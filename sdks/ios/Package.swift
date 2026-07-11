@@ -13,9 +13,17 @@ let package = Package(
             name: "VistreaRuntimeModels",
             targets: ["VistreaRuntimeModels"]
         ),
+        .library(
+            name: "VistreaRuntimeUIKit",
+            targets: ["VistreaRuntimeUIKit"]
+        ),
     ],
     targets: [
         .target(name: "VistreaRuntimeModels"),
+        .target(
+            name: "VistreaRuntimeUIKit",
+            dependencies: ["VistreaRuntimeModels"]
+        ),
         .testTarget(
             name: "VistreaRuntimeModelsTests",
             dependencies: ["VistreaRuntimeModels"]

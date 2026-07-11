@@ -11,10 +11,10 @@
   ],
   "platforms": {
     "ios": {
-      "implementation_status": "planned",
+      "implementation_status": "in-progress",
       "initial_adapter": "uikit",
       "capabilities": {
-        "runtime.snapshot": "planned",
+        "runtime.snapshot": "implemented",
         "runtime.events": "planned",
         "runtime.connection": "planned",
         "automation.actions": "planned",

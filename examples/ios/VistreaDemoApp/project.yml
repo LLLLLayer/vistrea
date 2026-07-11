@@ -1,0 +1,70 @@
+name: VistreaDemoApp
+
+options:
+  bundleIdPrefix: dev.vistrea
+  deploymentTarget:
+    iOS: "17.0"
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+packages:
+  VistreaIOSSDK:
+    path: ../../../sdks/ios
+
+targets:
+  VistreaDemoApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: ../../scenarios/manifest.json
+        buildPhase: resources
+      - path: ../../scenarios/fixtures/v1
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: VistreaIOSSDK
+        product: VistreaRuntimeModels
+      - package: VistreaIOSSDK
+        product: VistreaRuntimeUIKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.demo
+        PRODUCT_NAME: VistreaDemoApp
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Sources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  VistreaDemoAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: VistreaDemoApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.demo-uitests
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: true
+
+schemes:
+  VistreaDemoApp:
+    build:
+      targets:
+        VistreaDemoApp: all
+    run:
+      config: Debug
+      environmentVariables:
+        VISTREA_SCENARIO_ID: demo.navigation.basic
+        VISTREA_SCENARIO_PROFILE: baseline
+    test:
+      config: Debug
+      targets:
+        - VistreaDemoAppUITests
