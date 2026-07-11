@@ -25,14 +25,14 @@ Current objective:
 | Product and architecture documents | Architecture integration | `docs-2026-07-12` | Verified | Product invariants, layers, local-first storage, Hub boundary | English, links, structure, and Markdown checks passed |
 | Public interface specifications | Contract integration | `interfaces-draft-1` | Verified | Common, Runtime connection, automation, Engine, Data, Agent, Hub, operation parity | Cross-boundary architecture and interface review completed; blocking findings resolved |
 | Multi-agent development contract | Architecture integration | `workflow-1` | Verified | Work lanes, contention rules, handoff and integration order | `AGENTS.md` and `CLAUDE.md` symlink equivalence verified |
-| Native Demo App scenarios | Scenario contract owner | `scenarios-draft-1` | In progress | Executable shared Scenario IDs, manifests, and fixture-backed expectations for iOS/Android parity | Documentation exists; machine-readable scenario contract is being implemented |
+| Native Demo App scenarios | Scenario contract owner | `scenarios-1` | Verified | Executable shared Scenario IDs, manifests, profiles, artifacts, and fixture-backed expectations for iOS/Android parity | 12 scenarios, 6 profiles, 66 deterministic artifacts, and 12 tests pass |
 | Machine-readable protocol | Protocol owner | `v1-pre-release-2` | Verified | Complete shared model surface for every Data Unit of Work repository | 78 fixtures, model coverage, and 24 contract tests pass |
 | Local Data API | Data API owner | `data-draft-1` | In progress | Language-owned ports, deterministic in-memory Unit of Work, and shared contract tests | Implementation active; verification pending |
 | Host/Data implementation stack | Host/Data architecture owner | `stack-1` | Verified | Node/TypeScript runtime, SQLite driver, process boundary, migrations, backup, and recovery | ADR and migration runbook reviewed; document checks and `pnpm check` passed |
 | SQLite metadata store | Unassigned until Data API freeze | `pre-1.0` | Planned | Workspace metadata and migrations behind the shared Data contracts | Gated on the stable Data API and accepted migration ADR |
 | Content-addressed Object Store | Unassigned until Data API freeze | `pre-1.0` | Planned | Local immutable artifact storage behind the shared Data contracts | Gated on the stable Data API |
-| iOS Runtime SDK | Unassigned | `pre-1.0` | Planned | UIKit capture, Inspector, connection, protected tuning | No implementation |
-| Android Runtime SDK | Unassigned | `pre-1.0` | Planned | View capture, Inspector, connection, protected tuning | No implementation |
+| iOS Runtime SDK | iOS adapter owner | `models-1` | In progress | Canonical Swift Runtime Snapshot models are verified; UIKit capture, Inspector, connection, and protected tuning remain | 9 Swift fixture and failure-boundary tests pass |
+| Android Runtime SDK | Android adapter owner | `pre-1.0` | In progress | Canonical Kotlin Runtime Snapshot model adapter first; View capture, Inspector, connection, and protected tuning follow | Kotlin implementation active; verification pending |
 | Vistrea Studio | Unassigned | `studio-draft-1` | Planned | First vertical-loop UI | Interaction design only |
 | Automation and exploration | Unassigned | `interfaces-draft-1` | Planned | WDA/UIAutomator plus bounded exploration | Interface design only |
 | Vistrea Hub | Unassigned | `interfaces-draft-1` | Planned | Optional remote sync and collaboration | Interface design only |
@@ -129,6 +129,9 @@ No current architecture or protocol issue blocks Phase 0B. iOS UIKit is selected
 | 2026-07-12 | Complete executable check | `pnpm check` | Passed after Phase 0A2 integration |
 | 2026-07-12 | Phase 0A2 final review | Independent protocol, interface/documentation, and repository-hygiene audits | All P0/P1 findings resolved; final rechecks passed |
 | 2026-07-12 | Phase 0A2 Git checkpoint | Commit `6df8af6` | Phase 0A2 committed on `main`; local branch is one commit ahead of `origin/main` |
+| 2026-07-12 | Phase 0B decision checkpoint | Commit `4836ff5` | Host/Data stack, SQLite migration policy, and iOS-first vertical-loop acceptance path committed locally |
+| 2026-07-12 | iOS canonical model adapter | `swift test --package-path sdks/ios`; commit `4c67fb2` | 9 of 9 fixture, extension, strict-core, Unicode-limit, and timestamp tests passed |
+| 2026-07-12 | Executable Demo scenarios | `node examples/scenarios/validate.mjs`; `node --test examples/scenarios/tests/*.test.mjs`; commit `70798f0` | 12 scenarios, 6 profiles, 66 artifacts, all semantic checks, and 12 of 12 tests passed |
 | 2026-07-12 | Final architecture and interface review | Parallel read-only document, interface, and protocol audits | No remaining P0/P1 findings |
 | 2026-07-12 | Documentation language | Han-character scan over project Markdown | Passed |
 | 2026-07-12 | Documentation integrity | Local-link and code-fence validation | Passed |
@@ -153,6 +156,9 @@ No current architecture or protocol issue blocks Phase 0B. iOS UIKit is selected
 - Selected iOS UIKit for the first complete SDK-to-Data vertical loop while retaining shared Scenario IDs for Android parity.
 - Accepted the Node/TypeScript Host, `better-sqlite3`, and forward-only SQLite migration policy in ADR-0004.
 - Recorded the iOS-first `demo.navigation.basic` acceptance path in ADR-0005, including Data reopen, Studio, and CLI proof requirements.
+- Implemented and committed the Foundation-only Swift Runtime Snapshot model adapter without UIKit types or a private wire model.
+- Implemented and committed the executable cross-platform Scenario suite; native implementations remain required before its platform statuses can advance.
+- Started the Kotlin Runtime Snapshot adapter and file-backed content-addressed Object Store in parallel with Data API contract testing.
 
 ## Next milestones
 

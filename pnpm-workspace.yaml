@@ -1,0 +1,5 @@
+nodeVersion: 22.14.0
+engineStrict: true
+
+allowBuilds:
+  "better-sqlite3@12.11.1": true

@@ -10,11 +10,18 @@
   "description": "Local-first runtime UI knowledge, design review, exploration, and verification platform.",
   "scripts": {
     "protocol:validate": "node tools/protocol/validate-fixtures.mjs",
+    "scenarios:validate": "node examples/scenarios/validate.mjs",
+    "typecheck": "tsc --noEmit",
+    "build:host": "tsc -p tsconfig.json",
     "test:contract": "node --test tests/contract/*.test.mjs",
-    "check": "pnpm protocol:validate && pnpm test:contract"
+    "test:host-contract": "pnpm build:host && node --test .build/typescript/tests/contract/*.test.js",
+    "test:scenarios": "node --test examples/scenarios/tests/*.test.mjs",
+    "check": "pnpm protocol:validate && pnpm scenarios:validate && pnpm typecheck && pnpm test:contract && pnpm test:host-contract && pnpm test:scenarios"
   },
   "devDependencies": {
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1"
+    "@types/node": "22.14.0",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
+    "typescript": "7.0.2"
   }
 }
