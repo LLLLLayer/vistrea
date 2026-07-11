@@ -25,11 +25,12 @@ Current objective:
 | Product and architecture documents | Architecture integration | `docs-2026-07-12` | Verified | Product invariants, layers, local-first storage, Hub boundary | English, links, structure, and Markdown checks passed |
 | Public interface specifications | Contract integration | `interfaces-draft-1` | Verified | Common, Runtime connection, automation, Engine, Data, Agent, Hub, operation parity | Cross-boundary architecture and interface review completed; blocking findings resolved |
 | Multi-agent development contract | Architecture integration | `workflow-1` | Verified | Work lanes, contention rules, handoff and integration order | `AGENTS.md` and `CLAUDE.md` symlink equivalence verified |
-| Native Demo App scenarios | Unassigned | `scenarios-draft-1` | Planned | Shared iOS/Android Scenario IDs and build profiles | Scenario document exists; no executable apps yet |
+| Native Demo App scenarios | Scenario contract owner | `scenarios-draft-1` | In progress | Executable shared Scenario IDs, manifests, and fixture-backed expectations for iOS/Android parity | Documentation exists; machine-readable scenario contract is being implemented |
 | Machine-readable protocol | Protocol owner | `v1-pre-release-2` | Verified | Complete shared model surface for every Data Unit of Work repository | 78 fixtures, model coverage, and 24 contract tests pass |
-| Local Data API | Unassigned | `data-draft-1` | Planned | Unit of Work, repository ports, and in-memory contract-test surface | Documentation only |
-| SQLite metadata store | Unassigned | `pre-1.0` | Planned | Workspace metadata and migrations | No implementation |
-| Content-addressed Object Store | Unassigned | `pre-1.0` | Planned | Local immutable artifact storage | No implementation |
+| Local Data API | Data API owner | `data-draft-1` | In progress | Language-owned ports, deterministic in-memory Unit of Work, and shared contract tests | Implementation active; verification pending |
+| Host/Data implementation stack | Host/Data architecture owner | `stack-1` | Verified | Node/TypeScript runtime, SQLite driver, process boundary, migrations, backup, and recovery | ADR and migration runbook reviewed; document checks and `pnpm check` passed |
+| SQLite metadata store | Unassigned until Data API freeze | `pre-1.0` | Planned | Workspace metadata and migrations behind the shared Data contracts | Gated on the stable Data API and accepted migration ADR |
+| Content-addressed Object Store | Unassigned until Data API freeze | `pre-1.0` | Planned | Local immutable artifact storage behind the shared Data contracts | Gated on the stable Data API |
 | iOS Runtime SDK | Unassigned | `pre-1.0` | Planned | UIKit capture, Inspector, connection, protected tuning | No implementation |
 | Android Runtime SDK | Unassigned | `pre-1.0` | Planned | View capture, Inspector, connection, protected tuning | No implementation |
 | Vistrea Studio | Unassigned | `studio-draft-1` | Planned | First vertical-loop UI | Interaction design only |
@@ -60,7 +61,7 @@ The review resolved the blocking inconsistencies found in the initial draft:
 - Agent operations share one catalog, result model, async lifecycle, and CLI/MCP parity contract.
 - Hub objects, commits, refs, resumable uploads, conflicts, and collaboration projections use one local-first truth model.
 
-No current architecture or protocol issue blocks Phase 0B. First-platform and Host-toolchain choices remain intentionally open.
+No current architecture or protocol issue blocks Phase 0B. iOS UIKit is selected for the first complete native vertical loop; the Host/Data toolchain decision is being recorded before production adapters begin.
 
 ## Accepted decisions
 
@@ -72,8 +73,9 @@ No current architecture or protocol issue blocks Phase 0B. First-platform and Ho
 | Object, Commit, Ref, and Working Set identity | Accepted | `docs/decisions/0003-object-and-commit-identity.md` |
 | Flat UI trees and full-display logical coordinates | Accepted for pre-release v1 | `docs/protocol/RUNTIME_SNAPSHOT.md` and executable schemas |
 | Complete `DataUnitOfWork` shared model coverage | Accepted for pre-release v1 | `docs/protocol/DATA_MODEL_COVERAGE.md` and `protocol/model-coverage/v1.json` |
-| First native vertical platform | Pending | iOS UIKit or Android View |
-| Host and local Data implementation toolchain | Deferred | Required before production Data implementations, not before Data contracts |
+| First native vertical platform | Selected for the first loop | iOS UIKit; Android keeps the same executable Scenario IDs and follows in parallel where the shared contract is stable |
+| Host and local Data implementation toolchain | Accepted | `docs/decisions/0004-host-data-and-sqlite-migrations.md` |
+| First complete vertical-loop boundary | Accepted | `docs/decisions/0005-ios-first-vertical-loop.md` |
 
 ## Completed implementation slice: Phase 0A1
 
@@ -99,7 +101,7 @@ No current architecture or protocol issue blocks Phase 0B. First-platform and Ho
 - Added `protocol/model-coverage/v1.json` as the executable inventory for all nine `DataUnitOfWork` repositories and their support values.
 - Hardened Data port contracts around mutable-resource concurrency, atomic suppression summaries, atomic Operation lifecycle persistence, and persisted design/validation results.
 
-## Next implementation slice: Phase 0B
+## Active implementation slice: Phase 0B
 
 1. Convert the documented Data ports into language-owned contracts generated from or checked against the shared schemas.
 2. Implement a deterministic in-memory `DataUnitOfWork` reference adapter.
@@ -126,11 +128,12 @@ No current architecture or protocol issue blocks Phase 0B. First-platform and Ho
 | 2026-07-12 | Phase 0A2 contract tests | `pnpm test:contract` | 24 of 24 tests passed |
 | 2026-07-12 | Complete executable check | `pnpm check` | Passed after Phase 0A2 integration |
 | 2026-07-12 | Phase 0A2 final review | Independent protocol, interface/documentation, and repository-hygiene audits | All P0/P1 findings resolved; final rechecks passed |
+| 2026-07-12 | Phase 0A2 Git checkpoint | Commit `6df8af6` | Phase 0A2 committed on `main`; local branch is one commit ahead of `origin/main` |
 | 2026-07-12 | Final architecture and interface review | Parallel read-only document, interface, and protocol audits | No remaining P0/P1 findings |
 | 2026-07-12 | Documentation language | Han-character scan over project Markdown | Passed |
 | 2026-07-12 | Documentation integrity | Local-link and code-fence validation | Passed |
 | 2026-07-12 | Agent guidance | `CLAUDE.md -> AGENTS.md` symlink and byte comparison | Passed |
-| 2026-07-12 | Repository hygiene | Trailing-whitespace scan, runtime-artifact check, and Git status inspection | Passed; Phase 0A2 changes remain local pending user commit instruction |
+| 2026-07-12 | Repository hygiene | Trailing-whitespace scan, runtime-artifact check, and Git status inspection | Passed at the Phase 0A2 checkpoint; tracked working tree was clean after commit |
 
 ## Progress log
 
@@ -145,10 +148,15 @@ No current architecture or protocol issue blocks Phase 0B. First-platform and Ho
 - Established and pushed the initial Git baseline.
 - Implemented and verified Phase 0A2 with separate Screen Graph, Knowledge/Design, and Validation/Operation work lanes plus one integration owner.
 - Froze executable shared model coverage for the complete `DataUnitOfWork` and cleared Phase 0B to begin.
+- Committed the verified Phase 0A2 checkpoint as `6df8af6`.
+- Opened parallel Phase 0B lanes for the Data API and in-memory Unit of Work, the Host/Data stack and SQLite migration ADR, and executable cross-platform Scenario contracts.
+- Selected iOS UIKit for the first complete SDK-to-Data vertical loop while retaining shared Scenario IDs for Android parity.
+- Accepted the Node/TypeScript Host, `better-sqlite3`, and forward-only SQLite migration policy in ADR-0004.
+- Recorded the iOS-first `demo.navigation.basic` acceptance path in ADR-0005, including Data reopen, Studio, and CLI proof requirements.
 
 ## Next milestones
 
-1. Select and record the Phase 0B Host/Data contract toolchain.
-2. Implement and verify the language-owned Data ports and in-memory Data Unit of Work.
-3. Accept the SQLite migration choice and implement metadata plus the local Object Store behind the same contract tests.
-4. Choose the first native platform and generate its Demo App project.
+1. Finish and accept the Phase 0B Host/Data stack and SQLite migration ADR.
+2. Finish and verify the language-owned Data ports and deterministic in-memory Data Unit of Work.
+3. Implement SQLite metadata and the local Object Store behind the same contract tests.
+4. Generate the shared native Scenario contract and the iOS UIKit Demo App for the first vertical loop.
