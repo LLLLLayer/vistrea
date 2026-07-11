@@ -103,11 +103,20 @@ export interface ResourceRef extends JsonObject {
   readonly version?: string;
 }
 
+export interface EncryptionReference extends JsonObject {
+  readonly algorithm: string;
+  readonly key_id: string;
+}
+
 export interface ObjectRefShape extends JsonObject {
   readonly hash: string;
   readonly media_type: string;
   readonly byte_size: number;
+  readonly decoded_byte_size?: number;
   readonly compression: "none" | "gzip" | "zstd";
+  readonly encryption?: EncryptionReference;
+  readonly redaction_profile?: string;
+  readonly logical_name?: string;
   readonly extensions: JsonObject;
 }
 
@@ -688,6 +697,7 @@ export interface ObjectPutMetadata {
   readonly media_type: string;
   readonly compression: "none" | "gzip" | "zstd";
   readonly decoded_byte_size?: number;
+  readonly encryption?: EncryptionReference;
   readonly redaction_profile?: string;
   readonly logical_name?: string;
   readonly extensions?: JsonObject;

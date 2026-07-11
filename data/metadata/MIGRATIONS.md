@@ -7,11 +7,13 @@ This runbook implements [ADR-0004](../../docs/decisions/0004-host-data-and-sqlit
 ```text
 data/metadata/
 ├── MIGRATIONS.md
+├── copy-migrations.mjs
+├── index.ts
 ├── migrations/
-│   ├── 000001_initialize_metadata.sql
-│   └── 000002_add_runtime_events.sql
-└── src/
-    └── ...
+│   └── 000001_initialize_metadata.sql
+├── migrations.ts
+├── persistence.ts
+└── sqlite-data.ts
 ```
 
 Migration filenames match:

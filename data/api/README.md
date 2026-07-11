@@ -23,4 +23,6 @@ Interfaces use models from `protocol/` and one transaction-bound `DataUnitOfWork
 
 All repositories expose an opaque Unit of Work identity. A composition using repositories from different transactions fails before mutation. Revisioned values use creation revision `1` and compare-and-set replacement revision `N + 1`; immutable evidence rejects a second create.
 
+After `ObjectStore.put` verifies and returns an `ObjectRef`, the composition registers that value with `WorkspaceDataSource.registerVerifiedObjects` before opening a metadata Unit of Work that references it. Registration is an unreachable-object catalog entry, not product reachability.
+
 Operation-level semantics are defined in `docs/interfaces/DATA_API.md`.

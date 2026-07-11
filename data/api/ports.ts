@@ -274,6 +274,12 @@ export interface WorkspaceHealth {
 }
 
 export interface WorkspaceDataSource {
+  /**
+   * Records ObjectRefs returned by a successful ObjectStore put before a
+   * metadata Unit of Work may reference them. Registration is idempotent;
+   * conflicting metadata for one hash is an integrity error.
+   */
+  registerVerifiedObjects(objects: readonly ObjectRef[]): void;
   beginUnitOfWork(mode: UnitOfWorkMode): DataUnitOfWork;
   checkHealth(): WorkspaceHealth;
   readonly clock: Clock;

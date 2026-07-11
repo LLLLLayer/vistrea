@@ -28,6 +28,7 @@ interface WorkspaceRepository {
   create(command: CreateWorkspaceData): WorkspaceDescriptor;
   open(workspace_id: string): WorkspaceHandle;
   close(workspace_id: string): void;
+  registerVerifiedObjects(objects: ObjectRef[]): void;
   beginUnitOfWork(mode: "read" | "write"): DataUnitOfWork;
   checkHealth(): WorkspaceHealth;
   applyMigrations(target_version?: uint32): MigrationResult;
@@ -45,6 +46,7 @@ interface WorkspaceRepository {
 - Large Object Store writes complete and verify before metadata references become visible.
 - A failed metadata transaction must not expose partial graph, issue, patch, or ref updates.
 - Object writes that succeed before a metadata rollback become unreachable candidates and are reclaimed later by Workspace GC.
+- `registerVerifiedObjects` records only canonical metadata returned by a successful Object Store write. It is idempotent for equal values, rejects conflicting metadata for one hash, and does not by itself make an Object reachable from a Snapshot, Working Set, or Commit.
 - Revisioned creates and updates follow the shared `1`, `N`, `N + 1` rule in `COMMON_CONTRACTS.md`; repositories reject stale preconditions and submitted revision jumps.
 
 ## 3. Snapshot and observation ports
@@ -241,17 +243,17 @@ Normal authoring uses `must_match` or `must_not_exist`. `force` is never an omit
 
 ```ts
 interface ObjectStore {
-  put(stream: ByteStream, metadata: ObjectMetadata): ObjectRef;
-  stat(hash: string): ObjectMetadata;
-  open(hash: string, range?: ByteRange): ByteStream;
-  has(hashes: string[]): Set<string>;
-  pin(hash: string, policy: RetentionPolicy): void;
+  put(stream: ByteStream, metadata: ObjectPutMetadata): Promise<ObjectRef>;
+  stat(hash: string): Promise<ObjectRef>;
+  open(hash: string, range?: ByteRange): Promise<ByteStream>;
+  has(hashes: readonly string[]): Promise<ReadonlySet<string>>;
+  pin(hash: string, policy: RetentionPolicy): Promise<void>;
   inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef>;
-  deletePhysical(hash: string): void;
+  deletePhysical(hash: string): Promise<void>;
 }
 ```
 
-`put` verifies the content hash before success. The Object Store does not decide reachability. Workspace Engine GC computes protected hashes from Version Repository refs, commits, pins, Working Sets, and retention policy, then invokes the internal `deletePhysical` operation.
+`put` hashes the exact encoded byte stream and verifies `expected_hash` before success. Compression and optional encryption descriptors remain immutable `ObjectRef` metadata; neither changes encoded-byte identity. The Object Store does not decide reachability. Workspace Engine GC computes protected hashes from Version Repository refs, commits, pins, Working Sets, and retention policy, then invokes the internal `deletePhysical` operation.
 
 ## 10. Search port
 
