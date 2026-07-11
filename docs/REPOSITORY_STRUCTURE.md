@@ -38,6 +38,8 @@ vistrea/
 │   ├── schema/
 │   │   ├── README.md
 │   │   └── v1/                 # executable JSON Schema contracts
+│   ├── model-coverage/
+│   │   └── v1.json             # DataUnitOfWork canonical model inventory
 │   └── fixtures/
 │       ├── README.md
 │       └── v1/                 # valid, invalid, and compatibility fixtures
@@ -126,6 +128,7 @@ vistrea/
 ├── tools/
 │   ├── README.md
 │   └── protocol/
+│       ├── phase0a2-semantic-checks.mjs
 │       ├── semantic-checks.mjs
 │       ├── strict-json.mjs
 │       └── validate-fixtures.mjs
@@ -153,6 +156,7 @@ vistrea/
     │   └── STUDIO_INTERACTIONS.md
     ├── protocol/
     │   ├── README.md
+    │   ├── DATA_MODEL_COVERAGE.md
     │   └── RUNTIME_SNAPSHOT.md
     ├── decisions/
     │   ├── README.md

@@ -1,0 +1,54 @@
+{
+  "patch_id": "patch_019f0000-0000-7600-8000-000000000610",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "title": "Invalid tuning patch",
+  "target_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000610",
+  "status": "draft",
+  "issue_ids": [],
+  "changes": [
+    {
+      "tuning_change_id": "tuningchange_019f0000-0000-7600-8000-000000000610",
+      "runtime_target": {
+        "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000610",
+        "tree_id": "tree_019f0000-0000-7600-8000-000000000610",
+        "node_id": "node_019f0000-0000-7600-8000-000000000610",
+        "extensions": {}
+      },
+      "property": "alpha",
+      "preview_value": {
+        "kind": "number",
+        "value": 0.8,
+        "unit": "ratio",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "reversion_policy": {
+    "strategy": "restore_captured_original",
+    "triggers": [
+      "explicit_revert",
+      "ttl_expiry",
+      "prepare_disconnect",
+      "transport_loss",
+      "connection_close",
+      "application_termination"
+    ],
+    "restore_on_partial_failure": true,
+    "extensions": {}
+  },
+  "created_at": "2026-07-12T02:10:00Z",
+  "created_by": {
+    "kind": "agent",
+    "id": "fixture-agent",
+    "extensions": {}
+  },
+  "updated_at": "2026-07-12T02:10:00Z",
+  "updated_by": {
+    "kind": "agent",
+    "id": "fixture-agent",
+    "extensions": {}
+  },
+  "extensions": {}
+}

@@ -1,0 +1,105 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+    "kind": "RunValidation",
+    "state": "succeeded",
+    "created_at": "2026-07-12T03:00:00.000Z",
+    "updated_at": "2026-07-12T03:00:01.000Z",
+    "progress": {
+      "phase": "validation.complete",
+      "fraction": 1,
+      "completed_units": 4,
+      "total_units": 4,
+      "unit": "rule"
+    }
+  },
+  "revision": 4,
+  "events": [
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000201",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+      "sequence": 1,
+      "time": "2026-07-12T03:00:00.000Z",
+      "kind": "created",
+      "state": "queued",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000202",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+      "sequence": 2,
+      "time": "2026-07-12T03:00:00.100Z",
+      "kind": "started",
+      "state": "running",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000203",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+      "sequence": 3,
+      "time": "2026-07-12T03:00:00.700Z",
+      "kind": "progressed",
+      "state": "running",
+      "progress": {
+        "phase": "validation.rules",
+        "fraction": 0.75,
+        "completed_units": 3,
+        "total_units": 4,
+        "unit": "rule"
+      },
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000204",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+      "sequence": 4,
+      "time": "2026-07-12T03:00:01.000Z",
+      "kind": "succeeded",
+      "state": "succeeded",
+      "extensions": {}
+    }
+  ],
+  "result": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+    "result_type": "ValidationRun",
+    "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationRun",
+    "storage": "inline",
+    "value": {
+      "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000001",
+      "protocol_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000201",
+      "target": {
+        "kind": "runtime_snapshot",
+        "id": "snapshot_019f0000-0000-7000-8000-000000000001"
+      },
+      "rule_set": {
+        "kind": "validation_rule_set",
+        "id": "ruleset.core-v1"
+      },
+      "state": "succeeded",
+      "created_at": "2026-07-12T03:00:00.000Z",
+      "started_at": "2026-07-12T03:00:00.100Z",
+      "completed_at": "2026-07-12T03:00:01.000Z",
+      "updated_at": "2026-07-12T03:00:01.000Z",
+      "revision": 3,
+      "finding_counts": {
+        "total": 0,
+        "open": 0,
+        "suppressed": 0,
+        "resolved": 0,
+        "by_severity": {
+          "info": 0,
+          "warning": 0,
+          "error": 0,
+          "critical": 0
+        }
+      },
+      "extensions": {}
+    }
+  },
+  "extensions": {}
+}

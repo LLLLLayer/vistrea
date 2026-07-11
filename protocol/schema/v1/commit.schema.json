@@ -13,6 +13,12 @@
       "maxLength": 255,
       "pattern": "^(?:users|teams|builds|baselines|releases)/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$"
     },
+    "TagName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$"
+    },
     "CommitRoots": {
       "type": "object",
       "additionalProperties": false,
@@ -31,7 +37,7 @@
         "protocol_version",
         "parents",
         "created_at",
-        "author_id",
+        "author",
         "message",
         "roots",
         "object_hashes",
@@ -45,7 +51,9 @@
           "items": { "$ref": "#/$defs/CommitId" }
         },
         "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
-        "author_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "author": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef"
+        },
         "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "build_context": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" },
         "roots": { "$ref": "#/$defs/CommitRoots" },
@@ -76,18 +84,143 @@
         "revision": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" }
       }
     },
+    "Tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "commit_id", "created_at", "created_by", "extensions"],
+      "properties": {
+        "name": { "$ref": "#/$defs/TagName" },
+        "commit_id": { "$ref": "#/$defs/CommitId" },
+        "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+        "created_by": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef"
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "VersionSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "commit_id"],
+          "properties": {
+            "kind": { "const": "commit" },
+            "commit_id": { "$ref": "#/$defs/CommitId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref_name"],
+          "properties": {
+            "kind": { "const": "ref" },
+            "ref_name": { "$ref": "#/$defs/RefName" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "tag_name"],
+          "properties": {
+            "kind": { "const": "tag" },
+            "tag_name": { "$ref": "#/$defs/TagName" }
+          }
+        }
+      ]
+    },
+    "RefUpdatePrecondition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "expected_commit_id"],
+          "properties": {
+            "mode": { "const": "must_match" },
+            "expected_commit_id": { "$ref": "#/$defs/CommitId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "must_not_exist" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "authorization"],
+          "properties": {
+            "mode": { "const": "force" },
+            "authorization": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" }
+          }
+        }
+      ]
+    },
+    "WorkingChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change_id", "operation", "resource", "extensions"],
+      "properties": {
+        "change_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "operation": { "enum": ["upsert", "delete"] },
+        "resource": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" },
+        "payload": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "expected_revision": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "operation": { "const": "upsert" } },
+            "required": ["operation"]
+          },
+          "then": {
+            "properties": { "payload": true },
+            "required": ["payload"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "operation": { "const": "delete" } },
+            "required": ["operation"]
+          },
+          "then": {
+            "not": {
+              "properties": { "payload": true },
+              "required": ["payload"]
+            }
+          }
+        }
+      ]
+    },
     "WorkingSet": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["working_set_id", "base_commit_id", "created_at", "updated_at", "changes"],
+      "required": [
+        "working_set_id",
+        "base_commit_id",
+        "revision",
+        "created_at",
+        "updated_at",
+        "changes",
+        "extensions"
+      ],
       "properties": {
         "working_set_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
         "base_commit_id": { "$ref": "#/$defs/CommitId" },
+        "revision": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Revision"
+        },
         "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
         "updated_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
         "changes": {
           "type": "array",
-          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" }
+          "items": { "$ref": "#/$defs/WorkingChange" }
+        },
+        "extensions": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
         }
       }
     }

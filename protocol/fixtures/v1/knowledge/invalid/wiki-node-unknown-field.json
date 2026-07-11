@@ -1,0 +1,31 @@
+{
+  "wiki_node_id": "wiki_019f0000-0000-7500-8000-000000000510",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "kind": "note",
+  "title": "Unknown core field fixture",
+  "content": {
+    "storage": "inline",
+    "media_type": "text/plain",
+    "text": "This fixture must fail closed-schema validation.",
+    "extensions": {}
+  },
+  "status": "draft",
+  "labels": [],
+  "related_resources": [],
+  "attachments": [],
+  "created_at": "2026-07-12T01:10:00Z",
+  "created_by": {
+    "kind": "agent",
+    "id": "fixture-agent",
+    "extensions": {}
+  },
+  "updated_at": "2026-07-12T01:10:00Z",
+  "updated_by": {
+    "kind": "agent",
+    "id": "fixture-agent",
+    "extensions": {}
+  },
+  "unexpected": true,
+  "extensions": {}
+}

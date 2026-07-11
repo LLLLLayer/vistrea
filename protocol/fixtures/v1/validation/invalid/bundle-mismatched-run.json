@@ -1,0 +1,50 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "run": {
+    "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000020",
+    "protocol_version": { "major": 1, "minor": 0 },
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000120",
+    "target": {
+      "kind": "runtime_snapshot",
+      "id": "snapshot_019f0000-0000-7000-8000-000000000001"
+    },
+    "rule_set": { "kind": "validation_rule_set", "id": "ruleset.accessibility.core" },
+    "state": "succeeded",
+    "created_at": "2026-07-12T02:30:00.000Z",
+    "started_at": "2026-07-12T02:30:00.100Z",
+    "completed_at": "2026-07-12T02:30:01.000Z",
+    "updated_at": "2026-07-12T02:30:01.000Z",
+    "revision": 3,
+    "finding_counts": {
+      "total": 1,
+      "open": 1,
+      "suppressed": 0,
+      "resolved": 0,
+      "by_severity": { "info": 0, "warning": 1, "error": 0, "critical": 0 }
+    },
+    "extensions": {}
+  },
+  "findings": [
+    {
+      "finding_id": "finding_019f0000-0000-7000-8000-000000000020",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000099",
+      "rule_id": "accessibility.minimum-touch-target",
+      "category": "accessibility",
+      "severity": "warning",
+      "status": "open",
+      "message": "The finding points to a different validation run.",
+      "subject": {
+        "kind": "ui_node",
+        "id": "node_019f0000-0000-7000-8000-000000000011"
+      },
+      "evidence": [],
+      "detected_at": "2026-07-12T02:30:00.900Z",
+      "updated_at": "2026-07-12T02:30:00.900Z",
+      "revision": 1,
+      "extensions": {}
+    }
+  ],
+  "suppressions": [],
+  "extensions": {}
+}

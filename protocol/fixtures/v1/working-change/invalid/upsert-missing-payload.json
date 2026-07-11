@@ -1,0 +1,9 @@
+{
+  "change_id": "change_019f0000-0000-7000-8000-000000000002",
+  "operation": "upsert",
+  "resource": {
+    "kind": "screen_state",
+    "id": "screen_019f0000-0000-7000-8000-000000000001"
+  },
+  "extensions": {}
+}

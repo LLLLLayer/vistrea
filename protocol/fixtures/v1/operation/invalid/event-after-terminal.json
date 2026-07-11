@@ -1,0 +1,48 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000206",
+    "kind": "RunValidation",
+    "state": "succeeded",
+    "created_at": "2026-07-12T03:50:00.000Z",
+    "updated_at": "2026-07-12T03:50:02.000Z"
+  },
+  "revision": 3,
+  "events": [
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000251",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000206",
+      "sequence": 1,
+      "time": "2026-07-12T03:50:00.000Z",
+      "kind": "created",
+      "state": "queued",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000252",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000206",
+      "sequence": 2,
+      "time": "2026-07-12T03:50:01.000Z",
+      "kind": "succeeded",
+      "state": "succeeded",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000253",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000206",
+      "sequence": 3,
+      "time": "2026-07-12T03:50:02.000Z",
+      "kind": "warning",
+      "state": "running",
+      "message": "This event illegally appears after terminal completion.",
+      "extensions": {}
+    }
+  ],
+  "result": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000206",
+    "result_type": "ValidationRun",
+    "storage": "inline",
+    "value": { "status": "complete" }
+  },
+  "extensions": {}
+}

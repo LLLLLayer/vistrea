@@ -1,0 +1,15 @@
+{
+  "suppression_id": "suppression_019f0000-0000-7000-8000-000000000002",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "finding_id": "finding_019f0000-0000-7000-8000-000000000001",
+  "reason_code": "accepted_risk",
+  "justification": "Temporary exception for the current release candidate.",
+  "created_by": {
+    "kind": "human",
+    "id": "reviewer@example.com",
+    "extensions": {}
+  },
+  "created_at": "2026-07-12T02:05:00.000Z",
+  "expires_at": "2026-07-11T02:05:00.000Z",
+  "extensions": {}
+}

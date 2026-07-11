@@ -1,0 +1,20 @@
+{
+  "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000002",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation_id": "operation_019f0000-0000-7000-8000-000000000103",
+  "target": { "kind": "runtime_snapshot", "id": "snapshot_019f0000-0000-7000-8000-000000000001" },
+  "rule_set": { "kind": "validation_rule_set", "id": "ruleset.accessibility.core" },
+  "state": "succeeded",
+  "created_at": "2026-07-12T02:00:00.000Z",
+  "started_at": "2026-07-12T02:00:00.100Z",
+  "updated_at": "2026-07-12T02:00:01.000Z",
+  "revision": 2,
+  "finding_counts": {
+    "total": 0,
+    "open": 0,
+    "suppressed": 0,
+    "resolved": 0,
+    "by_severity": { "info": 0, "warning": 0, "error": 0, "critical": 0 }
+  },
+  "extensions": {}
+}

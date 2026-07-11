@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/artifact.schema.json",
+  "title": "Vistrea Artifact",
+  "$defs": {
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "protocol_version",
+        "kind",
+        "object",
+        "created_at",
+        "retention",
+        "extensions"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "protocol_version": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion"
+        },
+        "kind": {
+          "enum": [
+            "screenshot",
+            "video",
+            "log",
+            "trace",
+            "design",
+            "validation",
+            "export",
+            "other"
+          ]
+        },
+        "object": {
+          "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef"
+        },
+        "created_at": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
+        },
+        "captured_at": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime"
+        },
+        "source": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef"
+        },
+        "retention": { "enum": ["transient", "session", "pinned", "policy"] },
+        "extensions": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
+        }
+      }
+    },
+    "ArtifactLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_link_id",
+        "artifact_id",
+        "target",
+        "relation",
+        "created_at",
+        "created_by",
+        "extensions"
+      ],
+      "properties": {
+        "artifact_link_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "artifact_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "target": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef"
+        },
+        "relation": {
+          "enum": ["evidence", "design_baseline", "failure_window", "attachment"]
+        },
+        "created_at": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
+        },
+        "created_by": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef"
+        },
+        "extensions": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
+        }
+      }
+    }
+  },
+  "$ref": "#/$defs/Artifact"
+}

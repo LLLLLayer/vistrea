@@ -1,0 +1,433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/operation.schema.json",
+  "title": "Vistrea Durable Operation Types",
+  "$defs": {
+    "JsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/JsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+        }
+      ]
+    },
+    "OperationState": {
+      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+    },
+    "ErrorCode": {
+      "enum": [
+        "invalid_argument",
+        "not_found",
+        "already_exists",
+        "conflict",
+        "unauthenticated",
+        "forbidden",
+        "unsupported",
+        "policy_blocked",
+        "unavailable",
+        "timeout",
+        "cancelled",
+        "integrity_error",
+        "resource_exhausted",
+        "internal"
+      ]
+    },
+    "OperationProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9._-]*$"
+        },
+        "fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "completed_units": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger"
+        },
+        "total_units": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9._-]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "dependentRequired": {
+        "completed_units": ["total_units", "unit"],
+        "total_units": ["completed_units", "unit"],
+        "unit": ["completed_units", "total_units"]
+      },
+      "anyOf": [
+        { "properties": { "phase": true }, "required": ["phase"] },
+        { "properties": { "fraction": true }, "required": ["fraction"] },
+        { "properties": { "completed_units": true }, "required": ["completed_units"] },
+        { "properties": { "message": true }, "required": ["message"] }
+      ]
+    },
+    "VistreaError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "retryable": { "type": "boolean" },
+        "details": {
+          "type": "object",
+          "propertyNames": { "minLength": 1, "maxLength": 256 },
+          "additionalProperties": { "$ref": "#/$defs/JsonValue" }
+        },
+        "cause_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "OperationRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_id", "kind", "state", "created_at", "updated_at"],
+      "properties": {
+        "operation_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        },
+        "state": { "$ref": "#/$defs/OperationState" },
+        "created_at": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
+        },
+        "progress": { "$ref": "#/$defs/OperationProgress" },
+        "result_ref": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef"
+        },
+        "error": { "$ref": "#/$defs/VistreaError" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "enum": ["queued", "running"] } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "result_ref": false,
+              "error": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "succeeded" } },
+            "required": ["state"]
+          },
+          "then": { "properties": { "error": false } }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "failed" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "error": { "$ref": "#/$defs/VistreaError" },
+              "result_ref": false
+            },
+            "required": ["error"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "cancelled" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "error": {
+                "type": "object",
+                "properties": { "code": { "const": "cancelled" } },
+                "required": ["code"]
+              },
+              "result_ref": false
+            },
+            "required": ["error"]
+          }
+        }
+      ]
+    },
+    "InlineOperationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_id", "result_type", "storage", "value"],
+      "properties": {
+        "operation_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "result_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        },
+        "schema_id": {
+          "type": "string",
+          "format": "uri-reference",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "storage": { "const": "inline" },
+        "value": { "$ref": "#/$defs/JsonValue" }
+      }
+    },
+    "ResourceOperationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation_id", "result_type", "storage", "result_ref"],
+      "properties": {
+        "operation_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "result_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+        },
+        "schema_id": {
+          "type": "string",
+          "format": "uri-reference",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "storage": { "const": "resource" },
+        "result_ref": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef"
+        }
+      }
+    },
+    "OperationResult": {
+      "oneOf": [
+        { "$ref": "#/$defs/InlineOperationResult" },
+        { "$ref": "#/$defs/ResourceOperationResult" }
+      ]
+    },
+    "OperationEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "operation_id",
+        "sequence",
+        "time",
+        "kind",
+        "state",
+        "extensions"
+      ],
+      "properties": {
+        "event_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "operation_id": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
+        },
+        "sequence": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger"
+        },
+        "time": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
+        },
+        "kind": {
+          "enum": [
+            "created",
+            "started",
+            "progressed",
+            "cancel_requested",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "warning"
+          ]
+        },
+        "state": { "$ref": "#/$defs/OperationState" },
+        "progress": { "$ref": "#/$defs/OperationProgress" },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "error": { "$ref": "#/$defs/VistreaError" },
+        "extensions": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "created" } },
+            "required": ["kind"]
+          },
+          "then": { "properties": { "state": { "const": "queued" } } }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "started" } },
+            "required": ["kind"]
+          },
+          "then": { "properties": { "state": { "const": "running" } } }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "progressed" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "state": { "const": "running" },
+              "progress": { "$ref": "#/$defs/OperationProgress" }
+            },
+            "required": ["progress"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "cancel_requested" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": { "state": { "enum": ["queued", "running"] } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "succeeded" } },
+            "required": ["kind"]
+          },
+          "then": { "properties": { "state": { "const": "succeeded" } } }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "failed" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "state": { "const": "failed" },
+              "error": { "$ref": "#/$defs/VistreaError" }
+            },
+            "required": ["error"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "cancelled" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "state": { "const": "cancelled" },
+              "error": {
+                "type": "object",
+                "properties": { "code": { "const": "cancelled" } },
+                "required": ["code"]
+              }
+            },
+            "required": ["error"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "warning" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "state": { "enum": ["queued", "running"] },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            },
+            "required": ["message"]
+          }
+        }
+      ]
+    },
+    "OperationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol_version", "operation", "revision", "events", "extensions"],
+      "properties": {
+        "protocol_version": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion"
+        },
+        "operation": { "$ref": "#/$defs/OperationRef" },
+        "revision": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Revision"
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/OperationEvent" }
+        },
+        "result": { "$ref": "#/$defs/OperationResult" },
+        "extensions": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "type": "object",
+                "properties": { "state": { "const": "succeeded" } },
+                "required": ["state"]
+              }
+            },
+            "required": ["operation"]
+          },
+          "then": {
+            "properties": { "result": { "$ref": "#/$defs/OperationResult" } },
+            "required": ["result"]
+          },
+          "else": { "properties": { "result": false } }
+        }
+      ]
+    }
+  },
+  "$ref": "#/$defs/OperationRecord"
+}

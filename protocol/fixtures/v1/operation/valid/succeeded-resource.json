@@ -1,0 +1,54 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000202",
+    "kind": "ExportWorkspacePack",
+    "state": "succeeded",
+    "created_at": "2026-07-12T03:10:00.000Z",
+    "updated_at": "2026-07-12T03:10:02.000Z",
+    "result_ref": {
+      "kind": "artifact",
+      "id": "artifact_019f0000-0000-7000-8000-000000000201"
+    }
+  },
+  "revision": 3,
+  "events": [
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000211",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000202",
+      "sequence": 1,
+      "time": "2026-07-12T03:10:00.000Z",
+      "kind": "created",
+      "state": "queued",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000212",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000202",
+      "sequence": 2,
+      "time": "2026-07-12T03:10:00.100Z",
+      "kind": "started",
+      "state": "running",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000213",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000202",
+      "sequence": 3,
+      "time": "2026-07-12T03:10:02.000Z",
+      "kind": "succeeded",
+      "state": "succeeded",
+      "extensions": {}
+    }
+  ],
+  "result": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000202",
+    "result_type": "WorkspacePack",
+    "storage": "resource",
+    "result_ref": {
+      "kind": "artifact",
+      "id": "artifact_019f0000-0000-7000-8000-000000000201"
+    }
+  },
+  "extensions": {}
+}

@@ -1,0 +1,55 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000203",
+    "kind": "CaptureSnapshot",
+    "state": "failed",
+    "created_at": "2026-07-12T03:20:00.000Z",
+    "updated_at": "2026-07-12T03:20:00.500Z",
+    "error": {
+      "code": "unavailable",
+      "message": "The runtime connection closed before capture completed.",
+      "retryable": true,
+      "details": { "connection_state": "disconnected" },
+      "cause_id": "cause_019f0000-0000-7000-8000-000000000001"
+    }
+  },
+  "revision": 3,
+  "events": [
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000221",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000203",
+      "sequence": 1,
+      "time": "2026-07-12T03:20:00.000Z",
+      "kind": "created",
+      "state": "queued",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000222",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000203",
+      "sequence": 2,
+      "time": "2026-07-12T03:20:00.100Z",
+      "kind": "started",
+      "state": "running",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000223",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000203",
+      "sequence": 3,
+      "time": "2026-07-12T03:20:00.500Z",
+      "kind": "failed",
+      "state": "failed",
+      "error": {
+        "code": "unavailable",
+        "message": "The runtime connection closed before capture completed.",
+        "retryable": true,
+        "details": { "connection_state": "disconnected" },
+        "cause_id": "cause_019f0000-0000-7000-8000-000000000001"
+      },
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

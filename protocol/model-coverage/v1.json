@@ -1,0 +1,79 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "contract": "data-unit-of-work",
+  "repositories": {
+    "snapshots": [
+      "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "https://vistrea.dev/schema/v1/ui-node.schema.json#/$defs/UiNode"
+    ],
+    "observations": [
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/Observation"
+    ],
+    "runtime_events": [
+      "https://vistrea.dev/schema/v1/runtime-event.schema.json",
+      "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json"
+    ],
+    "screen_graph": [
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/GraphContext",
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/Action",
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/ScreenState",
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/Transition",
+      "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/StateIdentityDecision",
+      "https://vistrea.dev/schema/v1/graph.schema.json"
+    ],
+    "wiki": [
+      "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/WikiNode",
+      "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/WikiLink",
+      "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeCollection",
+      "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeGraph"
+    ],
+    "design_reviews": [
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReference",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignRegionMapping",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignComparison",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/ReviewIssue",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/ReviewVerificationRecord",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningPatch",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningApplication",
+      "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle"
+    ],
+    "validation": [
+      "https://vistrea.dev/schema/v1/validation.schema.json",
+      "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationFinding",
+      "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationSuppression",
+      "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationEvidence",
+      "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/BuildDiff",
+      "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationBundle"
+    ],
+    "operations": [
+      "https://vistrea.dev/schema/v1/operation.schema.json#/$defs/OperationRef",
+      "https://vistrea.dev/schema/v1/operation.schema.json#/$defs/OperationResult",
+      "https://vistrea.dev/schema/v1/operation.schema.json#/$defs/OperationEvent",
+      "https://vistrea.dev/schema/v1/operation.schema.json"
+    ],
+    "versions": [
+      "https://vistrea.dev/schema/v1/commit.schema.json",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/CommitManifest",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Ref",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Tag",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingChange",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/VersionSelector",
+      "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/RefUpdatePrecondition"
+    ]
+  },
+  "supporting_models": [
+    "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion",
+    "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef",
+    "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef",
+    "https://vistrea.dev/schema/v1/common.schema.json#/$defs/MutationPrecondition",
+    "https://vistrea.dev/schema/v1/common.schema.json#/$defs/RevisionPrecondition",
+    "https://vistrea.dev/schema/v1/geometry.schema.json",
+    "https://vistrea.dev/schema/v1/runtime-context.schema.json",
+    "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef",
+    "https://vistrea.dev/schema/v1/artifact.schema.json",
+    "https://vistrea.dev/schema/v1/artifact.schema.json#/$defs/ArtifactLink",
+    "https://vistrea.dev/schema/v1/workspace.schema.json"
+  ],
+  "extensions": {}
+}

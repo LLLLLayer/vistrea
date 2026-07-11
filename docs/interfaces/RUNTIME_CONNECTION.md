@@ -178,16 +178,9 @@ interface ApplyTuningPatchCommand {
   expected_snapshot_id: string;
   preview_ttl_ms?: JsonSafeUInt;
 }
-
-interface TuningApplication {
-  patch_id: string;
-  tuning_application_id: string;
-  connection_id: string;
-  applied_changes: AppliedTuningChange[];
-  rejected_changes: RejectedTuningChange[];
-  resulting_snapshot_id?: string;
-}
 ```
+
+`ApplyTuningPatch` returns the canonical protocol `TuningApplication` from `design.schema.json`; the Runtime transport must not define a reduced private variant.
 
 Rules:
 

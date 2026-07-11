@@ -32,10 +32,21 @@ Rules:
 - Commit identity is content-derived as `commit:sha256:<lowercase-hex>`.
 - Consumers treat unknown IDs as opaque and do not parse UUID fields.
 
+```ts
+interface ActorRef {
+  kind: "human" | "agent" | "service";
+  id: string;
+  display_name?: string;
+  extensions: Record<string, JsonValue>;
+}
+```
+
+Persisted authorship uses `ActorRef` so human, Coding Agent, and service changes remain distinguishable without encoding mutable identity details into domain IDs.
+
 ## 3. Time
 
 ```ts
-type Timestamp = string; // RFC 3339, UTC, nanosecond-capable
+type Timestamp = string; // canonical RFC 3339 UTC with zero to nine fractional digits
 
 interface EventTime {
   wall_time: Timestamp;
@@ -43,7 +54,11 @@ interface EventTime {
 }
 ```
 
+Timestamps use uppercase `T` and a required `Z`; numeric UTC offsets are not canonical protocol values. Fractional seconds contain one through nine digits when present. Validators compare the complete fractional value rather than truncating through a millisecond-only platform date type.
+
 `JsonSafeUInt` is an integer from `0` through `9,007,199,254,740,991`. Version 1 JSON never encodes a wider integer as a number because common JSON runtimes would lose precision. Wall time enables cross-system correlation. Monotonic offset preserves ordering and duration within one runtime event epoch even if the system clock changes. A new epoch is required before a counter approaches the safe-integer limit.
+
+`Revision` is a `JsonSafeUInt` starting at `1`. Revision zero is never a persisted resource version.
 
 ## 4. Version and capabilities
 
@@ -122,7 +137,9 @@ type OperationResult<T> =
     };
 ```
 
-Every asynchronous use case immediately returns `OperationRef`. After it succeeds, `GetOperationResult` returns a durable typed completion envelope. Small results are stored inline; large or independently addressable results use a required resource reference. `result_type` and optional `schema_id` make generic decoding explicit. Adapters must not substitute the immediate `OperationRef` for the completion result.
+Every asynchronous use case immediately returns `OperationRef`. After it succeeds, `GetOperationResult` returns a durable typed completion envelope. Small results are stored inline; large or independently addressable results use a required resource reference. `result_type` and optional `schema_id` make generic decoding explicit. When `schema_id` names a local `$defs` fragment, its name matches `result_type`; inline values must validate against that already-registered schema. Validators never load result schemas from the network. Adapters must not substitute the immediate `OperationRef` for the completion result.
+
+The Data Layer persists an `OperationRecord` containing a positive revision, the current `OperationRef`, its contiguous event history, and the optional terminal result. Callers that mutate lifecycle state read the record revision; public status adapters may project only its `OperationRef`.
 
 ## 7. Result and error model
 
@@ -192,10 +209,11 @@ interface ObjectRef {
   media_type: string;
   byte_size: JsonSafeUInt;        // encoded bytes after compression, before encryption
   decoded_byte_size?: JsonSafeUInt;
-  compression?: string;
+  compression: "none" | "gzip" | "zstd";
   encryption?: EncryptionRef;
   redaction_profile?: string;
   logical_name?: string;
+  extensions: Record<string, JsonValue>;
 }
 ```
 
@@ -207,12 +225,28 @@ Mutable resources expose a `revision` or current commit/ref target. Mutations pr
 
 ```ts
 interface MutationPrecondition {
-  expected_revision?: string;
+  expected_revision?: Revision;
   expected_commit_id?: string;
+}
+
+interface RevisionPrecondition extends MutationPrecondition {
+  expected_revision: Revision;
 }
 ```
 
-A mismatch returns `conflict` and the current revision in error details. Last-write-wins is not the default for Review Issues, refs, or tuning changes.
+`MutationPrecondition` requires at least one of its two fields; `{}` is invalid. A revisioned-resource update uses the refined `RevisionPrecondition`, so `expected_commit_id` may supplement but never replace `expected_revision`. A mismatch returns `conflict` and the current revision in error details. Last-write-wins is not the default for Review Issues, refs, or tuning changes.
+
+Revisioned-resource rules are uniform across in-memory, SQLite, Hub, and test implementations:
+
+- creation persists revision `1`;
+- an update precondition carries the currently read revision `N`;
+- a submitted replacement model carries revision `N + 1`; a command-style mutation that does not submit the full model derives and persists revision `N + 1`, and returns it when that contract has a result;
+- the repository atomically verifies both values and persists exactly `N + 1`, with no gaps or caller-selected jumps;
+- a composite mutation applies the same rule independently to every changed revisioned resource;
+- a deletion persists revision `N + 1` as tombstone or versioned change evidence even when the public domain value is no longer returned;
+- immutable evidence is created once, normally at revision `1`, and is never updated in place.
+
+An overflow at the JSON-safe integer limit fails instead of wrapping. For a revisioned resource, `expected_commit_id` may additionally pin version context but never replaces `expected_revision` unless that repository contract explicitly identifies the Commit as its sole concurrency token.
 
 ## 11. Redaction and field presence
 

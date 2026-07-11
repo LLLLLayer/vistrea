@@ -4,7 +4,7 @@
   "created_at": "2026-07-12T00:00:00Z",
   "project_id": "project_019f0000-0000-7000-8000-000000000001",
   "project_name": "Vistrea Demo",
-  "genesis_commit_id": "commit:sha256:4fd6a094baa3a8f85dd30584e086f24ff69c3ab8f531a631e0bfd6685faf7075",
+  "genesis_commit_id": "commit:sha256:f684c9a55458270197e2e68de29c7fd245b41673a949c46fe25e5caf76b20fd4",
   "default_ref_name": "teams/im/main",
   "source_repository": {
     "uri": "https://github.com/example/vistrea-demo.git",

@@ -1,0 +1,58 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "nodes": [
+    {
+      "wiki_node_id": "wiki_019f0000-0000-7500-8000-000000000520",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "kind": "note",
+      "title": "Source node",
+      "content": {
+        "storage": "inline",
+        "media_type": "text/plain",
+        "text": "The target Wiki node is intentionally absent.",
+        "extensions": {}
+      },
+      "status": "draft",
+      "labels": [],
+      "related_resources": [],
+      "attachments": [],
+      "created_at": "2026-07-12T01:20:00Z",
+      "created_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T01:20:00Z",
+      "updated_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "links": [
+    {
+      "wiki_link_id": "wikilink_019f0000-0000-7500-8000-000000000520",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "source_node_id": "wiki_019f0000-0000-7500-8000-000000000520",
+      "target": {
+        "kind": "wiki_node",
+        "id": "wiki_019f0000-0000-7500-8000-000000000599"
+      },
+      "relation": "relates_to",
+      "created_at": "2026-07-12T01:21:00Z",
+      "created_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "collections": [],
+  "extensions": {}
+}

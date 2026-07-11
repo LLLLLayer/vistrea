@@ -15,6 +15,245 @@ test("all protocol fixtures match their declared expectation", async () => {
   assert.deepEqual(report.failures, []);
 });
 
+test("DataUnitOfWork model coverage freezes the complete repository set", async () => {
+  const report = await validateFixtureSet({ silent: true });
+  assert.deepEqual(Object.keys(report.modelCoverage.repositories).sort(), [
+    "design_reviews",
+    "observations",
+    "operations",
+    "runtime_events",
+    "screen_graph",
+    "snapshots",
+    "validation",
+    "versions",
+    "wiki",
+  ]);
+  for (const references of Object.values(report.modelCoverage.repositories)) {
+    assert.ok(references.length > 0);
+    assert.equal(new Set(references).size, references.length);
+  }
+});
+
+test("Phase 0A2 failure fixtures exercise cross-model semantic guards", async () => {
+  const report = await validateFixtureSet({ silent: true });
+  const expected = new Map([
+    ["knowledge/invalid/dangling-link.json", "wiki_link_target_missing"],
+    ["design/invalid/issue-illegal-transition.json", "review_issue_transition_invalid"],
+    [
+      "design/invalid/terminal-tuning-not-reverted.json",
+      "tuning_application_reversion_incomplete",
+    ],
+    [
+      "design/invalid/tuning-patch-property-value-mismatch.json",
+      "tuning_change_property_value_mismatch",
+    ],
+    ["validation/invalid/bundle-mismatched-run.json", "validation_finding_run_mismatch"],
+    ["operation/invalid/inline-result-schema-mismatch.json", "operation_result_value_invalid"],
+    ["operation/invalid/progress-without-started.json", "operation_started_event_missing"],
+    ["working-set/invalid/duplicate-change-id.json", "duplicate_working_change_id"],
+  ]);
+
+  for (const [fixturePath, code] of expected) {
+    const result = report.results.find(({ path }) => path === fixturePath);
+    assert.equal(result?.passed, true, fixturePath);
+    assert.ok(result.semanticErrors.some((error) => error.code === code), fixturePath);
+  }
+});
+
+test("Phase 0A2 direct semantic guards fail closed", async () => {
+  const fixtureRoot = new URL("../../protocol/fixtures/v1/", import.meta.url);
+  const finding = parseJsonStrict(
+    await fs.readFile(new URL("validation/valid/finding-with-evidence.json", fixtureRoot)),
+  );
+  finding.status = "resolved";
+  finding.resolved_at = "2026-07-12T01:59:59.000Z";
+  assert.ok(
+    runSemanticChecks("validation-finding", finding).some(
+      (error) => error.code === "validation_finding_time_order_invalid",
+    ),
+  );
+
+  const validationRun = parseJsonStrict(
+    await fs.readFile(new URL("validation/valid/run-succeeded.json", fixtureRoot)),
+  );
+  validationRun.created_at = "2026-07-12T02:10:00.000000002Z";
+  validationRun.started_at = "2026-07-12T02:10:00.000000001Z";
+  assert.ok(
+    runSemanticChecks("validation-run", validationRun).some(
+      (error) => error.code === "validation_run_time_order_invalid",
+    ),
+  );
+
+  const operation = parseJsonStrict(
+    await fs.readFile(new URL("operation/valid/succeeded-inline.json", fixtureRoot)),
+  );
+  operation.result.result_type = "UnexpectedResult";
+  assert.ok(
+    runSemanticChecks("operation-record", operation).some(
+      (error) => error.code === "operation_result_type_mismatch",
+    ),
+  );
+  operation.result.result_type = "ValidationRun";
+  operation.result.value = { validation_run_id: "validationrun_missing_fields" };
+  assert.ok(
+    runSemanticChecks("operation-record", operation).some(
+      (error) => error.code === "operation_result_schema_unresolved",
+    ),
+  );
+
+  const graph = parseJsonStrict(
+    await fs.readFile(new URL("graph/valid/coherent.json", fixtureRoot)),
+  );
+  graph.observations.push({
+    ...structuredClone(graph.observations[1]),
+    observation_id: "observation_019f2000-0000-7000-8000-000000000099",
+  });
+  assert.ok(
+    runSemanticChecks("screen-graph", graph).some(
+      (error) => error.code === "graph_transition_observation_mismatch",
+    ),
+  );
+
+  const design = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  const color = (red) => ({
+    kind: "color_rgba",
+    value: { red, green: 0, blue: 0, alpha: 1 },
+    color_space: "srgb",
+    extensions: {},
+  });
+  design.patches[0].changes[0].original_value = color(0.2);
+  design.patches[0].changes[0].preview_value = color(0.4);
+  assert.ok(
+    runSemanticChecks("design-review-bundle", design).some(
+      (error) => error.code === "tuning_change_property_value_mismatch",
+    ),
+  );
+
+  const designWithDifference = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  designWithDifference.comparisons.push({
+    comparison_id: "comparison_019f0000-0000-7600-8000-000000000699",
+    protocol_version: { major: 1, minor: 0 },
+    revision: 1,
+    design_reference_id: designWithDifference.references[0].design_reference_id,
+    target_snapshot_id: designWithDifference.mappings[0].runtime_target.snapshot_id,
+    quality: "complete",
+    mapping_ids: [designWithDifference.mappings[0].mapping_id],
+    differences: [
+      {
+        difference_id: "difference_019f0000-0000-7600-8000-000000000699",
+        mapping_id: "mapping_019f0000-0000-7600-8000-000000000699",
+        category: "alpha",
+        severity: "minor",
+        expected: { kind: "number", value: 0.8, unit: "ratio", extensions: {} },
+        actual: { kind: "number", value: 1, unit: "ratio", extensions: {} },
+        evidence: [],
+        extensions: {},
+      },
+    ],
+    evidence: [],
+    completed_at: "2026-07-12T02:07:00Z",
+    completed_by: { kind: "agent", id: "contract-test", extensions: {} },
+    extensions: {},
+  });
+  assert.ok(
+    runSemanticChecks("design-review-bundle", designWithDifference).some(
+      (error) => error.code === "design_difference_mapping_missing",
+    ),
+  );
+
+  const designWithWrongMapping = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  designWithWrongMapping.references.push({
+    ...structuredClone(designWithWrongMapping.references[0]),
+    design_reference_id: "designref_019f0000-0000-7600-8000-000000000698",
+  });
+  designWithWrongMapping.issues[0].design_reference_id =
+    "designref_019f0000-0000-7600-8000-000000000698";
+  assert.ok(
+    runSemanticChecks("design-review-bundle", designWithWrongMapping).some(
+      (error) => error.code === "design_mapping_target_mismatch",
+    ),
+  );
+
+  const patchWithDuplicateTarget = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  const duplicateTargetChange = {
+    ...structuredClone(patchWithDuplicateTarget.patches[0].changes[0]),
+    tuning_change_id: "tuningchange_019f0000-0000-7600-8000-000000000698",
+    preview_value: { kind: "number", value: 0.7, unit: "ratio", extensions: {} },
+  };
+  delete duplicateTargetChange.runtime_target.stable_id;
+  patchWithDuplicateTarget.patches[0].changes.push(duplicateTargetChange);
+  assert.ok(
+    runSemanticChecks("design-review-bundle", patchWithDuplicateTarget).some(
+      (error) => error.code === "duplicate_tuning_property_target",
+    ),
+  );
+
+  const designWithReversedApplicationTime = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  designWithReversedApplicationTime.applications[0].started_at = "2026-07-12T02:03:02Z";
+  assert.ok(
+    runSemanticChecks("design-review-bundle", designWithReversedApplicationTime).some(
+      (error) => error.code === "tuning_application_time_order_invalid",
+    ),
+  );
+
+  const designWithContradictoryResolution = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  designWithContradictoryResolution.issues[0].state = "wont_fix";
+  designWithContradictoryResolution.issues[0].state_history.at(-1).to_state = "wont_fix";
+  assert.ok(
+    runSemanticChecks("design-review-bundle", designWithContradictoryResolution).some(
+      (error) => error.code === "review_issue_resolution_mismatch",
+    ),
+  );
+
+  const designWithFutureHistory = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  designWithFutureHistory.issues[0].state_history.at(-1).changed_at =
+    "2027-07-12T02:06:00Z";
+  designWithFutureHistory.issues[0].resolution.resolved_at = "2027-07-12T02:06:00Z";
+  assert.ok(
+    runSemanticChecks("design-review-bundle", designWithFutureHistory).some(
+      (error) => error.code === "design_timestamp_order_invalid",
+    ),
+  );
+
+  const prematurelyExpiredApplication = parseJsonStrict(
+    await fs.readFile(new URL("design/valid/review-bundle.json", fixtureRoot)),
+  );
+  const expiredApplication = prematurelyExpiredApplication.applications[0];
+  expiredApplication.status = "expired";
+  expiredApplication.reversion_reason = "explicit_revert";
+  expiredApplication.reverted_at = "2026-07-12T02:04:00Z";
+  expiredApplication.applied_changes[0].reverted_at = "2026-07-12T02:04:00Z";
+  assert.ok(
+    runSemanticChecks("design-review-bundle", prematurelyExpiredApplication).some(
+      (error) => error.code === "tuning_application_state_invalid",
+    ),
+  );
+
+  const findingWithFutureEvidence = parseJsonStrict(
+    await fs.readFile(new URL("validation/valid/finding-with-evidence.json", fixtureRoot)),
+  );
+  findingWithFutureEvidence.evidence[0].captured_at = "2027-07-12T02:00:00Z";
+  assert.ok(
+    runSemanticChecks("validation-finding", findingWithFutureEvidence).some(
+      (error) => error.code === "validation_evidence_time_invalid",
+    ),
+  );
+});
+
 test("Workspace bootstrap fixtures share one parentless genesis and default ref", async () => {
   const fixtureRoot = new URL("../../protocol/fixtures/v1/", import.meta.url);
   const readFixture = async (relativePath) =>

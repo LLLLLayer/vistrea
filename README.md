@@ -67,6 +67,7 @@ Planned native iOS and Android Demo Apps will implement the same cross-platform 
 - [Project overview](docs/PROJECT_OVERVIEW.md)
 - [Repository structure](docs/REPOSITORY_STRUCTURE.md)
 - [Data Layer](docs/architecture/DATA_LAYER.md)
+- [Executable Data model coverage](docs/protocol/DATA_MODEL_COVERAGE.md)
 - [Interface specifications](docs/interfaces/README.md)
 - [Studio interaction design](docs/product/STUDIO_INTERACTIONS.md)
 - [Development and multi-agent workflow](docs/DEVELOPMENT.md)
@@ -86,7 +87,7 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 
 ## Current status
 
-The repository is in Phase 0. The first machine-readable JSON Schema protocol slice, canonical fixtures, semantic validator, and contract tests are implemented. No platform project, storage engine, Runtime SDK, Studio application, automation provider, or Hub service has been implemented yet.
+The repository is in Phase 0. Phase 0A1 and Phase 0A2 are complete: the shared `DataUnitOfWork` model surface now has machine-readable JSON Schemas, 78 canonical fixtures, aggregate semantic validation, a model coverage manifest, and contract tests. Phase 0B will turn the documented Data ports into language-owned contracts and a deterministic in-memory reference adapter. No platform project, storage engine, Runtime SDK, Studio application, automation provider, or Hub service has been implemented yet.
 
 Run the current executable checks with:
 

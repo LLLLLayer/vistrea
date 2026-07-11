@@ -33,7 +33,18 @@
               "runtime-event-batch",
               "object-fixture",
               "workspace",
-              "commit"
+              "commit",
+              "working-set",
+              "screen-graph",
+              "knowledge-graph",
+              "design-review-bundle",
+              "tuning-patch",
+              "validation-run",
+              "validation-finding",
+              "validation-suppression",
+              "validation-bundle",
+              "build-diff",
+              "operation-record"
             ]
           },
           "expected_json_codes": {

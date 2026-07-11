@@ -1,0 +1,70 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "run": {
+    "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000010",
+    "protocol_version": { "major": 1, "minor": 0 },
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000110",
+    "target": {
+      "kind": "runtime_snapshot",
+      "id": "snapshot_019f0000-0000-7000-8000-000000000001"
+    },
+    "rule_set": {
+      "kind": "validation_rule_set",
+      "id": "ruleset.accessibility.core",
+      "version": "1.0.0"
+    },
+    "state": "succeeded",
+    "created_at": "2026-07-12T02:20:00.000Z",
+    "started_at": "2026-07-12T02:20:00.100Z",
+    "completed_at": "2026-07-12T02:20:01.000Z",
+    "updated_at": "2026-07-12T02:21:00.000Z",
+    "revision": 4,
+    "finding_counts": {
+      "total": 1,
+      "open": 0,
+      "suppressed": 1,
+      "resolved": 0,
+      "by_severity": { "info": 0, "warning": 1, "error": 0, "critical": 0 }
+    },
+    "extensions": {}
+  },
+  "findings": [
+    {
+      "finding_id": "finding_019f0000-0000-7000-8000-000000000010",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000010",
+      "rule_id": "accessibility.minimum-touch-target",
+      "category": "accessibility",
+      "severity": "warning",
+      "status": "suppressed",
+      "message": "The primary action touch target is smaller than the configured minimum.",
+      "subject": {
+        "kind": "ui_node",
+        "id": "node_019f0000-0000-7000-8000-000000000011"
+      },
+      "evidence": [],
+      "active_suppression_id": "suppression_019f0000-0000-7000-8000-000000000010",
+      "detected_at": "2026-07-12T02:20:00.900Z",
+      "updated_at": "2026-07-12T02:21:00.000Z",
+      "revision": 2,
+      "extensions": {}
+    }
+  ],
+  "suppressions": [
+    {
+      "suppression_id": "suppression_019f0000-0000-7000-8000-000000000010",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "finding_id": "finding_019f0000-0000-7000-8000-000000000010",
+      "reason_code": "known_issue",
+      "justification": "Tracked by the accessibility remediation milestone.",
+      "created_by": {
+        "kind": "human",
+        "id": "designer@example.com",
+        "extensions": {}
+      },
+      "created_at": "2026-07-12T02:21:00.000Z",
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

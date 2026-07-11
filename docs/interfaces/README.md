@@ -24,7 +24,7 @@ Product interaction mapping is defined separately in `../product/STUDIO_INTERACT
 - Product invariants remain authoritative in `docs/PROJECT_OVERVIEW.md`.
 - Layer ownership remains authoritative in `docs/REPOSITORY_STRUCTURE.md`.
 - These specifications own public operation names, input/output semantics, errors, and lifecycle behavior.
-- Accepted machine-readable schemas and fixtures in `protocol/` are canonical for the model surface they currently cover. Documentation remains authoritative for draft operations and models that do not yet have executable contracts.
+- Accepted machine-readable schemas, fixtures, and `protocol/model-coverage/v1.json` are canonical for the complete shared `DataUnitOfWork` value surface. Documentation remains authoritative for Phase 0B request, query, pagination, transaction, and operation-catalog types that do not yet have executable contracts.
 
 ## Change policy
 

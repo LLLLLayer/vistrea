@@ -1,0 +1,406 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 4,
+  "references": [
+    {
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "kind": "design_artifact",
+      "name": "Checkout confirmation baseline",
+      "artifact": {
+        "artifact_id": "artifact_019f0000-0000-7600-8000-000000000601",
+        "protocol_version": { "major": 1, "minor": 0 },
+        "kind": "design",
+        "object": {
+          "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "media_type": "image/png",
+          "byte_size": 1024,
+          "compression": "none",
+          "logical_name": "checkout-confirmation.png",
+          "extensions": {}
+        },
+        "created_at": "2026-07-12T02:00:00Z",
+        "retention": "pinned",
+        "extensions": {}
+      },
+      "canvas_size": { "width": 390, "height": 844 },
+      "pixel_size": { "width": 1170, "height": 2532 },
+      "created_at": "2026-07-12T02:00:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "display_name": "Demo Designer",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:00:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "display_name": "Demo Designer",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "mappings": [
+    {
+      "mapping_id": "mapping_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000601",
+      "design_region": { "x": 24, "y": 700, "width": 342, "height": 52 },
+      "runtime_target": {
+        "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+        "tree_id": "tree_019f0000-0000-7600-8000-000000000601",
+        "node_id": "node_019f0000-0000-7600-8000-000000000601",
+        "stable_id": "checkout.confirm.button",
+        "extensions": {}
+      },
+      "method": "manual",
+      "state": "confirmed",
+      "confidence": 1,
+      "created_at": "2026-07-12T02:01:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:01:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "comparisons": [
+    {
+      "comparison_id": "comparison_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": {
+        "major": 1,
+        "minor": 0
+      },
+      "revision": 1,
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000601",
+      "target_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+      "quality": "complete",
+      "mapping_ids": [
+        "mapping_019f0000-0000-7600-8000-000000000601"
+      ],
+      "differences": [
+        {
+          "difference_id": "difference_019f0000-0000-7600-8000-000000000601",
+          "mapping_id": "mapping_019f0000-0000-7600-8000-000000000601",
+          "runtime_target": {
+            "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+            "tree_id": "tree_019f0000-0000-7600-8000-000000000601",
+            "node_id": "node_019f0000-0000-7600-8000-000000000601",
+            "stable_id": "checkout.confirm.button",
+            "extensions": {}
+          },
+          "category": "alpha",
+          "severity": "minor",
+          "expected": {
+            "kind": "number",
+            "value": 0.8,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "actual": {
+            "kind": "number",
+            "value": 1,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "delta": 0.2,
+          "evidence": [],
+          "extensions": {}
+        }
+      ],
+      "evidence": [],
+      "completed_at": "2026-07-12T02:01:30Z",
+      "completed_by": {
+        "kind": "agent",
+        "id": "vistrea-design-comparison",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "issues": [
+    {
+      "issue_id": "issue_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 4,
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000601",
+      "comparison_id": "comparison_019f0000-0000-7600-8000-000000000601",
+      "mapping_id": "mapping_019f0000-0000-7600-8000-000000000601",
+      "runtime_target": {
+        "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+        "tree_id": "tree_019f0000-0000-7600-8000-000000000601",
+        "node_id": "node_019f0000-0000-7600-8000-000000000601",
+        "stable_id": "checkout.confirm.button",
+        "extensions": {}
+      },
+      "title": "Confirm button opacity differs from baseline",
+      "description": "The captured button is more opaque than the approved design.",
+      "category": "alpha",
+      "severity": "minor",
+      "state": "resolved",
+      "expected": {
+        "kind": "number",
+        "value": 0.8,
+        "unit": "ratio",
+        "extensions": {}
+      },
+      "actual": {
+        "kind": "number",
+        "value": 1,
+        "unit": "ratio",
+        "extensions": {}
+      },
+      "owner": {
+        "kind": "human",
+        "id": "developer-1",
+        "extensions": {}
+      },
+      "evidence": [],
+      "state_history": [
+        {
+          "revision": 1,
+          "to_state": "open",
+          "changed_at": "2026-07-12T02:02:00Z",
+          "changed_by": {
+            "kind": "human",
+            "id": "designer-1",
+            "extensions": {}
+          },
+          "extensions": {}
+        },
+        {
+          "revision": 2,
+          "from_state": "open",
+          "to_state": "in_progress",
+          "changed_at": "2026-07-12T02:03:00Z",
+          "changed_by": {
+            "kind": "human",
+            "id": "developer-1",
+            "extensions": {}
+          },
+          "extensions": {}
+        },
+        {
+          "revision": 3,
+          "from_state": "in_progress",
+          "to_state": "ready_for_verification",
+          "changed_at": "2026-07-12T02:04:00Z",
+          "changed_by": {
+            "kind": "human",
+            "id": "developer-1",
+            "extensions": {}
+          },
+          "extensions": {}
+        },
+        {
+          "revision": 4,
+          "from_state": "ready_for_verification",
+          "to_state": "resolved",
+          "verification_record_id": "verification_019f0000-0000-7600-8000-000000000601",
+          "changed_at": "2026-07-12T02:06:00Z",
+          "changed_by": {
+            "kind": "human",
+            "id": "designer-1",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "verification_record_ids": [
+        "verification_019f0000-0000-7600-8000-000000000601"
+      ],
+      "tuning_patch_ids": [
+        "patch_019f0000-0000-7600-8000-000000000601"
+      ],
+      "resolution": {
+        "kind": "verified",
+        "rationale": "A later real build matches the approved value.",
+        "verification_record_id": "verification_019f0000-0000-7600-8000-000000000601",
+        "resolved_at": "2026-07-12T02:06:00Z",
+        "resolved_by": {
+          "kind": "human",
+          "id": "designer-1",
+          "extensions": {}
+        },
+        "extensions": {}
+      },
+      "created_at": "2026-07-12T02:02:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:06:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "verifications": [
+    {
+      "verification_record_id": "verification_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "issue_id": "issue_019f0000-0000-7600-8000-000000000601",
+      "issue_revision": 3,
+      "basis": "real_build",
+      "result": "passed",
+      "verified_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000602",
+      "verified_build_id": "build_019f0000-0000-7600-8000-000000000602",
+      "evidence": [
+        {
+          "artifact_link_id": "artifactlink_019f0000-0000-7600-8000-000000000601",
+          "artifact_id": "artifact_019f0000-0000-7600-8000-000000000601",
+          "target": {
+            "kind": "review_issue",
+            "id": "issue_019f0000-0000-7600-8000-000000000601"
+          },
+          "relation": "evidence",
+          "created_at": "2026-07-12T02:05:00Z",
+          "created_by": {
+            "kind": "human",
+            "id": "designer-1",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "notes": "Verified on the next internal build without an active tuning preview.",
+      "verified_at": "2026-07-12T02:05:00Z",
+      "verified_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "patches": [
+    {
+      "patch_id": "patch_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "title": "Preview confirm button opacity",
+      "description": "A reversible preview used before the source-code fix.",
+      "target_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+      "status": "approved",
+      "issue_ids": [
+        "issue_019f0000-0000-7600-8000-000000000601"
+      ],
+      "changes": [
+        {
+          "tuning_change_id": "tuningchange_019f0000-0000-7600-8000-000000000601",
+          "runtime_target": {
+            "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+            "tree_id": "tree_019f0000-0000-7600-8000-000000000601",
+            "node_id": "node_019f0000-0000-7600-8000-000000000601",
+            "stable_id": "checkout.confirm.button",
+            "extensions": {}
+          },
+          "property": "alpha",
+          "original_value": {
+            "kind": "number",
+            "value": 1,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "preview_value": {
+            "kind": "number",
+            "value": 0.8,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "reversion_policy": {
+        "strategy": "restore_captured_original",
+        "triggers": [
+          "explicit_revert",
+          "ttl_expiry",
+          "prepare_disconnect",
+          "transport_loss",
+          "connection_close",
+          "application_termination"
+        ],
+        "restore_on_partial_failure": true,
+        "extensions": {}
+      },
+      "created_at": "2026-07-12T02:03:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:03:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "applications": [
+    {
+      "tuning_application_id": "tuningapp_019f0000-0000-7600-8000-000000000601",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "patch_id": "patch_019f0000-0000-7600-8000-000000000601",
+      "patch_revision": 1,
+      "connection_id": "connection_019f0000-0000-7600-8000-000000000601",
+      "expected_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+      "status": "active",
+      "applied_changes": [
+        {
+          "tuning_change_id": "tuningchange_019f0000-0000-7600-8000-000000000601",
+          "runtime_target": {
+            "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000601",
+            "tree_id": "tree_019f0000-0000-7600-8000-000000000601",
+            "node_id": "node_019f0000-0000-7600-8000-000000000601",
+            "stable_id": "checkout.confirm.button",
+            "extensions": {}
+          },
+          "original_value": {
+            "kind": "number",
+            "value": 1,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "applied_value": {
+            "kind": "number",
+            "value": 0.8,
+            "unit": "ratio",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "rejected_changes": [],
+      "preview_expires_at": "2026-07-12T02:13:00Z",
+      "started_at": "2026-07-12T02:03:00Z",
+      "applied_at": "2026-07-12T02:03:01Z",
+      "actor": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

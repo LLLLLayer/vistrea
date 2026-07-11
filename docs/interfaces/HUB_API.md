@@ -92,11 +92,12 @@ Every collaboration list or detail query requires exactly one `VersionSelector`:
 
 ```ts
 type VersionSelector =
-  | { commit_id: string }
-  | { ref_name: string };
+  | { kind: "commit"; commit_id: string }
+  | { kind: "ref"; ref_name: string }
+  | { kind: "tag"; tag_name: string };
 ```
 
-When a ref is selected, Hub resolves it once at query start and returns `resolved_commit_id` with the response. Pagination remains pinned to that Commit; there is no project-global implicit "current" collaboration value.
+This is the canonical protocol `VersionSelector`, not a Hub-private representation. When a ref or tag is selected, Hub resolves it once at query start and returns `resolved_commit_id` with the response. Pagination remains pinned to that Commit; there is no project-global implicit "current" collaboration value.
 
 Every collaboration mutation includes:
 

@@ -1,0 +1,38 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000205",
+    "kind": "RunValidation",
+    "state": "succeeded",
+    "created_at": "2026-07-12T03:40:00.000Z",
+    "updated_at": "2026-07-12T03:40:01.000Z"
+  },
+  "revision": 2,
+  "events": [
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000241",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000205",
+      "sequence": 1,
+      "time": "2026-07-12T03:40:00.000Z",
+      "kind": "created",
+      "state": "queued",
+      "extensions": {}
+    },
+    {
+      "event_id": "operationevent_019f0000-0000-7000-8000-000000000242",
+      "operation_id": "operation_019f0000-0000-7000-8000-000000000205",
+      "sequence": 2,
+      "time": "2026-07-12T03:40:01.000Z",
+      "kind": "succeeded",
+      "state": "succeeded",
+      "extensions": {}
+    }
+  ],
+  "result": {
+    "operation_id": "operation_019f0000-0000-7000-8000-000000000299",
+    "result_type": "ValidationRun",
+    "storage": "inline",
+    "value": { "status": "complete" }
+  },
+  "extensions": {}
+}

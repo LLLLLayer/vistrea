@@ -58,7 +58,8 @@
     {
       "path": "working-set/valid/after-genesis.json",
       "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
-      "expectation": "schema-valid"
+      "expectation": "schema-valid",
+      "semantic_kind": "working-set"
     },
     {
       "path": "commit/valid/initial.json",
@@ -225,6 +226,311 @@
       "expectation": "semantic-invalid",
       "semantic_kind": "object-fixture",
       "expected_semantic_codes": ["object_payload_invalid_base64"]
+    },
+    {
+      "path": "artifact/valid/screenshot.json",
+      "schema_id": "https://vistrea.dev/schema/v1/artifact.schema.json",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "artifact/invalid/missing-object.json",
+      "schema_id": "https://vistrea.dev/schema/v1/artifact.schema.json",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "object" }
+      ]
+    },
+    {
+      "path": "tag/valid/baseline-v1.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Tag",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "working-change/valid/upsert-screen.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingChange",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "working-change/invalid/upsert-missing-payload.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingChange",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "payload" }
+      ]
+    },
+    {
+      "path": "graph/valid/coherent.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "screen-graph"
+    },
+    {
+      "path": "graph/invalid/dangling-state-reference.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": ["graph_dangling_state_reference"]
+    },
+    {
+      "path": "graph/invalid/dangling-observation-reference.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": ["graph_dangling_observation_reference"]
+    },
+    {
+      "path": "graph/invalid/reversed-time-range.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": ["graph_context_time_range_invalid"]
+    },
+    {
+      "path": "graph/invalid/confidence-out-of-range.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/StateIdentityDecision",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "maximum", "instance_path": "/confidence" }
+      ]
+    },
+    {
+      "path": "knowledge/valid/bundle.json",
+      "schema_id": "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeGraph",
+      "expectation": "schema-valid",
+      "semantic_kind": "knowledge-graph"
+    },
+    {
+      "path": "knowledge/invalid/wiki-node-unknown-field.json",
+      "schema_id": "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/WikiNode",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "",
+          "additional_property": "unexpected"
+        }
+      ]
+    },
+    {
+      "path": "knowledge/invalid/dangling-link.json",
+      "schema_id": "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeGraph",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "knowledge-graph",
+      "expected_semantic_codes": ["wiki_link_target_missing"]
+    },
+    {
+      "path": "design/valid/review-bundle.json",
+      "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
+      "expectation": "schema-valid",
+      "semantic_kind": "design-review-bundle"
+    },
+    {
+      "path": "design/invalid/tuning-patch-missing-original.json",
+      "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningPatch",
+      "expectation": "schema-invalid",
+      "semantic_kind": "tuning-patch",
+      "expected_schema_errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/changes/0",
+          "missing_property": "original_value"
+        }
+      ]
+    },
+    {
+      "path": "design/invalid/issue-illegal-transition.json",
+      "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "design-review-bundle",
+      "expected_semantic_codes": ["review_issue_transition_invalid"]
+    },
+    {
+      "path": "design/invalid/terminal-tuning-not-reverted.json",
+      "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "design-review-bundle",
+      "expected_semantic_codes": ["tuning_application_reversion_incomplete"]
+    },
+    {
+      "path": "validation/valid/run-succeeded.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "validation-run"
+    },
+    {
+      "path": "validation/valid/finding-with-evidence.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationFinding",
+      "expectation": "schema-valid",
+      "semantic_kind": "validation-finding"
+    },
+    {
+      "path": "validation/valid/suppression.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationSuppression",
+      "expectation": "schema-valid",
+      "semantic_kind": "validation-suppression"
+    },
+    {
+      "path": "validation/valid/build-diff.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/BuildDiff",
+      "expectation": "schema-valid",
+      "semantic_kind": "build-diff"
+    },
+    {
+      "path": "validation/valid/bundle.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationBundle",
+      "expectation": "schema-valid",
+      "semantic_kind": "validation-bundle"
+    },
+    {
+      "path": "validation/invalid/run-time-order.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "validation-run",
+      "expected_semantic_codes": ["validation_run_time_order_invalid"]
+    },
+    {
+      "path": "validation/invalid/succeeded-run-missing-completed-at.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json",
+      "expectation": "schema-invalid",
+      "semantic_kind": "validation-run",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "completed_at" }
+      ]
+    },
+    {
+      "path": "validation/invalid/suppression-expiry.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationSuppression",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "validation-suppression",
+      "expected_semantic_codes": ["validation_suppression_expiry_invalid"]
+    },
+    {
+      "path": "validation/invalid/build-diff-summary-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/BuildDiff",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "build-diff",
+      "expected_semantic_codes": ["build_diff_summary_mismatch"]
+    },
+    {
+      "path": "validation/invalid/bundle-mismatched-run.json",
+      "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationBundle",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "validation-bundle",
+      "expected_semantic_codes": ["validation_finding_run_mismatch"]
+    },
+    {
+      "path": "operation/valid/succeeded-inline.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "operation-record"
+    },
+    {
+      "path": "operation/valid/succeeded-resource.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "operation-record"
+    },
+    {
+      "path": "operation/valid/failed.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "operation-record"
+    },
+    {
+      "path": "operation/invalid/succeeded-without-result.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "schema-invalid",
+      "semantic_kind": "operation-record",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "result" }
+      ]
+    },
+    {
+      "path": "operation/invalid/result-operation-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_result_operation_mismatch"]
+    },
+    {
+      "path": "operation/invalid/event-after-terminal.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_event_after_terminal"]
+    },
+    {
+      "path": "operation/invalid/progress-units-over-total.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_progress_units_invalid"]
+    },
+    {
+      "path": "operation/invalid/inline-result-schema-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_result_value_invalid"]
+    },
+    {
+      "path": "operation/invalid/duplicate-created-event.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_created_event_invalid"]
+    },
+    {
+      "path": "operation/invalid/progress-without-started.json",
+      "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "operation-record",
+      "expected_semantic_codes": ["operation_started_event_missing"]
+    },
+    {
+      "path": "timestamp/invalid/non-utc-offset.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "pattern", "instance_path": "" }
+      ]
+    },
+    {
+      "path": "working-set/invalid/duplicate-change-id.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "working-set",
+      "expected_semantic_codes": ["duplicate_working_change_id"]
+    },
+    {
+      "path": "design/invalid/tuning-patch-property-value-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningPatch",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "tuning-patch",
+      "expected_semantic_codes": ["tuning_change_property_value_mismatch"]
+    },
+    {
+      "path": "ref-update-precondition/valid/must-match.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/RefUpdatePrecondition",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "revision-precondition/valid/revision-and-commit.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/RevisionPrecondition",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "revision-precondition/invalid/commit-only.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/RevisionPrecondition",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "expected_revision" }
+      ]
+    },
+    {
+      "path": "timestamp/valid/nanosecond.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp",
+      "expectation": "schema-valid"
     }
   ]
 }

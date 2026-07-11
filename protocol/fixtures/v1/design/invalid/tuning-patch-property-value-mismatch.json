@@ -1,0 +1,52 @@
+{
+  "patch_id": "patch_019f0000-0000-7600-8000-000000000611",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "title": "Invalid alpha value kind",
+  "target_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000611",
+  "status": "draft",
+  "issue_ids": [],
+  "changes": [
+    {
+      "tuning_change_id": "tuningchange_019f0000-0000-7600-8000-000000000611",
+      "runtime_target": {
+        "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000611",
+        "tree_id": "tree_019f0000-0000-7600-8000-000000000611",
+        "node_id": "node_019f0000-0000-7600-8000-000000000611",
+        "extensions": {}
+      },
+      "property": "alpha",
+      "original_value": {
+        "kind": "color_rgba",
+        "value": { "red": 0.2, "green": 0, "blue": 0, "alpha": 1 },
+        "color_space": "srgb",
+        "extensions": {}
+      },
+      "preview_value": {
+        "kind": "color_rgba",
+        "value": { "red": 0.4, "green": 0, "blue": 0, "alpha": 1 },
+        "color_space": "srgb",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "reversion_policy": {
+    "strategy": "restore_captured_original",
+    "triggers": [
+      "explicit_revert",
+      "ttl_expiry",
+      "prepare_disconnect",
+      "transport_loss",
+      "connection_close",
+      "application_termination"
+    ],
+    "restore_on_partial_failure": true,
+    "extensions": {}
+  },
+  "created_at": "2026-07-12T02:11:00Z",
+  "created_by": { "kind": "agent", "id": "fixture-agent", "extensions": {} },
+  "updated_at": "2026-07-12T02:11:00Z",
+  "updated_by": { "kind": "agent", "id": "fixture-agent", "extensions": {} },
+  "extensions": {}
+}

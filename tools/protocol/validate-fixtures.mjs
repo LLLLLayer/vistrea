@@ -12,6 +12,7 @@ const toolDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(toolDirectory, "../..");
 const schemaDirectory = path.join(repositoryRoot, "protocol/schema/v1");
 const fixtureDirectory = path.join(repositoryRoot, "protocol/fixtures/v1");
+const modelCoveragePath = path.join(repositoryRoot, "protocol/model-coverage/v1.json");
 
 async function readJson(filePath) {
   return parseJsonStrict(await fs.readFile(filePath), path.relative(repositoryRoot, filePath));
@@ -81,6 +82,41 @@ const semanticKindBySchemaId = new Map([
   ["https://vistrea.dev/schema/v1/object-fixture.schema.json", "object-fixture"],
   ["https://vistrea.dev/schema/v1/workspace.schema.json", "workspace"],
   ["https://vistrea.dev/schema/v1/commit.schema.json", "commit"],
+  [
+    "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
+    "working-set",
+  ],
+  ["https://vistrea.dev/schema/v1/graph.schema.json", "screen-graph"],
+  [
+    "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeGraph",
+    "knowledge-graph",
+  ],
+  [
+    "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
+    "design-review-bundle",
+  ],
+  [
+    "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningPatch",
+    "tuning-patch",
+  ],
+  ["https://vistrea.dev/schema/v1/validation.schema.json", "validation-run"],
+  [
+    "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationFinding",
+    "validation-finding",
+  ],
+  [
+    "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationSuppression",
+    "validation-suppression",
+  ],
+  [
+    "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationBundle",
+    "validation-bundle",
+  ],
+  [
+    "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/BuildDiff",
+    "build-diff",
+  ],
+  ["https://vistrea.dev/schema/v1/operation.schema.json", "operation-record"],
 ]);
 
 export async function validateFixtureSet({ silent = false } = {}) {
@@ -105,8 +141,30 @@ export async function validateFixtureSet({ silent = false } = {}) {
     throw new Error(`Invalid fixture manifest:\n${JSON.stringify(formatSchemaErrors(validateManifest.errors), null, 2)}`);
   }
 
+  const modelCoverage = await readJson(modelCoveragePath);
+  const validateModelCoverage = ajv.getSchema(
+    "https://vistrea.dev/schema/v1/model-coverage.schema.json",
+  );
+  if (!validateModelCoverage) {
+    throw new Error("Model coverage schema was not registered.");
+  }
+  if (!validateModelCoverage(modelCoverage)) {
+    throw new Error(
+      `Invalid model coverage manifest:\n${JSON.stringify(formatSchemaErrors(validateModelCoverage.errors), null, 2)}`,
+    );
+  }
+
   const failures = [];
   const results = [];
+  const coveredSchemaIds = [
+    ...Object.values(modelCoverage.repositories).flat(),
+    ...modelCoverage.supporting_models,
+  ];
+  for (const schemaId of coveredSchemaIds) {
+    if (!ajv.getSchema(schemaId)) {
+      failures.push(`Model coverage references an unregistered schema: ${schemaId}`);
+    }
+  }
   const declaredPaths = manifest.fixtures.map((fixture) => fixture.path);
   const declaredPathSet = new Set(declaredPaths);
   const actualPaths = await collectJsonFixturePaths(fixtureDirectory);
@@ -192,7 +250,20 @@ export async function validateFixtureSet({ silent = false } = {}) {
       ? fixture.semantic_kind === expectedSemanticKind
       : fixture.semantic_kind === undefined;
     const semanticErrors = schemaValid && semanticKindValid && expectedSemanticKind
-      ? runSemanticChecks(expectedSemanticKind, value)
+      ? runSemanticChecks(expectedSemanticKind, value, {
+          validateSchema(schemaId, candidate) {
+            const candidateValidator = ajv.getSchema(schemaId);
+            if (!candidateValidator) {
+              return { registered: false, valid: false, errors: [] };
+            }
+            const valid = candidateValidator(candidate);
+            return {
+              registered: true,
+              valid,
+              errors: formatSchemaErrors(candidateValidator.errors),
+            };
+          },
+        })
       : [];
 
     let passed = false;
@@ -234,6 +305,10 @@ export async function validateFixtureSet({ silent = false } = {}) {
   }
 
   if (!silent) {
+    const coverageMark = failures.some((failure) => failure.startsWith("Model coverage"))
+      ? "FAIL"
+      : "PASS";
+    console.log(`${coverageMark} model-coverage       protocol/model-coverage/v1.json`);
     for (const result of results) {
       const mark = result.passed ? "PASS" : "FAIL";
       console.log(`${mark} ${result.expectation.padEnd(19)} ${result.path}`);
@@ -242,7 +317,7 @@ export async function validateFixtureSet({ silent = false } = {}) {
     console.log(`\n${passedCount}/${manifest.fixtures.length} fixtures passed.`);
   }
 
-  return { manifest, results, failures };
+  return { manifest, modelCoverage, results, failures };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

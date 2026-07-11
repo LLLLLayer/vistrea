@@ -1,0 +1,43 @@
+{
+  "screen_graph_id": "graph_019f2000-0000-7000-8000-000000000021",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "materialized_at": "2026-07-12T00:00:03Z",
+  "context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_ids": ["build_019f0000-0000-7000-8000-000000000001"],
+    "environment_ids": ["local"],
+    "extensions": {}
+  },
+  "entry_state_ids": [
+    "screenstate_019f2000-0000-7000-8000-000000000021"
+  ],
+  "states": [
+    {
+      "screen_state_id": "screenstate_019f2000-0000-7000-8000-000000000021",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "title": "Unsubstantiated state",
+      "kind": "screen",
+      "status": "active",
+      "canonical_snapshot_id": "snapshot_019f2000-0000-7000-8000-000000000021",
+      "observation_ids": [
+        "observation_019f2000-0000-7000-8000-000000000099"
+      ],
+      "identity": {
+        "strategy": "manual",
+        "manual_key": "demo.unsubstantiated",
+        "extensions": {}
+      },
+      "first_seen": "2026-07-12T00:00:00Z",
+      "last_seen": "2026-07-12T00:00:00Z",
+      "extensions": {}
+    }
+  ],
+  "actions": [],
+  "transitions": [],
+  "observations": [],
+  "identity_decisions": [],
+  "extensions": {}
+}

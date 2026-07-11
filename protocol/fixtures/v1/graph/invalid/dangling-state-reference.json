@@ -1,0 +1,114 @@
+{
+  "screen_graph_id": "graph_019f2000-0000-7000-8000-000000000011",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "materialized_at": "2026-07-12T00:00:03Z",
+  "context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_ids": ["build_019f0000-0000-7000-8000-000000000001"],
+    "environment_ids": ["local"],
+    "extensions": {}
+  },
+  "entry_state_ids": [
+    "screenstate_019f2000-0000-7000-8000-000000000011"
+  ],
+  "states": [
+    {
+      "screen_state_id": "screenstate_019f2000-0000-7000-8000-000000000011",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "title": "Home",
+      "kind": "screen",
+      "status": "active",
+      "canonical_snapshot_id": "snapshot_019f2000-0000-7000-8000-000000000011",
+      "observation_ids": [
+        "observation_019f2000-0000-7000-8000-000000000011"
+      ],
+      "identity": {
+        "strategy": "manual",
+        "manual_key": "demo.home",
+        "extensions": {}
+      },
+      "first_seen": "2026-07-12T00:00:00Z",
+      "last_seen": "2026-07-12T00:00:00Z",
+      "extensions": {}
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "action_019f2000-0000-7000-8000-000000000011",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "kind": "tap",
+      "requested_effect": "Open a missing target state",
+      "risk": "safe",
+      "target": {
+        "snapshot_id": "snapshot_019f2000-0000-7000-8000-000000000011",
+        "stable_id": "demo.home.missing",
+        "extensions": {}
+      },
+      "parameters": { "extensions": {} },
+      "extensions": {}
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "transition_019f2000-0000-7000-8000-000000000011",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "source_state_id": "screenstate_019f2000-0000-7000-8000-000000000011",
+      "target_state_id": "screenstate_019f2000-0000-7000-8000-000000000099",
+      "action_id": "action_019f2000-0000-7000-8000-000000000011",
+      "observation_ids": [],
+      "status": "expected",
+      "confidence": 0.5,
+      "occurrence_count": 0,
+      "first_seen": "2026-07-12T00:00:01Z",
+      "last_seen": "2026-07-12T00:00:01Z",
+      "extensions": {}
+    }
+  ],
+  "observations": [
+    {
+      "observation_id": "observation_019f2000-0000-7000-8000-000000000011",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "kind": "state",
+      "observed_at": { "wall_time": "2026-07-12T00:00:00Z" },
+      "runtime_context": {
+        "project_id": "project_019f0000-0000-7000-8000-000000000001",
+        "application_id": "dev.vistrea.demo",
+        "build_id": "build_019f0000-0000-7000-8000-000000000001",
+        "application_version": "1.0.0",
+        "platform": "ios",
+        "device": {
+          "kind": "simulator",
+          "model": "Demo iPhone",
+          "os_version": "18.0",
+          "extensions": {}
+        },
+        "environment_id": "local",
+        "locale": "en-US",
+        "theme": "light",
+        "text_scale": 1,
+        "sdk_version": "0.1.0",
+        "adapter_versions": { "uikit": "0.1.0" },
+        "extensions": {}
+      },
+      "capture_source": "sdk",
+      "screen_state_id": "screenstate_019f2000-0000-7000-8000-000000000011",
+      "snapshot_ids": [
+        "snapshot_019f2000-0000-7000-8000-000000000011"
+      ],
+      "runtime_event_ids": [],
+      "artifact_ids": [],
+      "confidence": 1,
+      "capabilities": {
+        "names": ["runtime.snapshot"],
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "identity_decisions": [],
+  "extensions": {}
+}

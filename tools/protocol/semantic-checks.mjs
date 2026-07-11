@@ -1,6 +1,20 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
+import {
+  checkBuildDiff,
+  checkDesignReviewBundle,
+  checkKnowledgeGraph,
+  checkOperationRecord,
+  checkScreenGraph,
+  checkTuningPatch,
+  checkValidationBundle,
+  checkValidationFinding,
+  checkValidationRun,
+  checkValidationSuppression,
+  checkWorkingSet,
+} from "./phase0a2-semantic-checks.mjs";
+
 export function canonicalizeIdentityJson(value) {
   if (value === null || typeof value === "boolean" || typeof value === "string") {
     return JSON.stringify(value);
@@ -552,8 +566,30 @@ export function runSemanticChecks(kind, value, context = {}) {
       return checkObjectFixture(value);
     case "commit":
       return checkCommit(value);
+    case "working-set":
+      return checkWorkingSet(value);
     case "workspace":
       return [];
+    case "screen-graph":
+      return checkScreenGraph(value);
+    case "knowledge-graph":
+      return checkKnowledgeGraph(value);
+    case "design-review-bundle":
+      return checkDesignReviewBundle(value);
+    case "tuning-patch":
+      return checkTuningPatch(value);
+    case "operation-record":
+      return checkOperationRecord(value, context);
+    case "validation-run":
+      return checkValidationRun(value);
+    case "validation-finding":
+      return checkValidationFinding(value);
+    case "validation-suppression":
+      return checkValidationSuppression(value);
+    case "validation-bundle":
+      return checkValidationBundle(value);
+    case "build-diff":
+      return checkBuildDiff(value);
     default:
       throw new TypeError(`Unknown semantic check kind: ${String(kind)}`);
   }

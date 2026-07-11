@@ -1,0 +1,39 @@
+{
+  "finding_id": "finding_019f0000-0000-7000-8000-000000000001",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "validation_run_id": "validationrun_019f0000-0000-7000-8000-000000000001",
+  "rule_id": "accessibility.minimum-touch-target",
+  "category": "accessibility",
+  "severity": "warning",
+  "status": "open",
+  "message": "The primary action touch target is smaller than the configured minimum.",
+  "subject": {
+    "kind": "ui_node",
+    "id": "node_019f0000-0000-7000-8000-000000000011",
+    "version": "snapshot_019f0000-0000-7000-8000-000000000001"
+  },
+  "expected": { "minimum_width": 44, "minimum_height": 44, "unit": "pt" },
+  "actual": { "width": 32, "height": 32, "unit": "pt" },
+  "evidence": [
+    {
+      "evidence_id": "evidence_019f0000-0000-7000-8000-000000000001",
+      "kind": "screenshot",
+      "captured_at": "2026-07-12T02:00:00.800Z",
+      "source_ref": {
+        "kind": "runtime_snapshot",
+        "id": "snapshot_019f0000-0000-7000-8000-000000000001"
+      },
+      "artifact_ref": {
+        "kind": "artifact",
+        "id": "artifact_019f0000-0000-7000-8000-000000000001"
+      },
+      "region": { "x": 24, "y": 120, "width": 32, "height": 32 },
+      "description": "Screenshot crop showing the measured primary action.",
+      "extensions": {}
+    }
+  ],
+  "detected_at": "2026-07-12T02:00:00.900Z",
+  "updated_at": "2026-07-12T02:00:00.900Z",
+  "revision": 1,
+  "extensions": {}
+}

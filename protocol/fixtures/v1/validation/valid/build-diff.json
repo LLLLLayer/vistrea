@@ -1,0 +1,56 @@
+{
+  "build_diff_id": "builddiff_019f0000-0000-7000-8000-000000000001",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "operation_id": "operation_019f0000-0000-7000-8000-000000000102",
+  "left_build": {
+    "kind": "build",
+    "id": "build_019f0000-0000-7000-8000-000000000001"
+  },
+  "right_build": {
+    "kind": "build",
+    "id": "build_019f0000-0000-7000-8000-000000000002"
+  },
+  "created_at": "2026-07-12T02:10:00.000Z",
+  "summary": {
+    "total": 1,
+    "added": 0,
+    "removed": 0,
+    "changed": 0,
+    "regressed": 1,
+    "improved": 0
+  },
+  "entries": [
+    {
+      "entry_id": "diffentry_019f0000-0000-7000-8000-000000000001",
+      "kind": "regressed",
+      "domains": ["visual", "design"],
+      "severity": "error",
+      "summary": "The primary action is misaligned relative to the approved baseline.",
+      "left_subject": {
+        "kind": "screen_state",
+        "id": "screen_019f0000-0000-7000-8000-000000000001",
+        "version": "build_019f0000-0000-7000-8000-000000000001"
+      },
+      "right_subject": {
+        "kind": "screen_state",
+        "id": "screen_019f0000-0000-7000-8000-000000000001",
+        "version": "build_019f0000-0000-7000-8000-000000000002"
+      },
+      "evidence": [
+        {
+          "evidence_id": "evidence_019f0000-0000-7000-8000-000000000002",
+          "kind": "screenshot",
+          "captured_at": "2026-07-12T02:09:59.000Z",
+          "artifact_ref": {
+            "kind": "artifact",
+            "id": "artifact_019f0000-0000-7000-8000-000000000002"
+          },
+          "description": "Pixel-diff evidence for the right build.",
+          "extensions": {}
+        }
+      ],
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

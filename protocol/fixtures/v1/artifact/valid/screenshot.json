@@ -1,0 +1,24 @@
+{
+  "artifact_id": "artifact_019f0000-0000-7000-8000-000000000001",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "kind": "screenshot",
+  "object": {
+    "hash": "sha256:b0cd09405ae15f1cfb3f4b291002921832c81e26ed7f308c56b5c1eb5a791de5",
+    "media_type": "image/png",
+    "byte_size": 7,
+    "compression": "none",
+    "logical_name": "home.png",
+    "extensions": {}
+  },
+  "created_at": "2026-07-12T00:05:00Z",
+  "captured_at": {
+    "wall_time": "2026-07-12T00:05:00Z",
+    "monotonic_offset_ns": 5000000
+  },
+  "source": {
+    "kind": "snapshot",
+    "id": "snapshot_019f0000-0000-7000-8000-000000000001"
+  },
+  "retention": "session",
+  "extensions": {}
+}

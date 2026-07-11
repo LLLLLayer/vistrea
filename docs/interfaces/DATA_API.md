@@ -4,6 +4,8 @@
 
 `data/api` defines storage ports consumed by Host Engine use cases. Concrete implementations may use SQLite, local files, in-memory fixtures, remote objects, or Vistrea Hub without changing product behavior.
 
+Canonical persisted and exchanged values are frozen by [`DATA_MODEL_COVERAGE.md`](../protocol/DATA_MODEL_COVERAGE.md) and `protocol/model-coverage/v1.json`. Phase 0B may define language-owned query, command, page, mask, and transaction types around those values, but it cannot redefine them.
+
 ## 2. Unit of Work and transaction model
 
 ```ts
@@ -43,6 +45,7 @@ interface WorkspaceRepository {
 - Large Object Store writes complete and verify before metadata references become visible.
 - A failed metadata transaction must not expose partial graph, issue, patch, or ref updates.
 - Object writes that succeed before a metadata rollback become unreachable candidates and are reclaimed later by Workspace GC.
+- Revisioned creates and updates follow the shared `1`, `N`, `N + 1` rule in `COMMON_CONTRACTS.md`; repositories reject stale preconditions and submitted revision jumps.
 
 ## 3. Snapshot and observation ports
 
@@ -88,63 +91,118 @@ Graph materialization is derived from immutable observations plus explicit ident
 ```ts
 interface WikiRepository {
   create(node: WikiNode, precondition?: MutationPrecondition): WikiNode;
-  update(node: WikiNode, precondition: MutationPrecondition): WikiNode;
+  update(node: WikiNode, precondition: RevisionPrecondition): WikiNode;
   get(node_id: string, at?: VersionSelector): WikiNode;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
-  unlink(link_id: string, precondition: MutationPrecondition): void;
+  unlink(link_id: string, precondition: RevisionPrecondition): void;
   backlinks(node_id: string, page?: PageRequest): Page<WikiLink>;
   related(ref: ResourceRef, page?: PageRequest): Page<WikiNode>;
-  putCollection(collection: KnowledgeCollection): void;
+  createCollection(collection: KnowledgeCollection): KnowledgeCollection;
+  updateCollection(
+    collection: KnowledgeCollection,
+    precondition: RevisionPrecondition
+  ): KnowledgeCollection;
   getCollection(id: string, at?: VersionSelector): KnowledgeCollection;
   listCollections(query: KnowledgeCollectionQuery): Page<KnowledgeCollection>;
 }
 ```
 
+`unlink` removes the live link and persists its next-revision deletion evidence in the same Unit of Work. The owning Engine command includes that deletion in its Working Set/Commit; a historical version can still reconstruct the prior link.
+
 ## 6. Design review port
 
 ```ts
 interface DesignReviewRepository {
-  putReference(reference: DesignReference): void;
+  createReference(reference: DesignReference): DesignReference;
+  updateReference(
+    reference: DesignReference,
+    precondition: RevisionPrecondition
+  ): DesignReference;
   getReference(id: string, at?: VersionSelector): DesignReference;
+  createRegionMapping(mapping: DesignRegionMapping): DesignRegionMapping;
+  updateRegionMapping(
+    mapping: DesignRegionMapping,
+    precondition: RevisionPrecondition
+  ): DesignRegionMapping;
+  listRegionMappings(query: DesignRegionMappingQuery): Page<DesignRegionMapping>;
+  appendComparison(comparison: DesignComparison): void;
+  getComparison(id: string): DesignComparison;
   createIssue(issue: ReviewIssue): ReviewIssue;
-  updateIssue(issue: ReviewIssue, precondition: MutationPrecondition): ReviewIssue;
+  updateIssue(issue: ReviewIssue, precondition: RevisionPrecondition): ReviewIssue;
   listIssues(query: ReviewIssueQuery, page?: PageRequest): Page<ReviewIssue>;
   appendVerification(record: ReviewVerificationRecord): void;
-  putRegionMapping(mapping: DesignRegionMapping): void;
-  listRegionMappings(query: DesignRegionMappingQuery): Page<DesignRegionMapping>;
-  putPatch(patch: TuningPatch): void;
+  createPatch(patch: TuningPatch): TuningPatch;
+  updatePatch(patch: TuningPatch, precondition: RevisionPrecondition): TuningPatch;
   getPatch(id: string): TuningPatch;
+  createApplication(application: TuningApplication): TuningApplication;
+  updateApplication(
+    application: TuningApplication,
+    precondition: RevisionPrecondition
+  ): TuningApplication;
+  getApplication(id: string): TuningApplication;
+  listActiveApplications(connection_id: string): TuningApplication[];
 }
 ```
+
+Design Comparisons and Verification Records are immutable evidence. References, mappings, Review Issues, Tuning Patches, and Tuning Applications are revisioned mutable resources and require optimistic concurrency after creation.
 
 ## 7. Validation and operation ports
 
 ```ts
 interface ValidationRepository {
-  putRun(run: ValidationRun): void;
-  updateRun(run: ValidationRun, precondition: MutationPrecondition): void;
+  createRun(run: ValidationRun): ValidationRun;
+  updateRun(run: ValidationRun, precondition: RevisionPrecondition): void;
   getRun(run_id: string): ValidationRun;
-  putFindings(findings: ValidationFinding[]): void;
+  addFindings(
+    run: ValidationRun,
+    findings: ValidationFinding[],
+    run_precondition: RevisionPrecondition
+  ): void;
+  getFinding(finding_id: string): ValidationFinding;
+  updateFinding(
+    run: ValidationRun,
+    finding: ValidationFinding,
+    run_precondition: RevisionPrecondition,
+    finding_precondition: RevisionPrecondition
+  ): void;
   listFindings(query: ValidationFindingQuery, page?: PageRequest): Page<ValidationFinding>;
-  putSuppression(suppression: ValidationSuppression): void;
+  suppressFinding(
+    run: ValidationRun,
+    finding: ValidationFinding,
+    suppression: ValidationSuppression,
+    run_precondition: RevisionPrecondition,
+    finding_precondition: RevisionPrecondition
+  ): void;
+  appendBuildDiff(diff: BuildDiff): void;
+  getBuildDiff(build_diff_id: string): BuildDiff;
 }
 
 interface OperationRepository {
-  create(operation: OperationRef): void;
-  update(operation: OperationRef, precondition: MutationPrecondition): void;
+  create(operation: OperationRef, created_event: OperationEvent): OperationRecord;
+  appendEvents(
+    operation: OperationRef,
+    events: OperationEvent[],
+    expected_next_sequence: JsonSafeUInt,
+    precondition: RevisionPrecondition
+  ): OperationRecord;
   complete(
     operation: OperationRef,
     result: OperationResult<JsonValue>,
-    precondition: MutationPrecondition
-  ): void;
-  get(operation_id: string): OperationRef;
+    terminal_event: OperationEvent,
+    expected_next_sequence: JsonSafeUInt,
+    precondition: RevisionPrecondition
+  ): OperationRecord;
+  get(operation_id: string): OperationRecord;
   getResult(operation_id: string): OperationResult<JsonValue>;
-  appendEvents(events: OperationEvent[]): void;
   listEvents(operation_id: string, after_cursor?: string): Page<OperationEvent>;
 }
 ```
 
-`complete` atomically persists the terminal succeeded state and exactly one typed completion result in the same Unit of Work. A succeeded operation without a readable result is integrity-invalid. Progress updates cannot set `succeeded`; failures persist their terminal `OperationRef.error`. Operation state, result, and events survive process restart.
+`create` atomically persists the queued Operation and its sequence-one `created` event. `appendEvents` atomically updates the Operation summary and appends a contiguous event suffix; it may persist running, failed, or cancelled state but cannot set `succeeded`. `complete` atomically persists the terminal succeeded state, its final event, and exactly one typed completion result. The record revision and expected next sequence prevent concurrent writers from forking one event stream. A succeeded operation without a readable result is integrity-invalid. Operation state, result, and events survive process restart.
+
+`ValidationRun.finding_counts` is the current summary at the Run revision, not a frozen completion snapshot. `addFindings`, every Finding status or severity update, and `suppressFinding` therefore update the affected Findings plus Run counts/revision/timestamp in one Unit of Work. Both Run and existing Finding revisions are compare-and-set inputs; callers cannot mutate a Finding independently and leave the summary stale.
+
+`updateRun` changes lifecycle fields but cannot independently overwrite `finding_counts`; the repository derives and verifies those counts from the same transaction snapshot.
 
 ## 8. Version port
 
@@ -152,14 +210,18 @@ interface OperationRepository {
 interface VersionRepository {
   createWorkingSet(base_commit_id: string): WorkingSet;
   getWorkingSet(working_set_id: string): WorkingSet;
-  appendWorkingChanges(working_set_id: string, changes: WorkingChange[]): void;
+  appendWorkingChanges(
+    working_set_id: string,
+    changes: WorkingChange[],
+    precondition: RevisionPrecondition
+  ): WorkingSet;
   createCommit(manifest: CommitManifest): Commit;
   commitWorkingSetAndUpdateRef(command: CommitWorkingSetCommand): CommitAndRefResult;
   getCommit(commit_id: string): Commit;
   listCommits(query: CommitQuery, page?: PageRequest): Page<Commit>;
   resolveRef(name: string): Ref;
   updateRef(name: string, commit_id: string, precondition: RefUpdatePrecondition): Ref;
-  createTag(name: string, commit_id: string): Tag;
+  createTag(tag: Tag): Tag;
   reachableObjects(commit_ids: string[]): AsyncIterable<ObjectRef>;
 }
 ```
@@ -170,10 +232,10 @@ Commits are immutable. A Working Set is mutable draft state rooted at one base c
 type RefUpdatePrecondition =
   | { mode: "must_match"; expected_commit_id: string }
   | { mode: "must_not_exist" }
-  | { mode: "force"; authorization: ForceRefAuthorization };
+  | { mode: "force"; authorization: ResourceRef };
 ```
 
-Normal authoring uses `must_match` or `must_not_exist`. `force` is never an omitted precondition: it requires an explicit protected-ref policy decision and an auditable authorization token.
+Normal authoring uses `must_match` or `must_not_exist`. `force` is never an omitted precondition: it requires an explicit protected-ref policy decision and a `ResourceRef` to an auditable authorization record.
 
 ## 9. Object Store port
 
@@ -242,5 +304,5 @@ Every Data API port should provide a deterministic fixture-backed in-memory impl
 - search rebuildability;
 - export/import round trip;
 - sync missing-object negotiation;
-- migration forward compatibility and recovery.
+- migration forward compatibility and recovery;
 - durable operation completion and typed-result recovery after restart.

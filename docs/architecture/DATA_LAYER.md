@@ -133,11 +133,23 @@ All metadata repositories used by one atomic Engine command come from one transa
 - associate ObjectRefs and capture context;
 - stream or page large payloads when needed.
 
+### `ObservationRepository`
+
+- append immutable state, transition, event, and artifact observations;
+- load observations by stable identity and context;
+- preserve corrections as superseding records rather than in-place rewrites.
+
+### `RuntimeEventRepository`
+
+- append validated event batches with durable epoch and sequence evidence;
+- query retained events and reconstructed timelines;
+- preserve reported gaps without treating filtered sequences as data loss.
+
 ### `ScreenGraphRepository`
 
 - query Screen States and Transitions by build and environment;
-- store immutable observations;
 - materialize version-scoped graph views;
+- store explicit state-identity decisions;
 - support graph comparison inputs.
 
 ### `WikiRepository`
@@ -149,8 +161,20 @@ All metadata repositories used by one atomic Engine command come from one transa
 ### `DesignReviewRepository`
 
 - store Design References and runtime mappings;
-- manage Review Issues and verification history;
-- store, load, and compare reversible Tuning Patches.
+- persist immutable comparisons and verification evidence;
+- manage Review Issues, reversible Tuning Patches, and Tuning Applications.
+
+### `ValidationRepository`
+
+- manage Validation Run lifecycle and current Finding summaries;
+- persist Findings, Suppressions, evidence, and immutable Build Diffs;
+- atomically keep Run counts consistent with Finding state.
+
+### `OperationRepository`
+
+- persist revisioned long-running Operation summaries;
+- append one contiguous event stream per Operation;
+- atomically store succeeded state, terminal event, and typed result.
 
 ### `VersionRepository`
 
@@ -199,23 +223,32 @@ Vistrea requires version semantics for several independent dimensions:
 | Exploration graph | graph for build and environment | Materialized from observations |
 | Design baseline | `design-v3` | Versioned ref to a design commit |
 | Review workflow | issue state and verification | Versioned collaboration data |
-| Tuning preview | a property patch | Reversible commit object |
+| Tuning preview | a property patch | Versioned reversible design value |
 | Wiki editing | notes, labels, links | Versioned knowledge changes |
 
 A Commit is a small immutable manifest:
 
 ```text
 Commit
-├── parent_ids
-├── protocol_version
-├── build_context
-├── graph_root
-├── wiki_root
-├── design_baseline
-├── review_changes
-├── tuning_patches
-└── object_hashes
+├── commit_id
+└── manifest
+    ├── protocol_version
+    ├── parents
+    ├── created_at
+    ├── author
+    ├── message
+    ├── build_context?
+    ├── roots
+    │   ├── runtime_graph?
+    │   ├── wiki?
+    │   ├── design?
+    │   ├── reviews?
+    │   └── validation?
+    ├── object_hashes
+    └── extensions
 ```
+
+This is the canonical `Commit`/`CommitManifest` shape from `commit.schema.json`. Tuning Patches and other design-review values are represented inside the referenced design or review root object, not as extra Commit fields.
 
 Refs provide mutable names:
 

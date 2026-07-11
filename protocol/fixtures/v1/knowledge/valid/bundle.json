@@ -1,0 +1,136 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "nodes": [
+    {
+      "wiki_node_id": "wiki_019f0000-0000-7500-8000-000000000501",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "kind": "screen",
+      "title": "Checkout confirmation",
+      "slug": "checkout-confirmation",
+      "summary": "Runtime behavior and review evidence for the confirmation screen.",
+      "content": {
+        "storage": "inline",
+        "media_type": "text/markdown",
+        "text": "# Checkout confirmation\n\nThe success banner is transient.",
+        "language": "en-US",
+        "extensions": {}
+      },
+      "status": "published",
+      "labels": ["checkout", "runtime"],
+      "related_resources": [
+        {
+          "kind": "screen_state",
+          "id": "screen_019f0000-0000-7500-8000-000000000501"
+        }
+      ],
+      "attachments": [],
+      "created_at": "2026-07-12T01:00:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "display_name": "Demo Designer",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T01:00:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "display_name": "Demo Designer",
+        "extensions": {}
+      },
+      "extensions": {}
+    },
+    {
+      "wiki_node_id": "wiki_019f0000-0000-7500-8000-000000000502",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "kind": "component",
+      "title": "Success banner",
+      "slug": "success-banner",
+      "content": {
+        "storage": "inline",
+        "media_type": "text/markdown",
+        "text": "The banner appears after a successful checkout and dismisses automatically.",
+        "language": "en-US",
+        "extensions": {}
+      },
+      "status": "published",
+      "labels": ["component", "transient"],
+      "related_resources": [],
+      "attachments": [],
+      "created_at": "2026-07-12T01:01:00Z",
+      "created_by": {
+        "kind": "agent",
+        "id": "vistrea-knowledge-agent",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T01:01:00Z",
+      "updated_by": {
+        "kind": "agent",
+        "id": "vistrea-knowledge-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "links": [
+    {
+      "wiki_link_id": "wikilink_019f0000-0000-7500-8000-000000000501",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "source_node_id": "wiki_019f0000-0000-7500-8000-000000000501",
+      "target": {
+        "kind": "wiki_node",
+        "id": "wiki_019f0000-0000-7500-8000-000000000502"
+      },
+      "relation": "documents",
+      "label": "Component details",
+      "created_at": "2026-07-12T01:02:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "collections": [
+    {
+      "collection_id": "collection_019f0000-0000-7500-8000-000000000501",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "name": "Checkout runtime knowledge",
+      "summary": "Canonical checkout screens and components.",
+      "node_ids": [
+        "wiki_019f0000-0000-7500-8000-000000000501",
+        "wiki_019f0000-0000-7500-8000-000000000502"
+      ],
+      "link_ids": [
+        "wikilink_019f0000-0000-7500-8000-000000000501"
+      ],
+      "entry_node_ids": [
+        "wiki_019f0000-0000-7500-8000-000000000501"
+      ],
+      "publication": {
+        "state": "draft",
+        "extensions": {}
+      },
+      "created_at": "2026-07-12T01:03:00Z",
+      "created_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T01:03:00Z",
+      "updated_by": {
+        "kind": "human",
+        "id": "designer-1",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "extensions": {}
+}

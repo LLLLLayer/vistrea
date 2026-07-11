@@ -1,0 +1,172 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 3,
+  "references": [
+    {
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000620",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "kind": "design_artifact",
+      "name": "Transition fixture baseline",
+      "artifact": {
+        "artifact_id": "artifact_019f0000-0000-7600-8000-000000000620",
+        "protocol_version": { "major": 1, "minor": 0 },
+        "kind": "design",
+        "object": {
+          "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "media_type": "image/png",
+          "byte_size": 512,
+          "compression": "none",
+          "extensions": {}
+        },
+        "created_at": "2026-07-12T02:20:00Z",
+        "retention": "pinned",
+        "extensions": {}
+      },
+      "canvas_size": { "width": 390, "height": 844 },
+      "pixel_size": { "width": 1170, "height": 2532 },
+      "created_at": "2026-07-12T02:20:00Z",
+      "created_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:20:00Z",
+      "updated_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "mappings": [],
+  "comparisons": [],
+  "issues": [
+    {
+      "issue_id": "issue_019f0000-0000-7600-8000-000000000620",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 3,
+      "design_reference_id": "designref_019f0000-0000-7600-8000-000000000620",
+      "runtime_target": {
+        "snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000620",
+        "tree_id": "tree_019f0000-0000-7600-8000-000000000620",
+        "node_id": "node_019f0000-0000-7600-8000-000000000620",
+        "extensions": {}
+      },
+      "title": "Illegal direct resolution transition",
+      "category": "spacing",
+      "severity": "minor",
+      "state": "open",
+      "expected": {
+        "kind": "number",
+        "value": 16,
+        "unit": "logical_point",
+        "extensions": {}
+      },
+      "actual": {
+        "kind": "number",
+        "value": 12,
+        "unit": "logical_point",
+        "extensions": {}
+      },
+      "evidence": [],
+      "state_history": [
+        {
+          "revision": 1,
+          "to_state": "open",
+          "changed_at": "2026-07-12T02:21:00Z",
+          "changed_by": {
+            "kind": "agent",
+            "id": "fixture-agent",
+            "extensions": {}
+          },
+          "extensions": {}
+        },
+        {
+          "revision": 2,
+          "from_state": "open",
+          "to_state": "resolved",
+          "verification_record_id": "verification_019f0000-0000-7600-8000-000000000620",
+          "changed_at": "2026-07-12T02:22:00Z",
+          "changed_by": {
+            "kind": "agent",
+            "id": "fixture-agent",
+            "extensions": {}
+          },
+          "extensions": {}
+        },
+        {
+          "revision": 3,
+          "from_state": "resolved",
+          "to_state": "open",
+          "reason": "Reopened after detecting the invalid workflow history.",
+          "changed_at": "2026-07-12T02:23:00Z",
+          "changed_by": {
+            "kind": "agent",
+            "id": "fixture-agent",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "verification_record_ids": [
+        "verification_019f0000-0000-7600-8000-000000000620"
+      ],
+      "tuning_patch_ids": [],
+      "created_at": "2026-07-12T02:21:00Z",
+      "created_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "updated_at": "2026-07-12T02:23:00Z",
+      "updated_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "verifications": [
+    {
+      "verification_record_id": "verification_019f0000-0000-7600-8000-000000000620",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "revision": 1,
+      "issue_id": "issue_019f0000-0000-7600-8000-000000000620",
+      "issue_revision": 1,
+      "basis": "real_build",
+      "result": "passed",
+      "verified_snapshot_id": "snapshot_019f0000-0000-7600-8000-000000000621",
+      "verified_build_id": "build_019f0000-0000-7600-8000-000000000621",
+      "evidence": [
+        {
+          "artifact_link_id": "artifactlink_019f0000-0000-7600-8000-000000000620",
+          "artifact_id": "artifact_019f0000-0000-7600-8000-000000000620",
+          "target": {
+            "kind": "review_issue",
+            "id": "issue_019f0000-0000-7600-8000-000000000620"
+          },
+          "relation": "evidence",
+          "created_at": "2026-07-12T02:22:00Z",
+          "created_by": {
+            "kind": "agent",
+            "id": "fixture-agent",
+            "extensions": {}
+          },
+          "extensions": {}
+        }
+      ],
+      "verified_at": "2026-07-12T02:22:00Z",
+      "verified_by": {
+        "kind": "agent",
+        "id": "fixture-agent",
+        "extensions": {}
+      },
+      "extensions": {}
+    }
+  ],
+  "patches": [],
+  "extensions": {}
+}

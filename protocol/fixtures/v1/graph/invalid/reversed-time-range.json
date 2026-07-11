@@ -1,0 +1,24 @@
+{
+  "screen_graph_id": "graph_019f2000-0000-7000-8000-000000000031",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "revision": 1,
+  "materialized_at": "2026-07-12T00:00:03Z",
+  "context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_ids": ["build_019f0000-0000-7000-8000-000000000001"],
+    "environment_ids": ["local"],
+    "observation_time_range": {
+      "started_at": "2026-07-12T00:00:02Z",
+      "ended_at": "2026-07-12T00:00:00Z"
+    },
+    "extensions": {}
+  },
+  "entry_state_ids": [],
+  "states": [],
+  "actions": [],
+  "transitions": [],
+  "observations": [],
+  "identity_decisions": [],
+  "extensions": {}
+}
