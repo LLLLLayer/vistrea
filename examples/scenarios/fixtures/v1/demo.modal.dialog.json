@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.modal.dialog",
+  "title": "Modal dialog",
+  "purpose": "Present and dismiss a deterministic modal while preserving overlay state and event evidence.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "transient-event",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.modal-base",
+    "seed": 1500,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.modal.open",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.modal.dialog",
+      "role": "dialog"
+    },
+    {
+      "node_id": "demo.modal.dismiss",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.modal-base",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.modal.open"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.modal-open",
+      "kind": "overlay",
+      "required_node_ids": [
+        "demo.modal.dialog",
+        "demo.modal.dismiss"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.modal.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.modal-base",
+      "to_state_id": "demo.state.modal-base"
+    },
+    {
+      "step_id": "demo.modal.present",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.modal.open"
+      },
+      "from_state_id": "demo.state.modal-base",
+      "to_state_id": "demo.state.modal-open"
+    },
+    {
+      "step_id": "demo.modal.dismiss",
+      "action": {
+        "kind": "dismiss",
+        "target_node_id": "demo.modal.dismiss"
+      },
+      "from_state_id": "demo.state.modal-open",
+      "to_state_id": "demo.state.modal-base"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.modal.dialog.snapshot.open",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.present",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.modal.dialog.snapshot.dismissed",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.dismiss",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.modal.dialog.screenshot.open",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.present",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.modal.dialog.events",
+      "kind": "runtime-event-batch",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.dismiss",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.modal.dialog.key-frame",
+      "kind": "key-frame",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.present",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.modal.dialog.graph",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.modal.dismiss",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.modal.snapshot.open",
+        "profile": "baseline",
+        "after_step_id": "demo.modal.present",
+        "state_id": "demo.state.modal-open",
+        "required_node_ids": [
+          "demo.modal.dialog",
+          "demo.modal.dismiss"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.modal.snapshot.dismissed",
+        "profile": "baseline",
+        "after_step_id": "demo.modal.dismiss",
+        "state_id": "demo.state.modal-base",
+        "required_node_ids": [
+          "demo.modal.open"
+        ],
+        "excluded_node_ids": [
+          "demo.modal.dialog"
+        ]
+      }
+    ],
+    "transient_events": [
+      {
+        "expectation_id": "demo.modal.event.presented",
+        "profile": "baseline",
+        "after_step_id": "demo.modal.present",
+        "kind": "transient_presented",
+        "target_node_id": "demo.modal.dialog",
+        "order": 1,
+        "deadline_ms": 250,
+        "evidence": [
+          "runtime-event-batch",
+          "key-frame"
+        ]
+      },
+      {
+        "expectation_id": "demo.modal.event.dismissed",
+        "profile": "baseline",
+        "after_step_id": "demo.modal.dismiss",
+        "kind": "transient_dismissed",
+        "target_node_id": "demo.modal.dialog",
+        "order": 2,
+        "deadline_ms": 250,
+        "evidence": [
+          "runtime-event-batch"
+        ]
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.transition.modal-open",
+          "step_id": "demo.modal.present",
+          "from_state_id": "demo.state.modal-base",
+          "to_state_id": "demo.state.modal-open",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.modal-dismiss",
+          "step_id": "demo.modal.dismiss",
+          "from_state_id": "demo.state.modal-open",
+          "to_state_id": "demo.state.modal-base",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    }
+  },
+  "extensions": {}
+}

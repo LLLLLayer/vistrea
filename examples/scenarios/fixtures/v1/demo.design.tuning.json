@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.design.tuning",
+  "title": "Design comparison and tuning",
+  "purpose": "Compare visual properties and describe an allowlisted, reversible runtime preview without changing source truth.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "design-tuning",
+    "validation"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "design-regression"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.design-tuning",
+    "seed": 1800,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.design.preview_card",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.design.preview_title",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.design-tuning",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.design.preview_card",
+        "demo.design.preview_title"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.design.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.design-tuning",
+      "to_state_id": "demo.state.design-tuning"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.design.tuning.snapshot.regression",
+      "kind": "runtime-snapshot",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.screenshot.regression",
+      "kind": "screenshot",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.review",
+      "kind": "design-review-bundle",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.patch",
+      "kind": "tuning-patch",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.application.active",
+      "kind": "tuning-application",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.application.reverted",
+      "kind": "tuning-application",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.validation",
+      "kind": "validation-bundle",
+      "profile": "design-regression",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.design.tuning.validation.baseline",
+      "kind": "validation-bundle",
+      "profile": "baseline",
+      "after_step_id": "demo.design.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.design.snapshot.regression",
+        "profile": "design-regression",
+        "after_step_id": "demo.design.launch",
+        "state_id": "demo.state.design-tuning",
+        "required_node_ids": [
+          "demo.design.preview_card",
+          "demo.design.preview_title"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "design_tuning": {
+      "design_reference_key": "demo.design.reference.primary",
+      "target_node_id": "demo.design.preview_card",
+      "differences": [
+        {
+          "property_name": "font_size",
+          "source_value": 14,
+          "design_value": 16
+        },
+        {
+          "property_name": "corner_radius",
+          "source_value": 4,
+          "design_value": 12
+        }
+      ],
+      "patch": {
+        "artifact_key": "demo.design.tuning.patch",
+        "changes": [
+          {
+            "property_name": "font_size",
+            "source_value": 14,
+            "preview_value": 16,
+            "allowlisted": true
+          },
+          {
+            "property_name": "corner_radius",
+            "source_value": 4,
+            "preview_value": 12,
+            "allowlisted": true
+          }
+        ],
+        "reversible": true,
+        "source_truth_unchanged": true,
+        "expected_reversion": "source-restored"
+      },
+      "application": {
+        "active_artifact_key": "demo.design.tuning.application.active",
+        "reverted_artifact_key": "demo.design.tuning.application.reverted",
+        "expected_status_sequence": [
+          "active",
+          "reverted"
+        ],
+        "reversion_reason": "explicit_revert"
+      },
+      "verification": {
+        "baseline_profile": "baseline",
+        "candidate_profile": "design-regression",
+        "expected_result": "pending",
+        "real_build_evidence_required": true
+      }
+    },
+    "validation": {
+      "profile_expectations": [
+        {
+          "profile": "baseline",
+          "findings": [
+            {
+              "rule_id": "demo.rule.design-style-mismatch",
+              "category": "design",
+              "severity": "error",
+              "target_node_id": "demo.design.preview_card",
+              "expectation": "absent"
+            }
+          ]
+        },
+        {
+          "profile": "design-regression",
+          "findings": [
+            {
+              "rule_id": "demo.rule.design-style-mismatch",
+              "category": "design",
+              "severity": "error",
+              "target_node_id": "demo.design.preview_card",
+              "expectation": "present"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

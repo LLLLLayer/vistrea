@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.form.validation",
+  "title": "Form validation",
+  "purpose": "Capture text entry, a deterministic required-field error, and recovery to the valid form state.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "transient-event",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.form",
+    "seed": 1200,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.form.name_input",
+      "role": "text-field"
+    },
+    {
+      "node_id": "demo.form.submit",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.form.name_error",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.form",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.form.name_input",
+        "demo.form.submit"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.form-error",
+      "kind": "error",
+      "required_node_ids": [
+        "demo.form.name_input",
+        "demo.form.submit",
+        "demo.form.name_error"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.form.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.form",
+      "to_state_id": "demo.state.form"
+    },
+    {
+      "step_id": "demo.form.submit-empty",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.form.submit"
+      },
+      "from_state_id": "demo.state.form",
+      "to_state_id": "demo.state.form-error"
+    },
+    {
+      "step_id": "demo.form.enter-valid-name",
+      "action": {
+        "kind": "type_text",
+        "target_node_id": "demo.form.name_input",
+        "input_alias": "VALID_NAME"
+      },
+      "from_state_id": "demo.state.form-error",
+      "to_state_id": "demo.state.form"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.form.validation.snapshot.error",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.form.submit-empty",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.form.validation.screenshot.error",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.form.submit-empty",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.form.validation.events",
+      "kind": "runtime-event-batch",
+      "profile": "baseline",
+      "after_step_id": "demo.form.submit-empty",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.form.validation.key-frame",
+      "kind": "key-frame",
+      "profile": "baseline",
+      "after_step_id": "demo.form.submit-empty",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.form.validation.graph",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.form.enter-valid-name",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.form.snapshot.error",
+        "profile": "baseline",
+        "after_step_id": "demo.form.submit-empty",
+        "state_id": "demo.state.form-error",
+        "required_node_ids": [
+          "demo.form.name_input",
+          "demo.form.submit",
+          "demo.form.name_error"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "transient_events": [
+      {
+        "expectation_id": "demo.form.event.error-appeared",
+        "profile": "baseline",
+        "after_step_id": "demo.form.submit-empty",
+        "kind": "node_appeared",
+        "target_node_id": "demo.form.name_error",
+        "order": 1,
+        "deadline_ms": 250,
+        "evidence": [
+          "runtime-event-batch",
+          "key-frame"
+        ]
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.transition.form-error",
+          "step_id": "demo.form.submit-empty",
+          "from_state_id": "demo.state.form",
+          "to_state_id": "demo.state.form-error",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.form-recovered",
+          "step_id": "demo.form.enter-valid-name",
+          "from_state_id": "demo.state.form-error",
+          "to_state_id": "demo.state.form",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    }
+  },
+  "extensions": {}
+}

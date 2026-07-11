@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.transient.success",
+  "title": "Transient success feedback",
+  "purpose": "Present success feedback for exactly two seconds and preserve its appearance and dismissal evidence.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "transient-event"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.success-ready",
+    "seed": 1300,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.success.submit",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.toast.success",
+      "role": "banner"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.success-ready",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.success.submit"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.success-visible",
+      "kind": "transient",
+      "required_node_ids": [
+        "demo.success.submit",
+        "demo.toast.success"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.success.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.success-ready",
+      "to_state_id": "demo.state.success-ready"
+    },
+    {
+      "step_id": "demo.success.submit",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.success.submit"
+      },
+      "from_state_id": "demo.state.success-ready",
+      "to_state_id": "demo.state.success-visible"
+    },
+    {
+      "step_id": "demo.success.wait-dismissal",
+      "action": {
+        "kind": "wait",
+        "duration_ms": 2000
+      },
+      "from_state_id": "demo.state.success-visible",
+      "to_state_id": "demo.state.success-ready"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.transient.success.snapshot.visible",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.success.submit",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.transient.success.snapshot.dismissed",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.success.wait-dismissal",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.transient.success.screenshot.visible",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.success.submit",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.transient.success.events",
+      "kind": "runtime-event-batch",
+      "profile": "baseline",
+      "after_step_id": "demo.success.wait-dismissal",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.transient.success.key-frame",
+      "kind": "key-frame",
+      "profile": "baseline",
+      "after_step_id": "demo.success.submit",
+      "comparison": "platform-visual",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.success.snapshot.visible",
+        "profile": "baseline",
+        "after_step_id": "demo.success.submit",
+        "state_id": "demo.state.success-visible",
+        "required_node_ids": [
+          "demo.toast.success"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.success.snapshot.dismissed",
+        "profile": "baseline",
+        "after_step_id": "demo.success.wait-dismissal",
+        "state_id": "demo.state.success-ready",
+        "required_node_ids": [
+          "demo.success.submit"
+        ],
+        "excluded_node_ids": [
+          "demo.toast.success"
+        ]
+      }
+    ],
+    "transient_events": [
+      {
+        "expectation_id": "demo.success.event.presented",
+        "profile": "baseline",
+        "after_step_id": "demo.success.submit",
+        "kind": "transient_presented",
+        "target_node_id": "demo.toast.success",
+        "order": 1,
+        "deadline_ms": 250,
+        "evidence": [
+          "runtime-event-batch",
+          "key-frame"
+        ]
+      },
+      {
+        "expectation_id": "demo.success.event.dismissed",
+        "profile": "baseline",
+        "after_step_id": "demo.success.wait-dismissal",
+        "kind": "transient_dismissed",
+        "target_node_id": "demo.toast.success",
+        "order": 2,
+        "deadline_ms": 2250,
+        "evidence": [
+          "runtime-event-batch"
+        ]
+      }
+    ]
+  },
+  "extensions": {}
+}

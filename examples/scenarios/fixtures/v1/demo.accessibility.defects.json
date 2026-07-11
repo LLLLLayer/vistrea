@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.accessibility.defects",
+  "title": "Accessibility defects",
+  "purpose": "Introduce a missing label and a small hit area only in the controlled accessibility regression profile.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "validation"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "validation.rules"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "validation.rules"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "accessibility-regression"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.accessibility",
+    "seed": 1700,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.accessibility.unlabeled_action",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.accessibility.small_action",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.accessibility",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.accessibility.unlabeled_action",
+        "demo.accessibility.small_action"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.accessibility.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.accessibility",
+      "to_state_id": "demo.state.accessibility"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.accessibility.defects.snapshot",
+      "kind": "runtime-snapshot",
+      "profile": "accessibility-regression",
+      "after_step_id": "demo.accessibility.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.accessibility.defects.screenshot",
+      "kind": "screenshot",
+      "profile": "accessibility-regression",
+      "after_step_id": "demo.accessibility.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.accessibility.defects.validation",
+      "kind": "validation-bundle",
+      "profile": "accessibility-regression",
+      "after_step_id": "demo.accessibility.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.accessibility.defects.validation.baseline",
+      "kind": "validation-bundle",
+      "profile": "baseline",
+      "after_step_id": "demo.accessibility.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.accessibility.snapshot.regression",
+        "profile": "accessibility-regression",
+        "after_step_id": "demo.accessibility.launch",
+        "state_id": "demo.state.accessibility",
+        "required_node_ids": [
+          "demo.accessibility.unlabeled_action",
+          "demo.accessibility.small_action"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "validation": {
+      "profile_expectations": [
+        {
+          "profile": "baseline",
+          "findings": [
+            {
+              "rule_id": "demo.rule.accessibility-label",
+              "category": "accessibility",
+              "severity": "error",
+              "target_node_id": "demo.accessibility.unlabeled_action",
+              "expectation": "absent"
+            },
+            {
+              "rule_id": "demo.rule.minimum-hit-area",
+              "category": "accessibility",
+              "severity": "warning",
+              "target_node_id": "demo.accessibility.small_action",
+              "expectation": "absent"
+            }
+          ]
+        },
+        {
+          "profile": "accessibility-regression",
+          "findings": [
+            {
+              "rule_id": "demo.rule.accessibility-label",
+              "category": "accessibility",
+              "severity": "error",
+              "target_node_id": "demo.accessibility.unlabeled_action",
+              "expectation": "present"
+            },
+            {
+              "rule_id": "demo.rule.minimum-hit-area",
+              "category": "accessibility",
+              "severity": "warning",
+              "target_node_id": "demo.accessibility.small_action",
+              "expectation": "present"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

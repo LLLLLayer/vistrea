@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "suite_id": "vistrea.demo.shared",
+  "protocol_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "required_platforms": [
+    "ios",
+    "android"
+  ],
+  "platforms": {
+    "ios": {
+      "implementation_status": "planned",
+      "initial_adapter": "uikit",
+      "capabilities": {
+        "runtime.snapshot": "planned",
+        "runtime.events": "planned",
+        "runtime.connection": "planned",
+        "automation.actions": "planned",
+        "automation.safety": "planned",
+        "exploration.graph": "planned",
+        "state-identity.normalization": "planned",
+        "design.comparison": "planned",
+        "design.tuning": "planned",
+        "validation.rules": "planned",
+        "validation.build-diff": "planned"
+      },
+      "limitations": []
+    },
+    "android": {
+      "implementation_status": "planned",
+      "initial_adapter": "view-viewgroup",
+      "capabilities": {
+        "runtime.snapshot": "planned",
+        "runtime.events": "planned",
+        "runtime.connection": "planned",
+        "automation.actions": "planned",
+        "automation.safety": "planned",
+        "exploration.graph": "planned",
+        "state-identity.normalization": "planned",
+        "design.comparison": "planned",
+        "design.tuning": "planned",
+        "validation.rules": "planned",
+        "validation.build-diff": "planned"
+      },
+      "limitations": []
+    }
+  },
+  "profiles": [
+    {
+      "profile_id": "baseline",
+      "description": "Expected passing behavior and visual presentation.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "fixed",
+        "seed": 1000
+      }
+    },
+    {
+      "profile_id": "new-feature",
+      "base_profile": "baseline",
+      "description": "Adds one intentional Screen State and path.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "fixed",
+        "seed": 1001
+      }
+    },
+    {
+      "profile_id": "design-regression",
+      "base_profile": "baseline",
+      "description": "Changes reviewable visual properties while preserving behavior.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "fixed",
+        "seed": 1002
+      }
+    },
+    {
+      "profile_id": "behavior-regression",
+      "base_profile": "baseline",
+      "description": "Breaks one expected Transition or timing rule.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "fixed",
+        "seed": 1003
+      }
+    },
+    {
+      "profile_id": "accessibility-regression",
+      "base_profile": "baseline",
+      "description": "Introduces deterministic accessibility defects.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "fixed",
+        "seed": 1004
+      }
+    },
+    {
+      "profile_id": "dynamic-content",
+      "base_profile": "baseline",
+      "description": "Changes seeded values that Screen State identity must normalize.",
+      "determinism": {
+        "data_source": "local-fixture",
+        "clock": "profile-seeded",
+        "seed": 1005
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "demo.navigation.basic",
+      "file": "fixtures/v1/demo.navigation.basic.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.form.validation",
+      "file": "fixtures/v1/demo.form.validation.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "transient-event",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.transient.success",
+      "file": "fixtures/v1/demo.transient.success.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "transient-event"
+      ]
+    },
+    {
+      "scenario_id": "demo.loading.outcomes",
+      "file": "fixtures/v1/demo.loading.outcomes.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "transient-event",
+        "exploration",
+        "validation"
+      ]
+    },
+    {
+      "scenario_id": "demo.modal.dialog",
+      "file": "fixtures/v1/demo.modal.dialog.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "transient-event",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.layout.occlusion",
+      "file": "fixtures/v1/demo.layout.occlusion.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "validation"
+      ]
+    },
+    {
+      "scenario_id": "demo.accessibility.defects",
+      "file": "fixtures/v1/demo.accessibility.defects.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "validation"
+      ]
+    },
+    {
+      "scenario_id": "demo.design.tuning",
+      "file": "fixtures/v1/demo.design.tuning.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "design-tuning",
+        "validation"
+      ]
+    },
+    {
+      "scenario_id": "demo.dynamic.normalization",
+      "file": "fixtures/v1/demo.dynamic.normalization.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.safety.dangerous",
+      "file": "fixtures/v1/demo.safety.dangerous.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.version.new-feature",
+      "file": "fixtures/v1/demo.version.new-feature.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration",
+        "build-diff"
+      ]
+    },
+    {
+      "scenario_id": "demo.version.regression",
+      "file": "fixtures/v1/demo.version.regression.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "design-tuning",
+        "validation",
+        "build-diff"
+      ]
+    }
+  ],
+  "vertical_loops": [
+    {
+      "loop_id": "ios.first-snapshot-loop",
+      "platform": "ios",
+      "status": "planned",
+      "scenario_ids": [
+        "demo.navigation.basic"
+      ],
+      "required_capabilities": [
+        "runtime.snapshot",
+        "runtime.connection"
+      ],
+      "artifact_keys": [
+        "demo.navigation.basic.snapshot.home",
+        "demo.navigation.basic.screenshot.home"
+      ],
+      "stages": [
+        "demo-app-launch",
+        "sdk-connect",
+        "snapshot-capture",
+        "host-receive",
+        "studio-render",
+        "data-persist",
+        "data-reopen"
+      ]
+    }
+  ],
+  "extensions": {}
+}

@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.dynamic.normalization",
+  "title": "Dynamic content normalization",
+  "purpose": "Change time, user, and list values while preserving one stable Screen State identity.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "exploration.graph",
+        "state-identity.normalization"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "exploration.graph",
+        "state-identity.normalization"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "dynamic-content"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.dynamic-content",
+    "seed": 1900,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.dynamic.clock",
+      "role": "label"
+    },
+    {
+      "node_id": "demo.dynamic.user_name",
+      "role": "label"
+    },
+    {
+      "node_id": "demo.dynamic.item_primary",
+      "role": "list-item"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.dynamic-content",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.dynamic.clock",
+        "demo.dynamic.user_name",
+        "demo.dynamic.item_primary"
+      ],
+      "dynamic_fields": [
+        {
+          "node_id": "demo.dynamic.clock",
+          "field": "text",
+          "normalization": "value-kind"
+        },
+        {
+          "node_id": "demo.dynamic.user_name",
+          "field": "text",
+          "normalization": "stable-placeholder"
+        },
+        {
+          "node_id": "demo.dynamic.item_primary",
+          "field": "content",
+          "normalization": "ignore-value"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.dynamic.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.dynamic-content",
+      "to_state_id": "demo.state.dynamic-content"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.dynamic.normalization.snapshot.baseline",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.dynamic.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.dynamic.normalization.snapshot.changed",
+      "kind": "runtime-snapshot",
+      "profile": "dynamic-content",
+      "after_step_id": "demo.dynamic.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.dynamic.normalization.screenshot.changed",
+      "kind": "screenshot",
+      "profile": "dynamic-content",
+      "after_step_id": "demo.dynamic.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.dynamic.normalization.graph",
+      "kind": "screen-graph",
+      "profile": "dynamic-content",
+      "after_step_id": "demo.dynamic.launch",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.dynamic.snapshot.baseline",
+        "profile": "baseline",
+        "after_step_id": "demo.dynamic.launch",
+        "state_id": "demo.state.dynamic-content",
+        "required_node_ids": [
+          "demo.dynamic.clock",
+          "demo.dynamic.user_name",
+          "demo.dynamic.item_primary"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.dynamic.snapshot.changed",
+        "profile": "dynamic-content",
+        "after_step_id": "demo.dynamic.launch",
+        "state_id": "demo.state.dynamic-content",
+        "required_node_ids": [
+          "demo.dynamic.clock",
+          "demo.dynamic.user_name",
+          "demo.dynamic.item_primary"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [],
+      "blocked_actions": [],
+      "identity_expectations": [
+        {
+          "expectation_id": "demo.dynamic.identity.same-state",
+          "left_profile": "baseline",
+          "right_profile": "dynamic-content",
+          "left_state_id": "demo.state.dynamic-content",
+          "right_state_id": "demo.state.dynamic-content",
+          "outcome": "same-state",
+          "normalized_fields": [
+            "demo.dynamic.clock.text",
+            "demo.dynamic.user_name.text",
+            "demo.dynamic.item_primary.content"
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

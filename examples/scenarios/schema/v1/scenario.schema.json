@@ -1,0 +1,1308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/examples/scenarios/schema/v1/scenario.schema.json",
+  "title": "Vistrea Cross-platform Demo Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "title",
+    "purpose",
+    "required",
+    "coverage",
+    "platform_support",
+    "profiles",
+    "reset",
+    "stable_nodes",
+    "states",
+    "steps",
+    "expected_artifacts",
+    "expectations",
+    "extensions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/ScenarioId"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "coverage": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/CoverageKind"
+      }
+    },
+    "platform_support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ios",
+        "android"
+      ],
+      "properties": {
+        "ios": {
+          "$ref": "#/$defs/PlatformRequirement"
+        },
+        "android": {
+          "$ref": "#/$defs/PlatformRequirement"
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/ProfileId"
+      }
+    },
+    "reset": {
+      "$ref": "#/$defs/ResetContract"
+    },
+    "stable_nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/StableNode"
+      }
+    },
+    "states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/ExpectedState"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/ScenarioStep"
+      }
+    },
+    "expected_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/ExpectedArtifact"
+      }
+    },
+    "expectations": {
+      "$ref": "#/$defs/Expectations"
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/RequireSnapshotCoverage"
+    },
+    {
+      "$ref": "#/$defs/RequireTransientEventCoverage"
+    },
+    {
+      "$ref": "#/$defs/RequireExplorationCoverage"
+    },
+    {
+      "$ref": "#/$defs/RequireDesignTuningCoverage"
+    },
+    {
+      "$ref": "#/$defs/RequireValidationCoverage"
+    },
+    {
+      "$ref": "#/$defs/RequireBuildDiffCoverage"
+    }
+  ],
+  "$defs": {
+    "ScenarioId": {
+      "type": "string",
+      "pattern": "^(?:demo|ios|android)\\.[a-z0-9]+(?:[._-][a-z0-9]+)*$",
+      "maxLength": 160
+    },
+    "LocalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$",
+      "maxLength": 200
+    },
+    "ProfileId": {
+      "enum": [
+        "baseline",
+        "new-feature",
+        "design-regression",
+        "behavior-regression",
+        "accessibility-regression",
+        "dynamic-content"
+      ]
+    },
+    "CoverageKind": {
+      "enum": [
+        "snapshot",
+        "transient-event",
+        "exploration",
+        "design-tuning",
+        "validation",
+        "build-diff"
+      ]
+    },
+    "CapabilityId": {
+      "enum": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "automation.safety",
+        "exploration.graph",
+        "state-identity.normalization",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules",
+        "validation.build-diff"
+      ]
+    },
+    "PlatformRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "capabilities",
+        "limitations"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "required",
+            "optional",
+            "unsupported"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CapabilityId"
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "ResetContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_state_id",
+        "seed",
+        "external_services"
+      ],
+      "properties": {
+        "entry_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "external_services": {
+          "const": false
+        }
+      }
+    },
+    "StableNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "role"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "role": {
+          "enum": [
+            "button",
+            "text-field",
+            "label",
+            "list-item",
+            "container",
+            "dialog",
+            "banner",
+            "progress-indicator"
+          ]
+        }
+      }
+    },
+    "DynamicField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "field",
+        "normalization"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "field": {
+          "enum": [
+            "text",
+            "value",
+            "content"
+          ]
+        },
+        "normalization": {
+          "enum": [
+            "ignore-value",
+            "value-kind",
+            "stable-placeholder"
+          ]
+        }
+      }
+    },
+    "ExpectedState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state_id",
+        "kind",
+        "required_node_ids",
+        "dynamic_fields"
+      ],
+      "properties": {
+        "state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "kind": {
+          "enum": [
+            "screen",
+            "overlay",
+            "transient",
+            "loading",
+            "error"
+          ]
+        },
+        "required_node_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ScenarioId"
+          }
+        },
+        "dynamic_fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DynamicField"
+          }
+        }
+      }
+    },
+    "DriverAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "launch",
+            "tap",
+            "long_press",
+            "type_text",
+            "clear_text",
+            "swipe",
+            "back",
+            "dismiss",
+            "wait"
+          ]
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "input_alias": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "tap",
+                  "long_press",
+                  "type_text",
+                  "clear_text"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "target_node_id": true
+            },
+            "required": [
+              "target_node_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "type_text"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "input_alias": true
+            },
+            "required": [
+              "input_alias"
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "wait"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "duration_ms": true
+            },
+            "required": [
+              "duration_ms"
+            ]
+          }
+        }
+      ]
+    },
+    "ScenarioStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "action",
+        "from_state_id",
+        "to_state_id"
+      ],
+      "properties": {
+        "step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "action": {
+          "$ref": "#/$defs/DriverAction"
+        },
+        "from_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "to_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ProfileId"
+          }
+        }
+      }
+    },
+    "ExpectedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_key",
+        "kind",
+        "profile",
+        "comparison",
+        "required"
+      ],
+      "properties": {
+        "artifact_key": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "kind": {
+          "enum": [
+            "runtime-snapshot",
+            "screenshot",
+            "runtime-event-batch",
+            "key-frame",
+            "screen-graph",
+            "design-review-bundle",
+            "tuning-patch",
+            "tuning-application",
+            "validation-bundle",
+            "build-diff"
+          ]
+        },
+        "profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "after_step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "comparison": {
+          "enum": [
+            "protocol-canonical",
+            "semantic-normalized",
+            "platform-visual"
+          ]
+        },
+        "required": {
+          "const": true
+        }
+      }
+    },
+    "SnapshotExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectation_id",
+        "profile",
+        "after_step_id",
+        "state_id",
+        "required_node_ids",
+        "excluded_node_ids"
+      ],
+      "properties": {
+        "expectation_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "after_step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "required_node_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ScenarioId"
+          }
+        },
+        "excluded_node_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ScenarioId"
+          }
+        }
+      }
+    },
+    "TransientEventExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectation_id",
+        "profile",
+        "after_step_id",
+        "kind",
+        "target_node_id",
+        "order",
+        "deadline_ms",
+        "evidence"
+      ],
+      "properties": {
+        "expectation_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "after_step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "kind": {
+          "enum": [
+            "node_appeared",
+            "node_disappeared",
+            "layout_changed",
+            "state_changed",
+            "transient_presented",
+            "transient_dismissed",
+            "screen_changed"
+          ]
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "deadline_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "runtime-event-batch",
+              "key-frame"
+            ]
+          }
+        }
+      }
+    },
+    "ExpectedTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition_id",
+        "step_id",
+        "from_state_id",
+        "to_state_id",
+        "status"
+      ],
+      "properties": {
+        "transition_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "from_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "to_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "status": {
+          "enum": [
+            "observed",
+            "expected",
+            "unreachable"
+          ]
+        }
+      }
+    },
+    "BlockedAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "target_node_id",
+        "risk",
+        "reason_code"
+      ],
+      "properties": {
+        "step_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "risk": {
+          "enum": [
+            "dangerous",
+            "forbidden"
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]+$"
+        }
+      }
+    },
+    "IdentityExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectation_id",
+        "left_profile",
+        "right_profile",
+        "left_state_id",
+        "right_state_id",
+        "outcome",
+        "normalized_fields"
+      ],
+      "properties": {
+        "expectation_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "left_profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "right_profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "left_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "right_state_id": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "outcome": {
+          "enum": [
+            "same-state",
+            "different-state"
+          ]
+        },
+        "normalized_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "ExplorationExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_transitions",
+        "blocked_actions",
+        "identity_expectations"
+      ],
+      "properties": {
+        "expected_transitions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExpectedTransition"
+          }
+        },
+        "blocked_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BlockedAction"
+          }
+        },
+        "identity_expectations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IdentityExpectation"
+          }
+        }
+      }
+    },
+    "PropertyExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "property_name",
+        "source_value",
+        "design_value"
+      ],
+      "properties": {
+        "property_name": {
+          "enum": [
+            "font_size",
+            "text_color",
+            "spacing",
+            "corner_radius",
+            "alpha",
+            "border_width"
+          ]
+        },
+        "source_value": {
+          "$ref": "#/$defs/Scalar"
+        },
+        "design_value": {
+          "$ref": "#/$defs/Scalar"
+        }
+      }
+    },
+    "TuningChangeExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "property_name",
+        "source_value",
+        "preview_value",
+        "allowlisted"
+      ],
+      "properties": {
+        "property_name": {
+          "enum": [
+            "font_size",
+            "text_color",
+            "spacing",
+            "corner_radius",
+            "alpha",
+            "border_width"
+          ]
+        },
+        "source_value": {
+          "$ref": "#/$defs/Scalar"
+        },
+        "preview_value": {
+          "$ref": "#/$defs/Scalar"
+        },
+        "allowlisted": {
+          "const": true
+        }
+      }
+    },
+    "DesignTuningExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "design_reference_key",
+        "target_node_id",
+        "differences",
+        "patch",
+        "application",
+        "verification"
+      ],
+      "properties": {
+        "design_reference_key": {
+          "$ref": "#/$defs/LocalId"
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "differences": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/PropertyExpectation"
+          }
+        },
+        "patch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "artifact_key",
+            "changes",
+            "reversible",
+            "source_truth_unchanged",
+            "expected_reversion"
+          ],
+          "properties": {
+            "artifact_key": {
+              "$ref": "#/$defs/LocalId"
+            },
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/TuningChangeExpectation"
+              }
+            },
+            "reversible": {
+              "const": true
+            },
+            "source_truth_unchanged": {
+              "const": true
+            },
+            "expected_reversion": {
+              "const": "source-restored"
+            }
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active_artifact_key",
+            "reverted_artifact_key",
+            "expected_status_sequence",
+            "reversion_reason"
+          ],
+          "properties": {
+            "active_artifact_key": {
+              "$ref": "#/$defs/LocalId"
+            },
+            "reverted_artifact_key": {
+              "$ref": "#/$defs/LocalId"
+            },
+            "expected_status_sequence": {
+              "const": [
+                "active",
+                "reverted"
+              ]
+            },
+            "reversion_reason": {
+              "const": "explicit_revert"
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseline_profile",
+            "candidate_profile",
+            "expected_result",
+            "real_build_evidence_required"
+          ],
+          "properties": {
+            "baseline_profile": {
+              "$ref": "#/$defs/ProfileId"
+            },
+            "candidate_profile": {
+              "$ref": "#/$defs/ProfileId"
+            },
+            "expected_result": {
+              "enum": [
+                "verified",
+                "failed",
+                "pending"
+              ]
+            },
+            "real_build_evidence_required": {
+              "const": true
+            }
+          }
+        }
+      }
+    },
+    "FindingExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "category",
+        "severity",
+        "expectation"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+        },
+        "category": {
+          "enum": [
+            "structural",
+            "visual",
+            "behavioral",
+            "accessibility",
+            "design",
+            "build_diff",
+            "policy",
+            "custom"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error",
+            "critical"
+          ]
+        },
+        "target_node_id": {
+          "$ref": "#/$defs/ScenarioId"
+        },
+        "expectation": {
+          "enum": [
+            "present",
+            "absent"
+          ]
+        }
+      }
+    },
+    "ValidationExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_expectations"
+      ],
+      "properties": {
+        "profile_expectations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profile",
+              "findings"
+            ],
+            "properties": {
+              "profile": {
+                "$ref": "#/$defs/ProfileId"
+              },
+              "findings": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/FindingExpectation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "BuildDiffEntryExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "domains",
+        "target_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "added",
+            "removed",
+            "changed",
+            "regressed",
+            "improved"
+          ]
+        },
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "structural",
+              "visual",
+              "behavioral",
+              "accessibility",
+              "design",
+              "validation"
+            ]
+          }
+        },
+        "target_id": {
+          "$ref": "#/$defs/LocalId"
+        }
+      }
+    },
+    "BuildDiffSummaryExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "added",
+        "removed",
+        "changed",
+        "regressed",
+        "improved"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "regressed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "improved": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "BuildDiffExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_profile",
+        "candidate_profile",
+        "expected_entries",
+        "expected_summary"
+      ],
+      "properties": {
+        "baseline_profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "candidate_profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "expected_entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/BuildDiffEntryExpectation"
+          }
+        },
+        "expected_summary": {
+          "$ref": "#/$defs/BuildDiffSummaryExpectation"
+        }
+      }
+    },
+    "Expectations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "snapshots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/SnapshotExpectation"
+          }
+        },
+        "transient_events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/TransientEventExpectation"
+          }
+        },
+        "exploration": {
+          "$ref": "#/$defs/ExplorationExpectation"
+        },
+        "design_tuning": {
+          "$ref": "#/$defs/DesignTuningExpectation"
+        },
+        "validation": {
+          "$ref": "#/$defs/ValidationExpectation"
+        },
+        "build_diff": {
+          "$ref": "#/$defs/BuildDiffExpectation"
+        }
+      }
+    },
+    "Scalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "RequireSnapshotCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "snapshot"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "snapshots": true
+            },
+            "required": [
+              "snapshots"
+            ]
+          }
+        }
+      }
+    },
+    "RequireTransientEventCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "transient-event"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "transient_events": true
+            },
+            "required": [
+              "transient_events"
+            ]
+          }
+        }
+      }
+    },
+    "RequireExplorationCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "exploration"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "exploration": true
+            },
+            "required": [
+              "exploration"
+            ]
+          }
+        }
+      }
+    },
+    "RequireDesignTuningCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "design-tuning"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "design_tuning": true
+            },
+            "required": [
+              "design_tuning"
+            ]
+          }
+        }
+      }
+    },
+    "RequireValidationCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "validation"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "validation": true
+            },
+            "required": [
+              "validation"
+            ]
+          }
+        }
+      }
+    },
+    "RequireBuildDiffCoverage": {
+      "if": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "array",
+            "contains": {
+              "const": "build-diff"
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "expectations": {
+            "type": "object",
+            "properties": {
+              "build_diff": true
+            },
+            "required": [
+              "build_diff"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

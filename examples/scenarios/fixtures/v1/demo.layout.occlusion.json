@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.layout.occlusion",
+  "title": "Layout occlusion",
+  "purpose": "Expose a deterministic interactive node that is clipped and covered by another visible region.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "validation"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "validation.rules"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "validation.rules"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.layout-occlusion",
+    "seed": 1600,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.layout.covered_action",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.layout.occluding_panel",
+      "role": "container"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.layout-occlusion",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.layout.covered_action",
+        "demo.layout.occluding_panel"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.layout.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.layout-occlusion",
+      "to_state_id": "demo.state.layout-occlusion"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.layout.occlusion.snapshot",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.layout.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.layout.occlusion.screenshot",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.layout.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.layout.occlusion.validation",
+      "kind": "validation-bundle",
+      "profile": "baseline",
+      "after_step_id": "demo.layout.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.layout.snapshot.occluded",
+        "profile": "baseline",
+        "after_step_id": "demo.layout.launch",
+        "state_id": "demo.state.layout-occlusion",
+        "required_node_ids": [
+          "demo.layout.covered_action",
+          "demo.layout.occluding_panel"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "validation": {
+      "profile_expectations": [
+        {
+          "profile": "baseline",
+          "findings": [
+            {
+              "rule_id": "demo.rule.interactive-occluded",
+              "category": "structural",
+              "severity": "error",
+              "target_node_id": "demo.layout.covered_action",
+              "expectation": "present"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.safety.dangerous",
+  "title": "Dangerous action safety",
+  "purpose": "Expose a destructive-looking target that exploration must classify and block before provider execution.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "automation.safety",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "automation.safety",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.safety",
+    "seed": 2000,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.safety.delete_account",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.safety",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.safety.delete_account"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.safety.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.safety",
+      "to_state_id": "demo.state.safety"
+    },
+    {
+      "step_id": "demo.safety.attempt-delete",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.safety.delete_account"
+      },
+      "from_state_id": "demo.state.safety",
+      "to_state_id": "demo.state.safety"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.safety.dangerous.snapshot",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.safety.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.safety.dangerous.screenshot",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.safety.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.safety.dangerous.graph",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.safety.attempt-delete",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.safety.snapshot.before-block",
+        "profile": "baseline",
+        "after_step_id": "demo.safety.launch",
+        "state_id": "demo.state.safety",
+        "required_node_ids": [
+          "demo.safety.delete_account"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [],
+      "blocked_actions": [
+        {
+          "step_id": "demo.safety.attempt-delete",
+          "target_node_id": "demo.safety.delete_account",
+          "risk": "dangerous",
+          "reason_code": "destructive_action_requires_confirmation"
+        }
+      ],
+      "identity_expectations": []
+    }
+  },
+  "extensions": {}
+}

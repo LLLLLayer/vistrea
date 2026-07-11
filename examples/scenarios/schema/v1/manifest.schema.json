@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/examples/scenarios/schema/v1/manifest.schema.json",
+  "title": "Vistrea Cross-platform Demo Scenario Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "suite_id",
+    "protocol_version",
+    "required_platforms",
+    "platforms",
+    "profiles",
+    "scenarios",
+    "vertical_loops",
+    "extensions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "suite_id": {
+      "const": "vistrea.demo.shared"
+    },
+    "protocol_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "const": 1
+        },
+        "minor": {
+          "const": 0
+        }
+      }
+    },
+    "required_platforms": {
+      "const": [
+        "ios",
+        "android"
+      ]
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ios",
+        "android"
+      ],
+      "properties": {
+        "ios": {
+          "$ref": "#/$defs/PlatformStatus"
+        },
+        "android": {
+          "$ref": "#/$defs/PlatformStatus"
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "$ref": "#/$defs/Profile"
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 12,
+      "items": {
+        "$ref": "#/$defs/ScenarioEntry"
+      }
+    },
+    "vertical_loops": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/VerticalLoop"
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$"
+      }
+    }
+  },
+  "$defs": {
+    "CapabilityId": {
+      "enum": [
+        "runtime.snapshot",
+        "runtime.events",
+        "runtime.connection",
+        "automation.actions",
+        "automation.safety",
+        "exploration.graph",
+        "state-identity.normalization",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules",
+        "validation.build-diff"
+      ]
+    },
+    "CapabilityStatus": {
+      "enum": [
+        "planned",
+        "implemented",
+        "verified",
+        "limited",
+        "unsupported"
+      ]
+    },
+    "PlatformStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_status",
+        "initial_adapter",
+        "capabilities",
+        "limitations"
+      ],
+      "properties": {
+        "implementation_status": {
+          "enum": [
+            "planned",
+            "in-progress",
+            "verified",
+            "limited"
+          ]
+        },
+        "initial_adapter": {
+          "enum": [
+            "uikit",
+            "view-viewgroup"
+          ]
+        },
+        "capabilities": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/CapabilityStatus"
+          },
+          "propertyNames": {
+            "enum": [
+              "runtime.snapshot",
+              "runtime.events",
+              "runtime.connection",
+              "automation.actions",
+              "automation.safety",
+              "exploration.graph",
+              "state-identity.normalization",
+              "design.comparison",
+              "design.tuning",
+              "validation.rules",
+              "validation.build-diff"
+            ]
+          }
+        },
+        "limitations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "ProfileId": {
+      "enum": [
+        "baseline",
+        "new-feature",
+        "design-regression",
+        "behavior-regression",
+        "accessibility-regression",
+        "dynamic-content"
+      ]
+    },
+    "Profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "description",
+        "determinism"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "base_profile": {
+          "$ref": "#/$defs/ProfileId"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "determinism": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "data_source",
+            "clock",
+            "seed"
+          ],
+          "properties": {
+            "data_source": {
+              "const": "local-fixture"
+            },
+            "clock": {
+              "enum": [
+                "fixed",
+                "profile-seeded"
+              ]
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      }
+    },
+    "CoverageKind": {
+      "enum": [
+        "snapshot",
+        "transient-event",
+        "exploration",
+        "design-tuning",
+        "validation",
+        "build-diff"
+      ]
+    },
+    "ScenarioEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "file",
+        "required",
+        "coverage"
+      ],
+      "properties": {
+        "scenario_id": {
+          "type": "string",
+          "pattern": "^(?:demo|ios|android)\\.[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+        },
+        "file": {
+          "type": "string",
+          "pattern": "^fixtures/v1/[a-z0-9.-]+\\.json$"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "coverage": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CoverageKind"
+          }
+        }
+      }
+    },
+    "VerticalLoop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "loop_id",
+        "platform",
+        "status",
+        "scenario_ids",
+        "required_capabilities",
+        "artifact_keys",
+        "stages"
+      ],
+      "properties": {
+        "loop_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+        },
+        "platform": {
+          "enum": [
+            "ios",
+            "android"
+          ]
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "in-progress",
+            "verified"
+          ]
+        },
+        "scenario_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^demo\\."
+          }
+        },
+        "required_capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/CapabilityId"
+          }
+        },
+        "artifact_keys": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+          }
+        },
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "demo-app-launch",
+              "sdk-connect",
+              "snapshot-capture",
+              "host-receive",
+              "studio-render",
+              "data-persist",
+              "data-reopen"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

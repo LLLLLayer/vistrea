@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.version.new-feature",
+  "title": "New feature build diff",
+  "purpose": "Add one deterministic Screen State and Transition only in the new-feature profile.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration",
+    "build-diff"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph",
+        "validation.build-diff"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph",
+        "validation.build-diff"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "new-feature"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.feature-home",
+    "seed": 2100,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.feature.open_insights",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.feature.insights_card",
+      "role": "container"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.feature-home",
+      "kind": "screen",
+      "required_node_ids": [],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.feature-insights",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.feature.insights_card"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.feature.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.feature-home",
+      "to_state_id": "demo.state.feature-home"
+    },
+    {
+      "step_id": "demo.feature.open-insights",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.feature.open_insights"
+      },
+      "from_state_id": "demo.state.feature-home",
+      "to_state_id": "demo.state.feature-insights",
+      "profiles": [
+        "new-feature"
+      ]
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.version.new-feature.snapshot.baseline",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.feature.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.new-feature.snapshot.new-home",
+      "kind": "runtime-snapshot",
+      "profile": "new-feature",
+      "after_step_id": "demo.feature.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.new-feature.snapshot.insights",
+      "kind": "runtime-snapshot",
+      "profile": "new-feature",
+      "after_step_id": "demo.feature.open-insights",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.new-feature.screenshot.insights",
+      "kind": "screenshot",
+      "profile": "new-feature",
+      "after_step_id": "demo.feature.open-insights",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.new-feature.graph",
+      "kind": "screen-graph",
+      "profile": "new-feature",
+      "after_step_id": "demo.feature.open-insights",
+      "comparison": "semantic-normalized",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.new-feature.diff",
+      "kind": "build-diff",
+      "profile": "new-feature",
+      "after_step_id": "demo.feature.open-insights",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.feature.snapshot.baseline",
+        "profile": "baseline",
+        "after_step_id": "demo.feature.launch",
+        "state_id": "demo.state.feature-home",
+        "required_node_ids": [],
+        "excluded_node_ids": [
+          "demo.feature.open_insights"
+        ]
+      },
+      {
+        "expectation_id": "demo.feature.snapshot.new-home",
+        "profile": "new-feature",
+        "after_step_id": "demo.feature.launch",
+        "state_id": "demo.state.feature-home",
+        "required_node_ids": [
+          "demo.feature.open_insights"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.feature.snapshot.insights",
+        "profile": "new-feature",
+        "after_step_id": "demo.feature.open-insights",
+        "state_id": "demo.state.feature-insights",
+        "required_node_ids": [
+          "demo.feature.insights_card"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.transition.feature-open",
+          "step_id": "demo.feature.open-insights",
+          "from_state_id": "demo.state.feature-home",
+          "to_state_id": "demo.state.feature-insights",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    },
+    "build_diff": {
+      "baseline_profile": "baseline",
+      "candidate_profile": "new-feature",
+      "expected_entries": [
+        {
+          "kind": "added",
+          "domains": [
+            "structural"
+          ],
+          "target_id": "demo.state.feature-insights"
+        },
+        {
+          "kind": "added",
+          "domains": [
+            "behavioral"
+          ],
+          "target_id": "demo.transition.feature-open"
+        }
+      ],
+      "expected_summary": {
+        "total": 2,
+        "added": 2,
+        "removed": 0,
+        "changed": 0,
+        "regressed": 0,
+        "improved": 0
+      }
+    }
+  },
+  "extensions": {}
+}

@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.navigation.basic",
+  "title": "Basic navigation",
+  "purpose": "Expose deterministic Home, Catalog, and Detail states with forward and back transitions.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.home",
+    "seed": 1100,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.home.open_catalog",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.catalog.item_primary",
+      "role": "list-item"
+    },
+    {
+      "node_id": "demo.detail.open_form",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.home",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.home.open_catalog"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.catalog",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.catalog.item_primary"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.detail",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.detail.open_form"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.navigation.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.home",
+      "to_state_id": "demo.state.home"
+    },
+    {
+      "step_id": "demo.navigation.open-catalog",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.home.open_catalog"
+      },
+      "from_state_id": "demo.state.home",
+      "to_state_id": "demo.state.catalog"
+    },
+    {
+      "step_id": "demo.navigation.open-detail",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.catalog.item_primary"
+      },
+      "from_state_id": "demo.state.catalog",
+      "to_state_id": "demo.state.detail"
+    },
+    {
+      "step_id": "demo.navigation.back-catalog",
+      "action": {
+        "kind": "back"
+      },
+      "from_state_id": "demo.state.detail",
+      "to_state_id": "demo.state.catalog"
+    },
+    {
+      "step_id": "demo.navigation.back-home",
+      "action": {
+        "kind": "back"
+      },
+      "from_state_id": "demo.state.catalog",
+      "to_state_id": "demo.state.home"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.navigation.basic.snapshot.home",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.navigation.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.navigation.basic.screenshot.home",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.navigation.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.navigation.basic.snapshot.detail",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.navigation.open-detail",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.navigation.basic.graph",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.navigation.back-home",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.navigation.snapshot.home",
+        "profile": "baseline",
+        "after_step_id": "demo.navigation.launch",
+        "state_id": "demo.state.home",
+        "required_node_ids": [
+          "demo.home.open_catalog"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.navigation.snapshot.detail",
+        "profile": "baseline",
+        "after_step_id": "demo.navigation.open-detail",
+        "state_id": "demo.state.detail",
+        "required_node_ids": [
+          "demo.detail.open_form"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.transition.home-catalog",
+          "step_id": "demo.navigation.open-catalog",
+          "from_state_id": "demo.state.home",
+          "to_state_id": "demo.state.catalog",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.catalog-detail",
+          "step_id": "demo.navigation.open-detail",
+          "from_state_id": "demo.state.catalog",
+          "to_state_id": "demo.state.detail",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.detail-catalog",
+          "step_id": "demo.navigation.back-catalog",
+          "from_state_id": "demo.state.detail",
+          "to_state_id": "demo.state.catalog",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.catalog-home",
+          "step_id": "demo.navigation.back-home",
+          "from_state_id": "demo.state.catalog",
+          "to_state_id": "demo.state.home",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    }
+  },
+  "extensions": {}
+}

@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.version.regression",
+  "title": "Regression build verification",
+  "purpose": "Detect controlled visual and behavioral regressions and fail Review Issue re-verification against real build evidence.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "design-tuning",
+    "validation",
+    "build-diff"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules",
+        "validation.build-diff"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "design.comparison",
+        "design.tuning",
+        "validation.rules",
+        "validation.build-diff"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "design-regression",
+    "behavior-regression"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.regression-checkout",
+    "seed": 2200,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.regression.checkout_card",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.regression.checkout",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.regression.complete_label",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.regression-checkout",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.regression.checkout_card",
+        "demo.regression.checkout"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.regression-complete",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.regression.complete_label"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.regression.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.regression-checkout",
+      "to_state_id": "demo.state.regression-checkout"
+    },
+    {
+      "step_id": "demo.regression.checkout-success",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.regression.checkout"
+      },
+      "from_state_id": "demo.state.regression-checkout",
+      "to_state_id": "demo.state.regression-complete",
+      "profiles": [
+        "baseline",
+        "design-regression"
+      ]
+    },
+    {
+      "step_id": "demo.regression.checkout-broken",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.regression.checkout"
+      },
+      "from_state_id": "demo.state.regression-checkout",
+      "to_state_id": "demo.state.regression-checkout",
+      "profiles": [
+        "behavior-regression"
+      ]
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.version.regression.snapshot",
+      "kind": "runtime-snapshot",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.screenshot",
+      "kind": "screenshot",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.review",
+      "kind": "design-review-bundle",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.patch",
+      "kind": "tuning-patch",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.application.active",
+      "kind": "tuning-application",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.application.reverted",
+      "kind": "tuning-application",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.validation-design",
+      "kind": "validation-bundle",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.validation-baseline",
+      "kind": "validation-bundle",
+      "profile": "baseline",
+      "after_step_id": "demo.regression.checkout-success",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.validation-behavior",
+      "kind": "validation-bundle",
+      "profile": "behavior-regression",
+      "after_step_id": "demo.regression.checkout-broken",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.version.regression.diff",
+      "kind": "build-diff",
+      "profile": "design-regression",
+      "after_step_id": "demo.regression.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.regression.snapshot.design",
+        "profile": "design-regression",
+        "after_step_id": "demo.regression.launch",
+        "state_id": "demo.state.regression-checkout",
+        "required_node_ids": [
+          "demo.regression.checkout_card",
+          "demo.regression.checkout"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "design_tuning": {
+      "design_reference_key": "demo.regression.reference.checkout",
+      "target_node_id": "demo.regression.checkout_card",
+      "differences": [
+        {
+          "property_name": "text_color",
+          "source_value": "#777777FF",
+          "design_value": "#111111FF"
+        }
+      ],
+      "patch": {
+        "artifact_key": "demo.version.regression.patch",
+        "changes": [
+          {
+            "property_name": "text_color",
+            "source_value": "#777777FF",
+            "preview_value": "#111111FF",
+            "allowlisted": true
+          }
+        ],
+        "reversible": true,
+        "source_truth_unchanged": true,
+        "expected_reversion": "source-restored"
+      },
+      "application": {
+        "active_artifact_key": "demo.version.regression.application.active",
+        "reverted_artifact_key": "demo.version.regression.application.reverted",
+        "expected_status_sequence": [
+          "active",
+          "reverted"
+        ],
+        "reversion_reason": "explicit_revert"
+      },
+      "verification": {
+        "baseline_profile": "baseline",
+        "candidate_profile": "design-regression",
+        "expected_result": "failed",
+        "real_build_evidence_required": true
+      }
+    },
+    "validation": {
+      "profile_expectations": [
+        {
+          "profile": "baseline",
+          "findings": [
+            {
+              "rule_id": "demo.rule.checkout-design",
+              "category": "design",
+              "severity": "error",
+              "target_node_id": "demo.regression.checkout_card",
+              "expectation": "absent"
+            },
+            {
+              "rule_id": "demo.rule.checkout-transition",
+              "category": "behavioral",
+              "severity": "critical",
+              "target_node_id": "demo.regression.checkout",
+              "expectation": "absent"
+            }
+          ]
+        },
+        {
+          "profile": "design-regression",
+          "findings": [
+            {
+              "rule_id": "demo.rule.checkout-design",
+              "category": "design",
+              "severity": "error",
+              "target_node_id": "demo.regression.checkout_card",
+              "expectation": "present"
+            }
+          ]
+        },
+        {
+          "profile": "behavior-regression",
+          "findings": [
+            {
+              "rule_id": "demo.rule.checkout-transition",
+              "category": "behavioral",
+              "severity": "critical",
+              "target_node_id": "demo.regression.checkout",
+              "expectation": "present"
+            }
+          ]
+        }
+      ]
+    },
+    "build_diff": {
+      "baseline_profile": "baseline",
+      "candidate_profile": "design-regression",
+      "expected_entries": [
+        {
+          "kind": "regressed",
+          "domains": [
+            "visual",
+            "design",
+            "validation"
+          ],
+          "target_id": "demo.regression.checkout_card"
+        }
+      ],
+      "expected_summary": {
+        "total": 1,
+        "added": 0,
+        "removed": 0,
+        "changed": 0,
+        "regressed": 1,
+        "improved": 0
+      }
+    }
+  },
+  "extensions": {}
+}

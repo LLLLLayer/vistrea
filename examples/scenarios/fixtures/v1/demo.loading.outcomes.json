@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.loading.outcomes",
+  "title": "Loading outcomes",
+  "purpose": "Expose loading, success, failure, retry, and deterministic timeout behavior.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "transient-event",
+    "exploration",
+    "validation"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph",
+        "validation.rules"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "runtime.events",
+        "automation.actions",
+        "exploration.graph",
+        "validation.rules"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline",
+    "behavior-regression"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.loading-idle",
+    "seed": 1400,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.loading.start_success",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.loading.start_failure",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.loading.progress",
+      "role": "progress-indicator"
+    },
+    {
+      "node_id": "demo.loading.content",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.loading.error",
+      "role": "label"
+    },
+    {
+      "node_id": "demo.loading.retry",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.loading-idle",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.loading.start_success",
+        "demo.loading.start_failure"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.loading-active",
+      "kind": "loading",
+      "required_node_ids": [
+        "demo.loading.progress"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.loading-success",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.loading.content"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.loading-failure",
+      "kind": "error",
+      "required_node_ids": [
+        "demo.loading.error",
+        "demo.loading.retry"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.loading.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.loading-idle",
+      "to_state_id": "demo.state.loading-idle"
+    },
+    {
+      "step_id": "demo.loading.start-success",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.loading.start_success"
+      },
+      "from_state_id": "demo.state.loading-idle",
+      "to_state_id": "demo.state.loading-active"
+    },
+    {
+      "step_id": "demo.loading.finish-success",
+      "action": {
+        "kind": "wait",
+        "duration_ms": 500
+      },
+      "from_state_id": "demo.state.loading-active",
+      "to_state_id": "demo.state.loading-success",
+      "profiles": [
+        "baseline"
+      ]
+    },
+    {
+      "step_id": "demo.loading.timeout",
+      "action": {
+        "kind": "wait",
+        "duration_ms": 3000
+      },
+      "from_state_id": "demo.state.loading-active",
+      "to_state_id": "demo.state.loading-active",
+      "profiles": [
+        "behavior-regression"
+      ]
+    },
+    {
+      "step_id": "demo.loading.back-idle",
+      "action": {
+        "kind": "back"
+      },
+      "from_state_id": "demo.state.loading-success",
+      "to_state_id": "demo.state.loading-idle",
+      "profiles": [
+        "baseline"
+      ]
+    },
+    {
+      "step_id": "demo.loading.start-failure",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.loading.start_failure"
+      },
+      "from_state_id": "demo.state.loading-idle",
+      "to_state_id": "demo.state.loading-active",
+      "profiles": [
+        "baseline"
+      ]
+    },
+    {
+      "step_id": "demo.loading.finish-failure",
+      "action": {
+        "kind": "wait",
+        "duration_ms": 500
+      },
+      "from_state_id": "demo.state.loading-active",
+      "to_state_id": "demo.state.loading-failure",
+      "profiles": [
+        "baseline"
+      ]
+    },
+    {
+      "step_id": "demo.loading.retry",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.loading.retry"
+      },
+      "from_state_id": "demo.state.loading-failure",
+      "to_state_id": "demo.state.loading-active",
+      "profiles": [
+        "baseline"
+      ]
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.loading.outcomes.snapshot.active",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.start-success",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.screenshot.active",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.start-success",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.snapshot.failure",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.finish-failure",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.events",
+      "kind": "runtime-event-batch",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.finish-failure",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.key-frame",
+      "kind": "key-frame",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.start-success",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.graph",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.retry",
+      "comparison": "semantic-normalized",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.validation",
+      "kind": "validation-bundle",
+      "profile": "behavior-regression",
+      "after_step_id": "demo.loading.timeout",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.loading.outcomes.validation.baseline",
+      "kind": "validation-bundle",
+      "profile": "baseline",
+      "after_step_id": "demo.loading.finish-success",
+      "comparison": "protocol-canonical",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.loading.snapshot.active",
+        "profile": "baseline",
+        "after_step_id": "demo.loading.start-success",
+        "state_id": "demo.state.loading-active",
+        "required_node_ids": [
+          "demo.loading.progress"
+        ],
+        "excluded_node_ids": []
+      },
+      {
+        "expectation_id": "demo.loading.snapshot.failure",
+        "profile": "baseline",
+        "after_step_id": "demo.loading.finish-failure",
+        "state_id": "demo.state.loading-failure",
+        "required_node_ids": [
+          "demo.loading.error",
+          "demo.loading.retry"
+        ],
+        "excluded_node_ids": [
+          "demo.loading.progress"
+        ]
+      }
+    ],
+    "transient_events": [
+      {
+        "expectation_id": "demo.loading.event.progress-appeared",
+        "profile": "baseline",
+        "after_step_id": "demo.loading.start-success",
+        "kind": "node_appeared",
+        "target_node_id": "demo.loading.progress",
+        "order": 1,
+        "deadline_ms": 250,
+        "evidence": [
+          "runtime-event-batch",
+          "key-frame"
+        ]
+      },
+      {
+        "expectation_id": "demo.loading.event.progress-dismissed",
+        "profile": "baseline",
+        "after_step_id": "demo.loading.finish-success",
+        "kind": "node_disappeared",
+        "target_node_id": "demo.loading.progress",
+        "order": 2,
+        "deadline_ms": 750,
+        "evidence": [
+          "runtime-event-batch"
+        ]
+      },
+      {
+        "expectation_id": "demo.loading.event.error-appeared",
+        "profile": "baseline",
+        "after_step_id": "demo.loading.finish-failure",
+        "kind": "node_appeared",
+        "target_node_id": "demo.loading.error",
+        "order": 3,
+        "deadline_ms": 750,
+        "evidence": [
+          "runtime-event-batch"
+        ]
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.transition.loading-start",
+          "step_id": "demo.loading.start-success",
+          "from_state_id": "demo.state.loading-idle",
+          "to_state_id": "demo.state.loading-active",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.loading-success",
+          "step_id": "demo.loading.finish-success",
+          "from_state_id": "demo.state.loading-active",
+          "to_state_id": "demo.state.loading-success",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.loading-failure",
+          "step_id": "demo.loading.finish-failure",
+          "from_state_id": "demo.state.loading-active",
+          "to_state_id": "demo.state.loading-failure",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.transition.loading-retry",
+          "step_id": "demo.loading.retry",
+          "from_state_id": "demo.state.loading-failure",
+          "to_state_id": "demo.state.loading-active",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    },
+    "validation": {
+      "profile_expectations": [
+        {
+          "profile": "baseline",
+          "findings": [
+            {
+              "rule_id": "demo.rule.loading-timeout",
+              "category": "behavioral",
+              "severity": "error",
+              "target_node_id": "demo.loading.progress",
+              "expectation": "absent"
+            }
+          ]
+        },
+        {
+          "profile": "behavior-regression",
+          "findings": [
+            {
+              "rule_id": "demo.rule.loading-timeout",
+              "category": "behavioral",
+              "severity": "error",
+              "target_node_id": "demo.loading.progress",
+              "expectation": "present"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

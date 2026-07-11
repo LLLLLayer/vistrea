@@ -1,27 +1,53 @@
 # Cross-platform Demo Scenarios
 
-The planned iOS and Android Demo Apps must implement the same required Scenario IDs and semantic outcomes. Layout may follow native platform conventions, but stable node identity, state transitions, events, and expected validation behavior must remain comparable.
+This directory is the executable, platform-neutral acceptance contract for the Vistrea iOS and Android Demo Apps.
+
+It owns shared Scenario IDs, deterministic launch profiles, semantic checkpoints, required evidence, and normalized outcomes. It does not define native layouts or replace the canonical wire models under `protocol/`.
+
+## Contract layout
+
+```text
+examples/scenarios/
+├── README.md
+├── manifest.json
+├── validate.mjs
+├── schema/v1/
+│   ├── manifest.schema.json
+│   └── scenario.schema.json
+├── fixtures/v1/
+│   └── demo.*.json
+└── tests/
+    └── scenarios.test.mjs
+```
+
+- `manifest.json` freezes the required Scenario IDs and build profiles, records per-platform implementation and capability status, and defines vertical-loop acceptance slices.
+- `fixtures/v1/` describes platform-neutral reset, state, action, evidence, and result expectations for each shared scenario.
+- `schema/v1/` validates the shape of the manifest and fixtures with JSON Schema Draft 2020-12.
+- `validate.mjs` adds cross-file ownership, reference, coverage, artifact, platform-parity, and build-diff semantic checks.
+- `tests/` proves both the accepted suite and important failure boundaries.
 
 ## Required scenarios
 
-| Scenario ID | Purpose | Required evidence |
+| Scenario ID | Purpose | Executable coverage |
 |---|---|---|
-| `demo.navigation.basic` | Home, list, and detail navigation | Screen States and forward/back Transitions |
-| `demo.form.validation` | Text entry and validation error | Node state, text handling, error event |
-| `demo.transient.success` | Two-second success toast/banner | Appearance/disappearance events and key frame |
-| `demo.loading.outcomes` | Loading, success, failure, retry | Timed Events and multiple states |
-| `demo.modal.dialog` | Modal presentation and dismissal | Overlay state and dismissal Transition |
-| `demo.layout.occlusion` | Covered or clipped interactive node | Structural validation finding |
-| `demo.accessibility.defects` | Missing label and small hit area | Accessibility findings |
-| `demo.design.tuning` | Typography, color, spacing, and corner properties | Design comparison and reversible Tuning Patch |
-| `demo.dynamic.normalization` | Changing time, user, or list content | Stable Screen State identity |
-| `demo.safety.dangerous` | Destructive-looking action | Exploration policy block |
-| `demo.version.new-feature` | New screen and path in a later build profile | Graph and build diff |
-| `demo.version.regression` | Intentional visual or behavioral regression | Validation and Review Issue re-verification |
+| `demo.navigation.basic` | Home, list, detail, and back navigation | Snapshot and exploration graph |
+| `demo.form.validation` | Text entry and validation recovery | Snapshot, event, and exploration graph |
+| `demo.transient.success` | Two-second success feedback | Snapshot, Runtime Event Batch, and key frame |
+| `demo.loading.outcomes` | Loading, success, failure, retry, and timeout | Snapshot, events, graph, and validation |
+| `demo.modal.dialog` | Modal presentation and dismissal | Overlay Snapshot, events, and graph |
+| `demo.layout.occlusion` | Covered interactive node | Snapshot and structural finding |
+| `demo.accessibility.defects` | Missing label and small hit area | Snapshot and accessibility findings |
+| `demo.design.tuning` | Design comparison and reversible preview | Snapshot, Design Review Bundle, Tuning Patch, Tuning Application lifecycle, and validation |
+| `demo.dynamic.normalization` | Changing time, user, and list content | Snapshots and same-state identity expectation |
+| `demo.safety.dangerous` | Destructive-looking action | Snapshot and policy block without a Transition |
+| `demo.version.new-feature` | New screen and path | Graph and build diff |
+| `demo.version.regression` | Visual and behavioral regression | Review re-verification, validation, and build diff |
+
+All required fixtures declare iOS and Android support as required. Platform-specific scenarios may use namespaced IDs such as `ios.uikit.layer_mismatch` or `android.compose.semantics_merge`, but they cannot replace this shared set.
 
 ## Stable identity
 
-Shared semantic nodes use cross-platform stable IDs:
+Shared semantic nodes use logical cross-platform IDs, for example:
 
 ```text
 demo.home.open_catalog
@@ -33,24 +59,80 @@ demo.toast.success
 demo.design.preview_card
 ```
 
-Native runtime IDs remain separate and platform-specific.
+Native accessibility identifiers, UIKit classes, Android resource IDs, and TestTags remain adapter-owned. A platform implementation maps those native values to the shared semantic IDs; it must not add native-only fields to the shared fixture schema.
+
+## Determinism and artifacts
+
+Every scenario declares:
+
+- a reset state, local seed, and no external service dependency;
+- the build profiles on which its steps run;
+- stable nodes, semantic states, and deterministic driver steps;
+- logical artifact keys and the checkpoint that produces each artifact;
+- structured Snapshot, event, exploration, design/tuning, validation, or build-diff expectations.
+
+Design/tuning fixtures require both active and explicitly reverted `TuningApplication` artifacts. This proves the preview lifecycle separately from the versioned `TuningPatch` and keeps source-code truth unchanged.
+
+`after_step_id` identifies the checkpoint immediately after that deterministic driver step completes. Event `order` is contiguous within one profile. `deadline_ms` is the maximum monotonic elapsed time from the associated checkpoint; it includes capture tolerance, while an explicit `wait` step retains the scenario's logical duration.
+
+Artifact keys are stable acceptance handles, not content hashes. Protocol objects use canonical structured comparison, Screen Graphs use semantic normalization, and screenshots or key frames use platform-visual comparison. Native screenshots are not expected to be pixel-identical across iOS and Android.
 
 ## Build profiles
 
-Each Demo App implementation must support deterministic launch profiles rather than separate long-lived forks:
+The manifest defines exactly six deterministic profiles:
 
 - `baseline`: expected passing behavior;
 - `new-feature`: adds an intentional Screen State and path;
 - `design-regression`: changes reviewable visual properties;
 - `behavior-regression`: breaks an expected Transition or timing rule;
 - `accessibility-regression`: introduces controlled accessibility defects;
-- `dynamic-content`: changes values that state identity must normalize.
+- `dynamic-content`: changes values that Screen State identity must normalize.
 
-Every profile declares its expected graph, events, findings, and design comparison result in shared fixtures once the fixture schema is selected.
+Profiles use local fixture data and fixed or profile-seeded clocks. Native implementations select them through platform-appropriate launch configuration without changing their semantic meaning.
 
-## Platform parity
+## Platform status and capability reporting
 
-- Required scenarios must exist on both platforms.
-- Platform-only scenarios use namespaced IDs such as `ios.uikit.layer_mismatch` or `android.compose.semantics_merge`.
-- A platform implementation may report an explicit limitation instead of silently omitting required evidence.
-- Contract tests compare normalized results, not pixel-identical native UI.
+`manifest.json` is the current implementation-status source of truth for both Demo Apps. A platform capability moves from `planned` to `implemented` and then `verified` only when its native implementation and scenario evidence exist. Use `limited` plus an explicit limitation when a platform can provide only partial evidence; never silently omit a required scenario.
+
+Per-scenario `platform_support` describes required capabilities, not current implementation completion. The validator checks that both platforms are required and that every requested capability is declared by the platform status matrix.
+
+## First iOS vertical loop
+
+The manifest defines a planned `ios.first-snapshot-loop` acceptance slice using the shared `demo.navigation.basic` scenario. It requires the same logical Home Snapshot and screenshot to pass through:
+
+```text
+Demo App launch
+-> SDK connect
+-> Snapshot capture
+-> Host receive
+-> Studio render
+-> Data persist
+-> Data reopen
+```
+
+This records coverage for the first iOS SDK-to-Data loop without making UIKit fields canonical. Its status remains `planned` until real native, Host, Studio, and persistence evidence verifies every stage.
+
+## Validation
+
+Install the root dependencies, then run the lane directly:
+
+```bash
+pnpm install --frozen-lockfile
+node examples/scenarios/validate.mjs
+node --test examples/scenarios/tests/*.test.mjs
+```
+
+The validator compiles both schemas with strict Ajv settings, validates every manifest-owned fixture, rejects fixture drift, checks all local references, recomputes build-diff summaries, verifies deterministic artifact coverage, and enforces the first iOS vertical-loop contract.
+
+## Native implementation handoff
+
+An iOS or Android scenario is ready for verification only when the native Demo App:
+
+1. resets to the declared state and seed without a remote dependency;
+2. maps native nodes to every required shared semantic ID;
+3. executes the declared profile-specific steps through real device interaction where applicable;
+4. emits every required logical artifact at its checkpoint;
+5. satisfies structured expectations after platform normalization;
+6. records any explicit limitation instead of omitting evidence.
+
+Contract tests compare normalized semantic outcomes, not private platform models or pixel-identical layouts.
