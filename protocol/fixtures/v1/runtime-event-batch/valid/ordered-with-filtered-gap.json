@@ -1,0 +1,28 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+  "first_sequence": 10,
+  "last_sequence": 12,
+  "events": [
+    {
+      "event_id": "event_019f0000-0000-7000-8000-000000000010",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+      "sequence": 10,
+      "time": { "wall_time": "2026-07-12T00:00:10Z", "monotonic_offset_ns": 10000000 },
+      "kind": "node_appeared",
+      "extensions": {}
+    },
+    {
+      "event_id": "event_019f0000-0000-7000-8000-000000000012",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+      "sequence": 12,
+      "time": { "wall_time": "2026-07-12T00:00:12Z", "monotonic_offset_ns": 12000000 },
+      "kind": "state_changed",
+      "extensions": {}
+    }
+  ],
+  "dropped_event_count": 0,
+  "extensions": {}
+}

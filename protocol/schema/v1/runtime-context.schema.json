@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/runtime-context.schema.json",
+  "title": "Vistrea Runtime Context",
+  "$defs": {
+    "DeviceDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "model", "os_version", "extensions"],
+      "properties": {
+        "device_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "kind": { "enum": ["simulator", "emulator", "real_device"] },
+        "model": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "os_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "RuntimeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id",
+        "application_id",
+        "build_id",
+        "application_version",
+        "platform",
+        "device",
+        "environment_id",
+        "locale",
+        "theme",
+        "text_scale",
+        "sdk_version",
+        "adapter_versions",
+        "extensions"
+      ],
+      "properties": {
+        "project_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "application_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "build_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "application_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "source_git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$" },
+        "platform": { "enum": ["ios", "android"] },
+        "device": { "$ref": "#/$defs/DeviceDescriptor" },
+        "environment_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "account_profile_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "feature_context_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "locale": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "theme": { "enum": ["light", "dark", "system", "custom"] },
+        "text_scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+        "sdk_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "adapter_versions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9._-]*$" },
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 64 }
+        },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  },
+  "$ref": "#/$defs/RuntimeContext"
+}

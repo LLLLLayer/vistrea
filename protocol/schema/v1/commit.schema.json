@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/commit.schema.json",
+  "title": "Vistrea Commit and Version Types",
+  "$defs": {
+    "CommitId": {
+      "type": "string",
+      "pattern": "^commit:sha256:[0-9a-f]{64}$"
+    },
+    "RefName": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 255,
+      "pattern": "^(?:users|teams|builds|baselines|releases)/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$"
+    },
+    "CommitRoots": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime_graph": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "wiki": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "design": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "reviews": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "validation": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" }
+      }
+    },
+    "CommitManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "parents",
+        "created_at",
+        "author_id",
+        "message",
+        "roots",
+        "object_hashes",
+        "extensions"
+      ],
+      "properties": {
+        "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+        "parents": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/CommitId" }
+        },
+        "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+        "author_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "build_context": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" },
+        "roots": { "$ref": "#/$defs/CommitRoots" },
+        "object_hashes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "Commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit_id", "manifest"],
+      "properties": {
+        "commit_id": { "$ref": "#/$defs/CommitId" },
+        "manifest": { "$ref": "#/$defs/CommitManifest" }
+      }
+    },
+    "Ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "commit_id", "revision"],
+      "properties": {
+        "name": { "$ref": "#/$defs/RefName" },
+        "commit_id": { "$ref": "#/$defs/CommitId" },
+        "revision": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" }
+      }
+    },
+    "WorkingSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["working_set_id", "base_commit_id", "created_at", "updated_at", "changes"],
+      "properties": {
+        "working_set_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "base_commit_id": { "$ref": "#/$defs/CommitId" },
+        "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+        "updated_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+        "changes": {
+          "type": "array",
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef" }
+        }
+      }
+    }
+  },
+  "$ref": "#/$defs/Commit"
+}

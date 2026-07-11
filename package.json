@@ -1,0 +1,20 @@
+{
+  "name": "vistrea",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.14.0 <25"
+  },
+  "description": "Local-first runtime UI knowledge, design review, exploration, and verification platform.",
+  "scripts": {
+    "protocol:validate": "node tools/protocol/validate-fixtures.mjs",
+    "test:contract": "node --test tests/contract/*.test.mjs",
+    "check": "pnpm protocol:validate && pnpm test:contract"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

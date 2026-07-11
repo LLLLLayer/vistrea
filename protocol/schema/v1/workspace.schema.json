@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/workspace.schema.json",
+  "title": "Vistrea Workspace Manifest",
+  "$defs": {
+    "SourceRepositoryRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri"],
+      "properties": {
+        "uri": { "type": "string", "format": "uri" },
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$" }
+      }
+    },
+    "WorkspaceManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "protocol_version",
+        "created_at",
+        "project_id",
+        "project_name",
+        "genesis_commit_id",
+        "default_ref_name",
+        "extensions"
+      ],
+      "properties": {
+        "workspace_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+        "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+        "project_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "project_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "genesis_commit_id": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/CommitId" },
+        "default_ref_name": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/RefName" },
+        "source_repository": { "$ref": "#/$defs/SourceRepositoryRef" },
+        "remote_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  },
+  "$ref": "#/$defs/WorkspaceManifest"
+}

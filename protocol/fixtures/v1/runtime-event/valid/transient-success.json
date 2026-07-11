@@ -1,0 +1,19 @@
+{
+  "event_id": "event_019f0000-0000-7000-8000-000000000001",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+  "sequence": 1,
+  "time": {
+    "wall_time": "2026-07-12T00:00:01.100Z",
+    "monotonic_offset_ns": 2200000
+  },
+  "kind": "transient_presented",
+  "node_id": "node_019f0000-0000-7000-8000-000000000012",
+  "stable_id": "demo.toast.success",
+  "snapshot_id": "snapshot_019f0000-0000-7000-8000-000000000002",
+  "duration_ms": 2000,
+  "payload": {
+    "text": "Saved successfully"
+  },
+  "extensions": {}
+}

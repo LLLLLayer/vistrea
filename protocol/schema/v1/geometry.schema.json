@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/geometry.schema.json",
+  "title": "Vistrea Geometry",
+  "$defs": {
+    "Point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "Size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      }
+    },
+    "PixelSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" },
+        "height": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" }
+      }
+    },
+    "Rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      }
+    },
+    "NonEmptyRect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "Insets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["top", "left", "bottom", "right"],
+      "properties": {
+        "top": { "type": "number", "minimum": 0 },
+        "left": { "type": "number", "minimum": 0 },
+        "bottom": { "type": "number", "minimum": 0 },
+        "right": { "type": "number", "minimum": 0 }
+      }
+    },
+    "DisplayGeometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinate_unit",
+        "origin",
+        "logical_size",
+        "pixel_size",
+        "pixel_scale_x",
+        "pixel_scale_y",
+        "orientation",
+        "safe_area",
+        "geometry_revision",
+        "extensions"
+      ],
+      "properties": {
+        "coordinate_unit": { "const": "logical_point" },
+        "origin": { "const": "top_left" },
+        "logical_size": { "$ref": "#/$defs/Size" },
+        "pixel_size": { "$ref": "#/$defs/PixelSize" },
+        "pixel_scale_x": { "type": "number", "exclusiveMinimum": 0 },
+        "pixel_scale_y": { "type": "number", "exclusiveMinimum": 0 },
+        "orientation": {
+          "enum": ["portrait", "portrait_upside_down", "landscape_left", "landscape_right"]
+        },
+        "safe_area": { "$ref": "#/$defs/Insets" },
+        "geometry_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  }
+}

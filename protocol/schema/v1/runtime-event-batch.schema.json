@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+  "title": "Vistrea Runtime Event Batch",
+  "$ref": "https://vistrea.dev/schema/v1/runtime-event.schema.json#/$defs/RuntimeEventBatch"
+}

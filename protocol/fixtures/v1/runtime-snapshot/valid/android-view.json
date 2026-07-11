@@ -1,0 +1,119 @@
+{
+  "snapshot_id": "snapshot_019f0000-0000-7000-8000-000000000003",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "captured_at": {
+    "wall_time": "2026-07-12T00:00:02Z",
+    "monotonic_offset_ns": 3000000
+  },
+  "runtime_context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_id": "build_019f0000-0000-7000-8000-000000000002",
+    "application_version": "1.0.0",
+    "source_git_sha": "0123456789abcdef0123456789abcdef01234567",
+    "platform": "android",
+    "device": {
+      "device_id": "device_019f0000-0000-7000-8000-000000000002",
+      "kind": "emulator",
+      "model": "Demo Android",
+      "os_version": "15",
+      "extensions": {}
+    },
+    "environment_id": "local",
+    "account_profile_id": "demo-user",
+    "feature_context_refs": ["baseline"],
+    "locale": "en-US",
+    "theme": "light",
+    "text_scale": 1,
+    "sdk_version": "0.1.0",
+    "adapter_versions": { "view": "0.1.0" },
+    "extensions": {}
+  },
+  "display": {
+    "coordinate_unit": "logical_point",
+    "origin": "top_left",
+    "logical_size": { "width": 360, "height": 800 },
+    "pixel_size": { "width": 1080, "height": 2400 },
+    "pixel_scale_x": 3,
+    "pixel_scale_y": 3,
+    "orientation": "portrait",
+    "safe_area": { "top": 24, "left": 0, "bottom": 24, "right": 0 },
+    "geometry_revision": "display-1",
+    "extensions": {}
+  },
+  "trees": [
+    {
+      "tree_id": "tree_019f0000-0000-7000-8000-000000000003",
+      "kind": "view",
+      "root_node_ids": ["node_019f0000-0000-7000-8000-000000000020"],
+      "payload": {
+        "inline_nodes": [
+          {
+            "node_id": "node_019f0000-0000-7000-8000-000000000020",
+            "stable_id": "demo.home.root",
+            "child_ids": ["node_019f0000-0000-7000-8000-000000000021"],
+            "native_type": "android.widget.FrameLayout",
+            "role": "container",
+            "frame": { "x": 0, "y": 0, "width": 360, "height": 800 },
+            "content": {},
+            "state": { "visible": true, "enabled": true },
+            "actions": [],
+            "capture_limitations": [],
+            "related_nodes": [],
+            "extensions": { "android.view.resource_id": "demo_home_root" }
+          },
+          {
+            "node_id": "node_019f0000-0000-7000-8000-000000000021",
+            "stable_id": "demo.home.open_catalog",
+            "parent_id": "node_019f0000-0000-7000-8000-000000000020",
+            "child_ids": [],
+            "native_type": "com.google.android.material.button.MaterialButton",
+            "role": "button",
+            "frame": { "x": 16, "y": 104, "width": 328, "height": 48 },
+            "visible_rect": { "x": 16, "y": 104, "width": 328, "height": 48 },
+            "hit_rect": { "x": 16, "y": 104, "width": 328, "height": 48 },
+            "content": { "text": "Open catalog", "content_description": "Open catalog" },
+            "state": { "visible": true, "enabled": true },
+            "actions": ["tap"],
+            "visual": {
+              "alpha": 1,
+              "background_color": { "red": 0.1, "green": 0.3, "blue": 0.9, "alpha": 1, "color_space": "srgb" },
+              "corner_radius": 12
+            },
+            "accessibility": { "label": "Open catalog", "role": "button", "hidden": false },
+            "source_context": { "route": "demo/home", "controller": "DemoHomeActivity", "component": "PrimaryButton" },
+            "capture_limitations": [],
+            "related_nodes": [],
+            "extensions": { "android.view.resource_id": "open_catalog" }
+          }
+        ]
+      },
+      "capture_limitations": [],
+      "extensions": {}
+    }
+  ],
+  "screenshot": {
+    "object": {
+      "hash": "sha256:ceb0b1ee67725b7d1542f913e402041229da6126ea517c44758c21734fef9994",
+      "media_type": "image/png",
+      "byte_size": 16,
+      "compression": "none",
+      "logical_name": "android-home.png",
+      "extensions": {}
+    },
+    "capture_started_at": { "wall_time": "2026-07-12T00:00:02Z", "monotonic_offset_ns": 2900000 },
+    "capture_finished_at": { "wall_time": "2026-07-12T00:00:02.010Z", "monotonic_offset_ns": 3100000 },
+    "tree_skew_ms": 1,
+    "coverage": { "x": 0, "y": 0, "width": 360, "height": 800 },
+    "pixel_size": { "width": 1080, "height": 2400 },
+    "system_chrome": "included",
+    "color_space": "srgb",
+    "extensions": {}
+  },
+  "capabilities": {
+    "names": ["runtime.snapshot", "runtime.events", "design.tuning"],
+    "extensions": {}
+  },
+  "capture_limitations": [],
+  "extensions": {}
+}

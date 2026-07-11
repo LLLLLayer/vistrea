@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
+  "title": "Vistrea Object Integrity Fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["object", "payload_base64"],
+  "properties": {
+    "object": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+    "payload_base64": {
+      "type": "string",
+      "contentEncoding": "base64"
+    }
+  }
+}

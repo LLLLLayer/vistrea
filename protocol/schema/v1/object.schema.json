@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/object.schema.json",
+  "title": "Vistrea Object Reference",
+  "$defs": {
+    "EncryptionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id"],
+      "properties": {
+        "algorithm": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "key_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "ObjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "media_type", "byte_size", "compression", "extensions"],
+      "properties": {
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9.+-]+/[a-z0-9.+-]+$"
+        },
+        "byte_size": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "decoded_byte_size": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "compression": { "enum": ["none", "gzip", "zstd"] },
+        "encryption": { "$ref": "#/$defs/EncryptionRef" },
+        "redaction_profile": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "logical_name": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  },
+  "$ref": "#/$defs/ObjectRef"
+}

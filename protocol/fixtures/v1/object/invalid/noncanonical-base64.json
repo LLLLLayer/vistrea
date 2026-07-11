@@ -1,0 +1,12 @@
+{
+  "object": {
+    "hash": "sha256:b0cd09405ae15f1cfb3f4b291002921832c81e26ed7f308c56b5c1eb5a791de5",
+    "media_type": "text/plain",
+    "byte_size": 7,
+    "decoded_byte_size": 7,
+    "compression": "none",
+    "logical_name": "vistrea.txt",
+    "extensions": {}
+  },
+  "payload_base64": "Vmlz dHJlYQ=="
+}

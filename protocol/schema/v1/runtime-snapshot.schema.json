@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+  "title": "Vistrea Runtime Snapshot",
+  "$defs": {
+    "ScreenshotEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "object",
+        "capture_started_at",
+        "capture_finished_at",
+        "tree_skew_ms",
+        "coverage",
+        "pixel_size",
+        "system_chrome",
+        "extensions"
+      ],
+      "properties": {
+        "object": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "capture_started_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime" },
+        "capture_finished_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime" },
+        "tree_skew_ms": { "type": "number", "minimum": 0 },
+        "coverage": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/NonEmptyRect" },
+        "pixel_size": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/PixelSize" },
+        "system_chrome": { "enum": ["included", "excluded", "partial", "unknown"] },
+        "color_space": { "enum": ["srgb", "display_p3", "unknown"] },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "EventWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_epoch_id"],
+      "properties": {
+        "event_epoch_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "first_sequence": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "last_sequence": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "dropped_event_count": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" }
+      }
+    },
+    "RuntimeSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_id",
+        "protocol_version",
+        "captured_at",
+        "runtime_context",
+        "display",
+        "trees",
+        "capabilities",
+        "capture_limitations",
+        "extensions"
+      ],
+      "properties": {
+        "snapshot_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+        "captured_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime" },
+        "runtime_context": { "$ref": "https://vistrea.dev/schema/v1/runtime-context.schema.json#/$defs/RuntimeContext" },
+        "display": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/DisplayGeometry" },
+        "trees": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "https://vistrea.dev/schema/v1/ui-node.schema.json#/$defs/UiTree" }
+        },
+        "screenshot": { "$ref": "#/$defs/ScreenshotEvidence" },
+        "event_window": { "$ref": "#/$defs/EventWindow" },
+        "capabilities": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet" },
+        "capture_limitations": {
+          "type": "array",
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CaptureLimitation" }
+        },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  },
+  "$ref": "#/$defs/RuntimeSnapshot"
+}

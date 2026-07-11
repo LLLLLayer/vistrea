@@ -1,0 +1,9 @@
+{
+  "names": ["runtime.snapshot"],
+  "extensions": {
+    "com.example.future_capability": {
+      "enabled": true,
+      "configuration": "demo"
+    }
+  }
+}

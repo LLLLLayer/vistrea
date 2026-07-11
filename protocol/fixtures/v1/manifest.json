@@ -1,0 +1,230 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "fixtures": [
+    {
+      "path": "runtime-snapshot/valid/minimal.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-snapshot"
+    },
+    {
+      "path": "runtime-snapshot/valid/ios-uikit.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-snapshot"
+    },
+    {
+      "path": "runtime-snapshot/valid/android-view.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-snapshot"
+    },
+    {
+      "path": "runtime-snapshot/valid/partial-screenshot.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-snapshot"
+    },
+    {
+      "path": "runtime-event/valid/transient-success.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-event"
+    },
+    {
+      "path": "runtime-event-batch/valid/ordered-with-filtered-gap.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-event-batch"
+    },
+    {
+      "path": "runtime-event-batch/valid/all-dropped.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "runtime-event-batch"
+    },
+    {
+      "path": "object/valid/plain-text.json",
+      "schema_id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "object-fixture"
+    },
+    {
+      "path": "workspace/valid/local.json",
+      "schema_id": "https://vistrea.dev/schema/v1/workspace.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "workspace"
+    },
+    {
+      "path": "working-set/valid/after-genesis.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "commit/valid/initial.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "commit"
+    },
+    {
+      "path": "ref/valid/team-main.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Ref",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "compatibility/namespaced-extension.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
+      "expectation": "compatibility-valid"
+    },
+    {
+      "path": "compatibility/higher-minor-snapshot.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "compatibility-valid",
+      "semantic_kind": "runtime-snapshot"
+    },
+    {
+      "path": "json/invalid/duplicate-key.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
+      "expectation": "json-invalid",
+      "expected_json_codes": ["duplicate_json_key"]
+    },
+    {
+      "path": "json/invalid/unsafe-integer.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
+      "expectation": "json-invalid",
+      "expected_json_codes": ["unsafe_json_integer"]
+    },
+    {
+      "path": "json/invalid/lone-surrogate.json",
+      "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
+      "expectation": "json-invalid",
+      "expected_json_codes": ["invalid_unicode_scalar"]
+    },
+    {
+      "path": "ref/invalid/empty-segment.json",
+      "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Ref",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "pattern", "instance_path": "/name" }
+      ]
+    },
+    {
+      "path": "runtime-snapshot/invalid/missing-protocol-version.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "protocol_version" }
+      ]
+    },
+    {
+      "path": "runtime-snapshot/invalid/unknown-core-field.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "schema-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_schema_errors": [
+        { "keyword": "additionalProperties", "instance_path": "", "additional_property": "unexpected" }
+      ]
+    },
+    {
+      "path": "runtime-event-batch/invalid/missing-extensions.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "schema-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "extensions" }
+      ]
+    },
+    {
+      "path": "runtime-snapshot/invalid/duplicate-node-id.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["duplicate_node_id"]
+    },
+    {
+      "path": "runtime-snapshot/invalid/dangling-child-reference.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["dangling_child_reference"]
+    },
+    {
+      "path": "runtime-snapshot/invalid/tree-cycle.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["tree_cycle"]
+    },
+    {
+      "path": "runtime-snapshot/invalid/display-scale-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["display_scale_mismatch"]
+    },
+    {
+      "path": "runtime-snapshot/invalid/screenshot-pixel-size-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["screenshot_pixel_size_mismatch"]
+    },
+    {
+      "path": "runtime-snapshot/invalid/object-tree-unresolved.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-snapshot",
+      "expected_semantic_codes": ["tree_payload_unresolved"]
+    },
+    {
+      "path": "runtime-event-batch/invalid/reversed-range.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_semantic_codes": ["event_batch_range_invalid"]
+    },
+    {
+      "path": "runtime-event-batch/invalid/epoch-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_semantic_codes": ["event_batch_epoch_mismatch"]
+    },
+    {
+      "path": "runtime-event-batch/invalid/non-increasing.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_semantic_codes": ["event_batch_order_invalid"]
+    },
+    {
+      "path": "runtime-event-batch/invalid/out-of-range.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_semantic_codes": ["event_batch_sequence_out_of_range"]
+    },
+    {
+      "path": "runtime-event-batch/invalid/dropped-count-overflow.json",
+      "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "runtime-event-batch",
+      "expected_semantic_codes": ["event_batch_drop_count_exceeds_range"]
+    },
+    {
+      "path": "object/invalid/hash-mismatch.json",
+      "schema_id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "object-fixture",
+      "expected_semantic_codes": ["object_hash_mismatch"]
+    },
+    {
+      "path": "object/invalid/noncanonical-base64.json",
+      "schema_id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "object-fixture",
+      "expected_semantic_codes": ["object_payload_invalid_base64"]
+    }
+  ]
+}

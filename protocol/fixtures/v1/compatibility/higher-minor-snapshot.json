@@ -1,0 +1,68 @@
+{
+  "snapshot_id": "snapshot_019f0000-0000-7000-8000-000000000301",
+  "protocol_version": { "major": 1, "minor": 1 },
+  "captured_at": { "wall_time": "2026-07-12T00:03:01Z" },
+  "runtime_context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_id": "build_019f0000-0000-7000-8000-000000000001",
+    "application_version": "1.1.0",
+    "platform": "android",
+    "device": {
+      "kind": "emulator",
+      "model": "Demo Android",
+      "os_version": "16",
+      "extensions": {}
+    },
+    "environment_id": "local",
+    "locale": "en-US",
+    "theme": "light",
+    "text_scale": 1,
+    "sdk_version": "0.2.0",
+    "adapter_versions": { "view": "0.2.0" },
+    "extensions": { "dev.vistrea.future_runtime": { "mode": "preview" } }
+  },
+  "display": {
+    "coordinate_unit": "logical_point",
+    "origin": "top_left",
+    "logical_size": { "width": 360, "height": 800 },
+    "pixel_size": { "width": 1080, "height": 2400 },
+    "pixel_scale_x": 3,
+    "pixel_scale_y": 3,
+    "orientation": "portrait",
+    "safe_area": { "top": 24, "left": 0, "bottom": 24, "right": 0 },
+    "geometry_revision": "display-1",
+    "extensions": {}
+  },
+  "trees": [
+    {
+      "tree_id": "tree_019f0000-0000-7000-8000-000000000301",
+      "kind": "semantic",
+      "root_node_ids": ["node_019f0000-0000-7000-8000-000000000301"],
+      "payload": {
+        "inline_nodes": [
+          {
+            "node_id": "node_019f0000-0000-7000-8000-000000000301",
+            "child_ids": [],
+            "native_type": "FutureView",
+            "role": "container",
+            "content": {},
+            "state": {},
+            "actions": [],
+            "capture_limitations": [],
+            "related_nodes": [],
+            "extensions": { "dev.vistrea.future_node": { "value": true } }
+          }
+        ]
+      },
+      "capture_limitations": [],
+      "extensions": {}
+    }
+  ],
+  "capabilities": {
+    "names": ["runtime.snapshot", "dev.vistrea.future_feature"],
+    "extensions": { "dev.vistrea.future_capability": { "level": 1 } }
+  },
+  "capture_limitations": [],
+  "extensions": { "dev.vistrea.future_snapshot": { "enabled": true } }
+}

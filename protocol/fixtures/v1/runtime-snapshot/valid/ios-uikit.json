@@ -1,0 +1,125 @@
+{
+  "snapshot_id": "snapshot_019f0000-0000-7000-8000-000000000002",
+  "protocol_version": { "major": 1, "minor": 0 },
+  "captured_at": {
+    "wall_time": "2026-07-12T00:00:01Z",
+    "monotonic_offset_ns": 2000000
+  },
+  "runtime_context": {
+    "project_id": "project_019f0000-0000-7000-8000-000000000001",
+    "application_id": "dev.vistrea.demo",
+    "build_id": "build_019f0000-0000-7000-8000-000000000001",
+    "application_version": "1.0.0",
+    "source_git_sha": "0123456789abcdef0123456789abcdef01234567",
+    "platform": "ios",
+    "device": {
+      "device_id": "device_019f0000-0000-7000-8000-000000000001",
+      "kind": "simulator",
+      "model": "Demo iPhone",
+      "os_version": "18.0",
+      "extensions": {}
+    },
+    "environment_id": "local",
+    "account_profile_id": "demo-user",
+    "feature_context_refs": ["baseline"],
+    "locale": "en-US",
+    "theme": "light",
+    "text_scale": 1,
+    "sdk_version": "0.1.0",
+    "adapter_versions": { "uikit": "0.1.0" },
+    "extensions": {}
+  },
+  "display": {
+    "coordinate_unit": "logical_point",
+    "origin": "top_left",
+    "logical_size": { "width": 390, "height": 844 },
+    "pixel_size": { "width": 1170, "height": 2532 },
+    "pixel_scale_x": 3,
+    "pixel_scale_y": 3,
+    "orientation": "portrait",
+    "safe_area": { "top": 59, "left": 0, "bottom": 34, "right": 0 },
+    "geometry_revision": "display-1",
+    "extensions": {}
+  },
+  "trees": [
+    {
+      "tree_id": "tree_019f0000-0000-7000-8000-000000000002",
+      "kind": "view",
+      "root_node_ids": ["node_019f0000-0000-7000-8000-000000000010"],
+      "payload": {
+        "inline_nodes": [
+          {
+            "node_id": "node_019f0000-0000-7000-8000-000000000010",
+            "stable_id": "demo.home.root",
+            "child_ids": ["node_019f0000-0000-7000-8000-000000000011"],
+            "native_type": "DemoHomeView",
+            "role": "container",
+            "frame": { "x": 0, "y": 0, "width": 390, "height": 844 },
+            "content": {},
+            "state": { "visible": true, "enabled": true },
+            "actions": [],
+            "capture_limitations": [],
+            "related_nodes": [],
+            "extensions": { "ios.uikit.window_level": 0 }
+          },
+          {
+            "node_id": "node_019f0000-0000-7000-8000-000000000011",
+            "stable_id": "demo.home.open_catalog",
+            "parent_id": "node_019f0000-0000-7000-8000-000000000010",
+            "child_ids": [],
+            "native_type": "UIButton",
+            "role": "button",
+            "frame": { "x": 24, "y": 120, "width": 342, "height": 52 },
+            "visible_rect": { "x": 24, "y": 120, "width": 342, "height": 52 },
+            "hit_rect": { "x": 24, "y": 120, "width": 342, "height": 52 },
+            "content": { "text": "Open catalog" },
+            "state": { "visible": true, "enabled": true },
+            "actions": ["tap"],
+            "visual": {
+              "alpha": 1,
+              "background_color": { "red": 0.1, "green": 0.3, "blue": 0.9, "alpha": 1, "color_space": "srgb" },
+              "corner_radius": 12
+            },
+            "accessibility": { "label": "Open catalog", "role": "button", "hidden": false },
+            "source_context": { "route": "demo/home", "controller": "DemoHomeViewController", "component": "PrimaryButton" },
+            "capture_limitations": [],
+            "related_nodes": [],
+            "extensions": {}
+          }
+        ]
+      },
+      "capture_limitations": [],
+      "extensions": {}
+    }
+  ],
+  "screenshot": {
+    "object": {
+      "hash": "sha256:f94b346f6566e57842e2911f61a85ebb8b3f56aa538c5555aae4c51fe509157e",
+      "media_type": "image/png",
+      "byte_size": 12,
+      "compression": "none",
+      "logical_name": "ios-home.png",
+      "extensions": {}
+    },
+    "capture_started_at": { "wall_time": "2026-07-12T00:00:01Z", "monotonic_offset_ns": 1900000 },
+    "capture_finished_at": { "wall_time": "2026-07-12T00:00:01.010Z", "monotonic_offset_ns": 2100000 },
+    "tree_skew_ms": 1,
+    "coverage": { "x": 0, "y": 0, "width": 390, "height": 844 },
+    "pixel_size": { "width": 1170, "height": 2532 },
+    "system_chrome": "included",
+    "color_space": "srgb",
+    "extensions": {}
+  },
+  "event_window": {
+    "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+    "first_sequence": 1,
+    "last_sequence": 1,
+    "dropped_event_count": 0
+  },
+  "capabilities": {
+    "names": ["runtime.snapshot", "runtime.events", "design.tuning"],
+    "extensions": {}
+  },
+  "capture_limitations": [],
+  "extensions": {}
+}

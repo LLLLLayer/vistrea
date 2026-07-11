@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/ui-node.schema.json",
+  "title": "Vistrea UI Node and Tree",
+  "$defs": {
+    "TextContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string", "maxLength": 65536 },
+        "value": { "type": "string", "maxLength": 65536 },
+        "placeholder": { "type": "string", "maxLength": 4096 },
+        "content_description": { "type": "string", "maxLength": 65536 },
+        "redacted_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["text", "value", "placeholder", "content_description"] }
+        }
+      }
+    },
+    "NodeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visible": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "selected": { "type": "boolean" },
+        "focused": { "type": "boolean" },
+        "checked": { "type": "boolean" },
+        "expanded": { "type": "boolean" }
+      }
+    },
+    "Color": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["red", "green", "blue", "alpha", "color_space"],
+      "properties": {
+        "red": { "type": "number", "minimum": 0, "maximum": 1 },
+        "green": { "type": "number", "minimum": 0, "maximum": 1 },
+        "blue": { "type": "number", "minimum": 0, "maximum": 1 },
+        "alpha": { "type": "number", "minimum": 0, "maximum": 1 },
+        "color_space": { "enum": ["srgb", "display_p3", "unknown"] }
+      }
+    },
+    "Font": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "size", "weight"],
+      "properties": {
+        "family": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "postscript_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "weight": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "VisualProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alpha": { "type": "number", "minimum": 0, "maximum": 1 },
+        "foreground_color": { "$ref": "#/$defs/Color" },
+        "background_color": { "$ref": "#/$defs/Color" },
+        "font": { "$ref": "#/$defs/Font" },
+        "corner_radius": { "type": "number", "minimum": 0 },
+        "border_width": { "type": "number", "minimum": 0 },
+        "border_color": { "$ref": "#/$defs/Color" }
+      }
+    },
+    "AccessibilityProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "maxLength": 65536 },
+        "value": { "type": "string", "maxLength": 65536 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "hidden": { "type": "boolean" },
+        "focus_order": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" }
+      }
+    },
+    "RelatedNodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree_id", "node_id", "relation"],
+      "properties": {
+        "tree_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "node_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "relation": { "enum": ["semantic_for", "view_for", "layer_for", "source_for"] }
+      }
+    },
+    "UiNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "native_type",
+        "role",
+        "child_ids",
+        "content",
+        "state",
+        "actions",
+        "capture_limitations",
+        "related_nodes",
+        "extensions"
+      ],
+      "properties": {
+        "node_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "stable_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/StableId" },
+        "parent_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "child_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" }
+        },
+        "native_type": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "frame": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/Rect" },
+        "visible_rect": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/Rect" },
+        "hit_rect": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/Rect" },
+        "bounds": { "$ref": "https://vistrea.dev/schema/v1/geometry.schema.json#/$defs/Rect" },
+        "z_index": { "type": "number" },
+        "clipped": { "type": "boolean" },
+        "content": { "$ref": "#/$defs/TextContent" },
+        "state": { "$ref": "#/$defs/NodeState" },
+        "actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["tap", "long_press", "type_text", "clear_text", "swipe", "scroll"] }
+        },
+        "visual": { "$ref": "#/$defs/VisualProperties" },
+        "accessibility": { "$ref": "#/$defs/AccessibilityProperties" },
+        "source_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "route": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "controller": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "module": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "component": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        },
+        "related_nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RelatedNodeRef" }
+        },
+        "capture_limitations": {
+          "type": "array",
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CaptureLimitation" }
+        },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "InlineNodePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inline_nodes"],
+      "properties": {
+        "inline_nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/UiNode" }
+        }
+      }
+    },
+    "ObjectNodePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes_object", "node_count", "encoding"],
+      "properties": {
+        "nodes_object": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" },
+        "node_count": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger" },
+        "encoding": { "enum": ["vistrea.ui-nodes+json"] }
+      }
+    },
+    "UiTree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tree_id", "kind", "root_node_ids", "payload", "capture_limitations", "extensions"],
+      "properties": {
+        "tree_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "kind": { "enum": ["semantic", "view", "layer"] },
+        "root_node_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" }
+        },
+        "payload": {
+          "oneOf": [
+            { "$ref": "#/$defs/InlineNodePayload" },
+            { "$ref": "#/$defs/ObjectNodePayload" }
+          ]
+        },
+        "capture_limitations": {
+          "type": "array",
+          "items": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CaptureLimitation" }
+        },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  }
+}

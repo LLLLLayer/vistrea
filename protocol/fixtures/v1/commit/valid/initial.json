@@ -1,0 +1,28 @@
+{
+  "commit_id": "commit:sha256:4fd6a094baa3a8f85dd30584e086f24ff69c3ab8f531a631e0bfd6685faf7075",
+  "manifest": {
+    "protocol_version": { "major": 1, "minor": 0 },
+    "parents": [],
+    "created_at": "2026-07-12T00:00:00Z",
+    "author_id": "developer@example.com",
+    "message": "Initialize the Vistrea Demo runtime graph.",
+    "build_context": {
+      "kind": "build",
+      "id": "build_019f0000-0000-7000-8000-000000000001"
+    },
+    "roots": {
+      "runtime_graph": {
+        "hash": "sha256:d3a61194af7d5b6cd827c23b41ec3cc721cf0d4bbe05d663d5f32da86265a89a",
+        "media_type": "application/vnd.vistrea.graph+json",
+        "byte_size": 10,
+        "compression": "none",
+        "logical_name": "graph-root.json",
+        "extensions": {}
+      }
+    },
+    "object_hashes": [
+      "sha256:d3a61194af7d5b6cd827c23b41ec3cc721cf0d4bbe05d663d5f32da86265a89a"
+    ],
+    "extensions": {}
+  }
+}

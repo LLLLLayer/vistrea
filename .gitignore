@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Local Vistrea workspace and captured artifacts
+.vistrea/
+
+# Node.js
+node_modules/
+coverage/
+
+# Python tooling
+.venv/
+__pycache__/
+
+# Xcode / Swift
+DerivedData/
+.build/
+*.xcuserstate
+xcuserdata/
+
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+
+# IDEs
+.idea/
+.vscode/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example

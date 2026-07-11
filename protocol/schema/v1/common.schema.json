@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/common.schema.json",
+  "title": "Vistrea Common Types",
+  "$defs": {
+    "SafeUnsignedInteger": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "SafePositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "UInt32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ProtocolVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "const": 1 },
+        "minor": { "$ref": "#/$defs/UInt32" }
+      }
+    },
+    "TypedUuidV7": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "StableId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "EventTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wall_time"],
+      "properties": {
+        "wall_time": { "$ref": "#/$defs/Timestamp" },
+        "monotonic_offset_ns": { "$ref": "#/$defs/SafeUnsignedInteger" }
+      }
+    },
+    "Extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+      },
+      "additionalProperties": true
+    },
+    "CapabilitySet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["names", "extensions"],
+      "properties": {
+        "names": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+          }
+        },
+        "extensions": { "$ref": "#/$defs/Extensions" }
+      }
+    },
+    "CaptureLimitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "message", "retryable", "extensions"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$"
+        },
+        "severity": {
+          "enum": ["info", "warning", "error"]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tree_id": { "$ref": "#/$defs/TypedUuidV7" },
+            "node_id": { "$ref": "#/$defs/TypedUuidV7" },
+            "field": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "retryable": { "type": "boolean" },
+        "extensions": { "$ref": "#/$defs/Extensions" }
+      }
+    },
+    "ResourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9._-]*$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 320 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 320 }
+      }
+    }
+  }
+}

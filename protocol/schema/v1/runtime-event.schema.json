@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/runtime-event.schema.json",
+  "title": "Vistrea Runtime Event",
+  "$defs": {
+    "RuntimeEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "protocol_version",
+        "event_epoch_id",
+        "sequence",
+        "time",
+        "kind",
+        "extensions"
+      ],
+      "properties": {
+        "event_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+        "event_epoch_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "sequence": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "time": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime" },
+        "kind": {
+          "enum": [
+            "node_appeared",
+            "node_disappeared",
+            "layout_changed",
+            "state_changed",
+            "transient_presented",
+            "transient_dismissed",
+            "screen_changed"
+          ]
+        },
+        "node_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "stable_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/StableId" },
+        "snapshot_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "duration_ms": { "type": "number", "minimum": 0 },
+        "payload": { "type": "object", "additionalProperties": true },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    },
+    "RuntimeEventBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "event_epoch_id",
+        "first_sequence",
+        "last_sequence",
+        "events",
+        "dropped_event_count",
+        "extensions"
+      ],
+      "properties": {
+        "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+        "event_epoch_id": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7" },
+        "first_sequence": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "last_sequence": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RuntimeEvent" }
+        },
+        "dropped_event_count": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger" },
+        "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+      }
+    }
+  },
+  "$ref": "#/$defs/RuntimeEvent"
+}

@@ -1,0 +1,19 @@
+{
+  "protocol_version": { "major": 1, "minor": 0 },
+  "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+  "first_sequence": 1,
+  "last_sequence": 1,
+  "events": [
+    {
+      "event_id": "event_019f0000-0000-7000-8000-000000000024",
+      "protocol_version": { "major": 1, "minor": 0 },
+      "event_epoch_id": "epoch_019f0000-0000-7000-8000-000000000001",
+      "sequence": 2,
+      "time": { "wall_time": "2026-07-12T00:00:24Z" },
+      "kind": "node_appeared",
+      "extensions": {}
+    }
+  ],
+  "dropped_event_count": 0,
+  "extensions": {}
+}
