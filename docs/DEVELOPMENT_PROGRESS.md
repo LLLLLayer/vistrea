@@ -31,9 +31,9 @@ Current objective:
 | Host/Data implementation stack | Host/Data architecture owner | `stack-1` | Verified | Node/TypeScript runtime, SQLite driver, process boundary, migrations, backup, and recovery | ADR and migration runbook reviewed; document checks and `pnpm check` passed |
 | SQLite metadata store | SQLite adapter owner | `sqlite-1` | Verified | Real SQLite transactions, all nine repositories, exact-byte migrations, durable ObjectRef catalog and associations, reopen, health, and corruption rejection | 9 SQLite contracts pass inside the 30-test Host contract suite |
 | Content-addressed Object Store | Object Store owner | `objects-1` | Verified | Encoded-byte SHA-256 storage, atomic publication, encryption metadata, range reads, retention, recovery, and symlink-safe paths | 11 Object Store contracts pass inside the 30-test Host contract suite |
-| Host Snapshot Engine | Connection Engine owner | `loopback-engine-1` | Verified | Capture/Get/List, Object-before-metadata ordering, validation, rollback/orphan behavior, authenticated bounded loopback transport, and production local Workspace composition | 14 Engine, transport, and local Workspace integration tests pass |
+| Host Snapshot Engine | Connection Engine owner | `loopback-engine-1` | Verified | Capture/Get/List, Object-before-metadata ordering, validation, rollback/orphan behavior, authenticated bounded loopback transport, and production local Workspace composition | 14 Engine, transport, and local Workspace integration tests pass; commit `87490c4` |
 | iOS Runtime SDK and Demo App | iOS vertical-loop owner | `uikit-capture-1` | In progress | Canonical Swift models, real UIKit hierarchy/screenshot capture, shared data-driven scenarios, and a Debug-only in-app Inspector are verified; Host connection and protected tuning remain | 9 Swift model tests, Simulator build/launch, and 1 UI navigation/capture test pass; commit `be60c0b` |
-| Android Runtime SDK | Android adapter owner | `models-1` | In progress | Canonical Kotlin Runtime Snapshot models are verified; View capture, Inspector, connection, and protected tuning remain | 8 Gradle tests and changed-code detekt review pass; commit `1812e63` |
+| Android Runtime SDK and Demo App | Android vertical-loop owner | `android-demo-1` | In progress | Canonical Kotlin models, all 12 native View/ViewGroup scenarios, deterministic launch, predictive back, and a Debug-only View Tree are verified; canonical View capture, Host connection, and protected tuning remain | 8 SDK tests; 5 Demo contracts in Debug and Release; API 36.1 scenario/behavior smoke; Android Lint and detekt pass; commits `1812e63` and `560b752` |
 | Vistrea Studio | Unassigned | `studio-draft-1` | Planned | First vertical-loop UI | Interaction design only |
 | Automation and exploration | Unassigned | `interfaces-draft-1` | Planned | WDA/UIAutomator plus bounded exploration | Interface design only |
 | Vistrea Hub | Unassigned | `interfaces-draft-1` | Planned | Optional remote sync and collaboration | Interface design only |
@@ -120,7 +120,7 @@ The active slice is now product composition: Host Local API, native Runtime clie
 - Ref fixtures cover a valid team ref and an empty segment; additional category, length, and reserved-segment negatives remain planned.
 - Operation inline values validate against a declared local schema, but the complete operation-kind-to-result-type catalog remains documentation until the Phase 0B operation manifest is executable.
 - Data query, filter, page, field-mask, maintenance-command, and transaction-handle types remain Phase 0B language contracts; they may compose but cannot redefine shared protocol values.
-- The iOS native Demo App and Debug Runtime Inspector now exist. Android Demo parity, the standalone Studio app, automation providers, and Hub service remain open.
+- The native iOS and Android Demo Apps and Debug Inspectors now exist. Android canonical View capture, the standalone Studio app, automation providers, and Hub service remain open.
 
 ## Verification log
 
@@ -143,6 +143,7 @@ The active slice is now product composition: Host Local API, native Runtime clie
 | 2026-07-12 | Production local storage | `pnpm test:host-contract` | 30 of 30 tests passed: 10 shared repository, 11 Object Store, and 9 SQLite migration/reopen/transaction contracts |
 | 2026-07-12 | Integrated Phase 0B check | `pnpm check` | 78 protocol fixtures, 24 protocol contracts, 30 Host contracts, 4 Snapshot Engine integrations, and 12 Scenario tests passed |
 | 2026-07-12 | Snapshot Engine, Runtime transport, and local Workspace | `pnpm test:host-integration` | 14 of 14 tests passed, covering authenticated loopback capture, bounded framing, Object transfer integrity, cancellation, Engine rollback, exclusive Host ownership, and production reopen |
+| 2026-07-12 | Native Android Demo App | `./gradlew assembleDebug assembleRelease test lintDebug`; changed-code detekt; API 36.1 emulator smoke | Both APK variants and all Demo contracts passed; Lint had 0 errors, detekt had 0 issues, all 12 reset states exposed required shared IDs, navigation/back and loading cancellation passed, the Debug tree was non-empty, and Release contained no Debug Inspector implementation or strings; commit `560b752` |
 | 2026-07-12 | Final architecture and interface review | Parallel read-only document, interface, and protocol audits | No remaining P0/P1 findings |
 | 2026-07-12 | Documentation language | Han-character scan over project Markdown | Passed |
 | 2026-07-12 | Documentation integrity | Local-link and code-fence validation | Passed |
@@ -177,6 +178,7 @@ The active slice is now product composition: Host Local API, native Runtime clie
 - Implemented and committed the native UIKit Demo App, all shared Scenario IDs, real canonical hierarchy/screenshot capture, and a Debug-only in-app Runtime Inspector.
 - Completed production SQLite metadata and file-backed Object Store adapters, including exact-byte packaged migrations, durable reopen, encryption metadata, retention recovery, and symlink-safe content paths.
 - Completed and verified the Snapshot Engine, HMAC-authenticated loopback Runtime transport, strict bounded Object transfer, and exclusive production `LocalDataWorkspace` composition.
+- Implemented and committed the native Android View/ViewGroup Demo App with all shared Scenario IDs, fail-closed fixture dispatch, predictive-back behavior, cancellable delayed transitions, and source-set-isolated Debug Inspector.
 
 ## Next milestones
 
