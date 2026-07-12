@@ -76,6 +76,8 @@ kotlin {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    debugImplementation("dev.vistrea:runtime-android:0.1.0")
+    debugImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation(kotlin("test-junit"))
 }
 

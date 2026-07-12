@@ -16,3 +16,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "VistreaDemoApp"
 include(":app")
+
+includeBuild("../../../sdks/android") {
+    dependencySubstitution {
+        substitute(module("dev.vistrea:runtime-android"))
+            .using(project(":runtime-android"))
+    }
+}

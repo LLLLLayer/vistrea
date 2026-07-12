@@ -35,7 +35,7 @@ internal object InspectorFactory {
         }
         AlertDialog.Builder(activity)
             .setTitle("Local Debug View Tree")
-            .setMessage("Inspector placeholder only. Host transport is not implemented.")
+            .setMessage("Authenticated Host capture is available when Debug configuration is present.")
             .setView(ScrollView(activity).apply { addView(tree) })
             .setPositiveButton("Close", null)
             .show()

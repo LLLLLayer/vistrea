@@ -14,7 +14,13 @@ import dev.vistrea.protocol.v1.ObjectHash
 import dev.vistrea.protocol.v1.ProjectId
 import dev.vistrea.protocol.v1.RedactedContentField
 import dev.vistrea.protocol.v1.RuntimeSnapshotJson
+import dev.vistrea.runtime.connection.RuntimeCaptureReason
+import dev.vistrea.runtime.connection.RuntimeCaptureRequest
+import dev.vistrea.runtime.connection.RuntimeCaptureScreenshotMode
+import dev.vistrea.runtime.connection.RuntimeConnectionErrorCode
+import dev.vistrea.runtime.connection.RuntimeConnectionException
 import java.security.MessageDigest
+import kotlinx.coroutines.runBlocking
 
 class AndroidViewRuntimeCaptureInstrumentedTest : InstrumentationTestCase() {
     fun testCapturesCanonicalTreeAndPngObject() {
@@ -121,6 +127,79 @@ class AndroidViewRuntimeCaptureInstrumentedTest : InstrumentationTestCase() {
         assertEquals(
             AndroidRuntimeCaptureFailure.NODE_LIMIT_EXCEEDED,
             (nodeLimit as AndroidRuntimeCaptureException).failure,
+        )
+    }
+
+    fun testRuntimeConnectionProviderBridgesToMainThreadCanonicalCapture() {
+        lateinit var root: FrameLayout
+        instrumentation.runOnMainSync {
+            root = fixtureRoot()
+        }
+        val provider = AndroidViewRuntimeSnapshotCaptureProvider(
+            adapter = adapter(),
+            rootViewProvider = { root },
+            scenarioIdProvider = { "demo.navigation.basic" },
+        )
+        val payload = runBlocking {
+            provider.capture(
+                RuntimeCaptureRequest(
+                    includePaths = listOf("trees"),
+                    screenshot = RuntimeCaptureScreenshotMode.NONE,
+                    reason = RuntimeCaptureReason.MANUAL,
+                ),
+            )
+        }
+
+        assertTrue(payload.objects.isEmpty())
+        assertNull(payload.snapshot.screenshot)
+        assertEquals(
+            "demo.navigation.basic",
+            payload.snapshot.extensions["vistrea.scenario_id"]?.toString()?.trim('"'),
+        )
+        assertTrue(payload.snapshot.trees.single().payload.inlineNodes?.isNotEmpty() == true)
+    }
+
+    fun testRuntimeConnectionProviderRejectsUnsupportedOrUnsatisfiedFieldMasks() {
+        lateinit var root: FrameLayout
+        instrumentation.runOnMainSync {
+            root = fixtureRoot()
+        }
+        val provider = AndroidViewRuntimeSnapshotCaptureProvider(
+            adapter = adapter(),
+            rootViewProvider = { root },
+        )
+        val unsupported = runBlocking {
+            runCatching {
+                provider.capture(
+                    RuntimeCaptureRequest(
+                        includePaths = listOf("trees", "unknown"),
+                        screenshot = RuntimeCaptureScreenshotMode.NONE,
+                        reason = RuntimeCaptureReason.MANUAL,
+                    ),
+                )
+            }.exceptionOrNull()
+        }
+        val unsatisfied = runBlocking {
+            runCatching {
+                provider.capture(
+                    RuntimeCaptureRequest(
+                        includePaths = listOf("trees"),
+                        screenshot = RuntimeCaptureScreenshotMode.REFERENCE,
+                        reason = RuntimeCaptureReason.MANUAL,
+                    ),
+                )
+            }.exceptionOrNull()
+        }
+
+        assertTrue(unsupported is RuntimeConnectionException)
+        assertEquals(
+            RuntimeConnectionErrorCode.PROTOCOL_VIOLATION,
+            (unsupported as RuntimeConnectionException).code,
+        )
+        assertTrue(unsatisfied is RuntimeConnectionException)
+        assertEquals(
+            RuntimeConnectionErrorCode.PROTOCOL_VIOLATION,
+            (unsatisfied as RuntimeConnectionException).code,
         )
     }
 

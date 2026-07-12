@@ -21,6 +21,8 @@ import dev.vistrea.demo.contract.ScenarioContractRepository
 import dev.vistrea.demo.contract.ScenarioFixture
 import dev.vistrea.demo.contract.ScenarioSuite
 import dev.vistrea.demo.inspector.InspectorFactory
+import dev.vistrea.demo.runtime.RuntimeConnectionFactory
+import dev.vistrea.demo.runtime.RuntimeConnectionManager
 import dev.vistrea.demo.ui.Palette
 import dev.vistrea.demo.ui.ScenarioContentFactory
 import dev.vistrea.demo.ui.ScenarioController
@@ -34,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var contextLabel: TextView
     private lateinit var shell: LinearLayout
     private var controller: ScenarioController? = null
+    private val runtimeConnections = RuntimeConnectionManager()
     private var activeScenarioId: String? = null
     private var predictiveBackCallback: OnBackInvokedCallback? = null
 
@@ -43,12 +46,14 @@ class MainActivity : Activity() {
         createShell()
         registerPredictiveBack()
         applyLaunchSelection(selectionFrom(intent))
+        updateRuntimeConnection(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         applyLaunchSelection(selectionFrom(intent))
+        updateRuntimeConnection(intent)
     }
 
     @SuppressLint("GestureBackNavigation")
@@ -58,6 +63,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        runtimeConnections.stop()
         controller?.stop()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             predictiveBackCallback?.let(onBackInvokedDispatcher::unregisterOnBackInvokedCallback)
@@ -76,6 +82,12 @@ class MainActivity : Activity() {
             callback,
         )
         predictiveBackCallback = callback
+    }
+
+    private fun updateRuntimeConnection(intent: Intent) {
+        runtimeConnections.replaceIfRequested(RuntimeConnectionFactory.hasConfiguration(intent)) {
+            RuntimeConnectionFactory.create(this, intent) { activeScenarioId }
+        }
     }
 
     private fun handleBackRequest() {

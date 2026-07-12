@@ -20,6 +20,12 @@ android {
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
+    buildTypes {
+        create("internal") {
+            initWith(getByName("debug"))
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -36,10 +42,22 @@ kotlin {
         jvmTarget.set(JvmTarget.JVM_17)
         allWarningsAsErrors.set(true)
     }
+    sourceSets {
+        named("debug") {
+            kotlin.srcDir("src/development/kotlin")
+        }
+        named("internal") {
+            kotlin.srcDir("src/development/kotlin")
+        }
+    }
 }
 
 dependencies {
     api(project(":"))
+    debugApi(project(":runtime-connection"))
+    "internalApi"(project(":runtime-connection"))
+    debugImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    "internalImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     testImplementation(kotlin("test-junit"))
 }
