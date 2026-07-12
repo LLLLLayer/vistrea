@@ -1,0 +1,4 @@
+interface:
+  display_name: "Inspect Runtime UI with Vistrea"
+  short_description: "Capture and inspect canonical Runtime UI evidence"
+  default_prompt: "Use $vistrea-inspect-runtime to capture the current app UI and summarize its canonical runtime evidence."
