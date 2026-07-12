@@ -20,6 +20,7 @@ The first native SwiftUI Snapshot workspace is implemented as a standalone Swift
 - Review Issue lifecycle transitions: selecting an issue loads its persisted revision and offers only the legal target states from the canonical lifecycle (`open`, `in_progress`, `ready_for_verification`, `resolved`, `wont_fix`) with an optional reason; optimistic-concurrency conflicts reload the issue and show a changed-elsewhere note;
 - Deep Wiki editing: a New node sheet (schema kind picker, title, summary, Markdown) and a per-node Edit sheet that loads the full node, revises it guarded by `expected_revision`, and offers only legal status transitions; conflicts reload the node and show a changed-elsewhere note;
 - Canvas Screen State details: clicking a state opens a side panel with its persisted title, kind, status, first/last seen, and canonical Snapshot ID, lists the Wiki nodes already linked to it, and can create a `relates_to` Wiki link to the state;
+- a Canvas Explore entry driving the Host's background exploration Operation: a small form (maximum actions, settle milliseconds, excluded stable IDs) starts the run, a status line polls the Operation once per second behind a generation guard that stops when the pane disappears or a newer request supersedes it, Cancel requests cancellation, a succeeded run shows the report summary (states discovered, actions, stop reason) and refreshes the Canvas graph automatically, and failed, cancelled, or `unsupported` Hosts (no automation provider, HTTP 501) surface the error code and message verbatim with the controls re-enabled;
 - loading, empty, detail-error, connection-error, capture-error, and write-conflict states;
 - a capture action over the Host Local API;
 - a canonical fixture-backed development mode when no Host is configured, including in-memory fixture implementations of every write flow above.
@@ -72,6 +73,7 @@ The adapter consumes these frozen local endpoints:
 - `GET /v1/screen-graph` and `GET /v1/screen-states/:id`
 - `GET /v1/wiki/nodes`, `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes/:id`, and `POST /v1/wiki/nodes/:id/revisions`
 - `POST /v1/wiki/links` and `GET /v1/wiki/related`
+- `POST /v1/exploration/operations`, `GET /v1/exploration/operations/:id`, and `POST /v1/exploration/operations/:id/cancel`
 
 Canonical Runtime Snapshot responses use the strict shared decoder. Host envelopes also reject unknown core fields.
 URLSession streams into bounded buffers before decoding: JSON responses are capped at 64 MiB and Object responses at 256 MiB. Full Object reads verify `ETag`, `Content-Length`, and SHA-256; byte ranges verify `ETag`, `Content-Length`, canonical `Content-Range`, and exact body length.

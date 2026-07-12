@@ -59,6 +59,18 @@ extension HostClient {
     func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage {
         WikiNodePage(items: [])
     }
+
+    func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
+        throw HostClientError.fixtureUnavailable("This test double does not support exploration.")
+    }
+
+    func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord {
+        throw HostClientError.fixtureUnavailable("This test double does not support exploration.")
+    }
+
+    func cancelExploration(id: String) async throws -> ExplorationOperationRef {
+        throw HostClientError.fixtureUnavailable("This test double does not support exploration.")
+    }
 }
 
 enum StudioTestFixtures {

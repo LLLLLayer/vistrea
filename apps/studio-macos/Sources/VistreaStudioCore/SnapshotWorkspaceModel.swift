@@ -97,6 +97,16 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isLinkingWikiNode = false
     @Published public private(set) var canvasLinkError: String?
 
+    // Exploration Operation state (device automation Host capability).
+    @Published public private(set) var explorationOperationID: String?
+    @Published public private(set) var explorationState: String?
+    @Published public private(set) var explorationProgress: ExplorationProgressSummary?
+    @Published public private(set) var explorationLastEventMessage: String?
+    @Published public private(set) var explorationReport: ExplorationReportSummary?
+    @Published public private(set) var explorationError: String?
+    @Published public private(set) var isExploring = false
+    @Published public private(set) var isCancellingExploration = false
+
     private let client: any HostClient
     private var selectionGeneration = 0
     // Per-pane request generations: a slow older response must never
@@ -109,6 +119,18 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     private var issueDetailGeneration = 0
     private var wikiEditGeneration = 0
     private var canvasStateGeneration = 0
+    private var explorationGeneration = 0
+    // The Screen Graph identity the Canvas last loaded, so a finished
+    // exploration can refresh the same graph.
+    private var lastCanvasProjectID: String?
+    private var lastCanvasApplicationID: String?
+
+    /// Sleeps between exploration polls. Production always waits the fixed
+    /// one-second interval — the pane never polls faster — while tests
+    /// replace this internal hook to script the loop deterministically.
+    var explorationPollSleep: @Sendable () async -> Void = {
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+    }
 
     public init(client: any HostClient) {
         self.client = client
@@ -229,6 +251,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Reloads the materialized Screen Graph for the Canvas.
     public func loadCanvas(projectID: String, applicationID: String) async {
+        lastCanvasProjectID = projectID
+        lastCanvasApplicationID = applicationID
         canvasGeneration += 1
         let generation = canvasGeneration
         canvasPhase = .loading
@@ -662,6 +686,150 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return
         }
         await loadRelatedWikiNodes(stateID: stateID, generation: canvasStateGeneration)
+    }
+
+    // MARK: - Exploration Operations (device automation Host capability)
+
+    /// Starts one background exploration Operation and polls it to a
+    /// terminal state. A Host without a configured automation provider
+    /// rejects the run with HTTP 501 code `unsupported`; the message is
+    /// shown inline and the controls stay usable.
+    public func startExploration(
+        maximumActions: Int,
+        maximumDepth: Int? = nil,
+        settleMilliseconds: Int? = nil,
+        excludedStableIDs: [String] = []
+    ) async {
+        guard !isExploring else {
+            return
+        }
+        explorationGeneration += 1
+        let generation = explorationGeneration
+        isExploring = true
+        explorationError = nil
+        explorationReport = nil
+        explorationProgress = nil
+        explorationLastEventMessage = nil
+        explorationState = nil
+        explorationOperationID = nil
+        let command = ExplorationRunCommand(
+            maximumActions: maximumActions,
+            maximumDepth: maximumDepth,
+            settleMilliseconds: settleMilliseconds,
+            excludedStableIDs: excludedStableIDs.isEmpty ? nil : excludedStableIDs
+        )
+        let operationID: String
+        do {
+            let ref = try await client.runExploration(command)
+            guard generation == explorationGeneration else {
+                return
+            }
+            operationID = ref.operationID
+            explorationOperationID = ref.operationID
+            explorationState = ref.state
+        } catch {
+            guard generation == explorationGeneration else {
+                return
+            }
+            explorationError = Self.explorationMessage(for: error)
+            isExploring = false
+            return
+        }
+        await pollExploration(operationID: operationID, generation: generation)
+    }
+
+    /// Requests cancellation of the running exploration. The Operation stays
+    /// running until the walk observes the request; the poll loop then shows
+    /// the terminal `cancelled` state.
+    public func cancelExploration() async {
+        guard isExploring, !isCancellingExploration, let operationID = explorationOperationID else {
+            return
+        }
+        isCancellingExploration = true
+        defer { isCancellingExploration = false }
+        do {
+            let ref = try await client.cancelExploration(id: operationID)
+            if explorationOperationID == operationID {
+                explorationState = ref.state
+            }
+        } catch {
+            if explorationOperationID == operationID {
+                explorationError = Self.explorationMessage(for: error)
+            }
+        }
+    }
+
+    /// Stops the exploration poll loop without cancelling the Host-side run,
+    /// when the Canvas pane disappears or a newer request supersedes it.
+    public func stopExplorationPolling() {
+        explorationGeneration += 1
+        isExploring = false
+    }
+
+    /// Polls the exploration Operation once per interval until it reaches a
+    /// terminal state or the generation guard supersedes the loop.
+    private func pollExploration(operationID: String, generation: Int) async {
+        while generation == explorationGeneration {
+            await explorationPollSleep()
+            guard generation == explorationGeneration else {
+                return
+            }
+            let record: ExplorationOperationRecord
+            do {
+                record = try await client.getExplorationOperation(id: operationID)
+            } catch {
+                guard generation == explorationGeneration else {
+                    return
+                }
+                explorationError = Self.explorationMessage(for: error)
+                isExploring = false
+                return
+            }
+            guard generation == explorationGeneration else {
+                return
+            }
+            explorationState = record.operation.state
+            explorationProgress = record.latestProgress
+            explorationLastEventMessage = record.latestEventMessage
+            switch record.operation.state {
+            case "succeeded":
+                explorationReport = record.report
+                isExploring = false
+                await refreshCanvasAfterExploration()
+                return
+            case "failed", "cancelled":
+                explorationError = Self.terminalExplorationMessage(for: record.operation)
+                isExploring = false
+                return
+            default:
+                continue
+            }
+        }
+    }
+
+    /// Discovered states belong on the Canvas immediately, so a succeeded
+    /// run reloads the same Screen Graph the Canvas last showed.
+    private func refreshCanvasAfterExploration() async {
+        guard let projectID = lastCanvasProjectID, let applicationID = lastCanvasApplicationID else {
+            return
+        }
+        await loadCanvas(projectID: projectID, applicationID: applicationID)
+    }
+
+    /// Surfaces the canonical error code and message verbatim.
+    private static func explorationMessage(for error: Error) -> String {
+        if let hostError = error as? HostClientError,
+           case let .server(_, _, code, message, _) = hostError {
+            return "\(code): \(message)"
+        }
+        return message(for: error)
+    }
+
+    private static func terminalExplorationMessage(for operation: ExplorationOperationRef) -> String {
+        guard let error = operation.error else {
+            return "The exploration operation ended as \(operation.state)."
+        }
+        return "\(error.code): \(error.message)"
     }
 
     private func loadRelatedWikiNodes(stateID: String, generation: Int) async {

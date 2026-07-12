@@ -419,6 +419,79 @@ public struct HTTPHostClient: HostClient, Sendable {
         )
     }
 
+    public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
+        guard (1...500).contains(command.maximumActions) else {
+            throw HostClientError.invalidConfiguration(
+                "The exploration action budget must be between 1 and 500 actions."
+            )
+        }
+        if let maximumDepth = command.maximumDepth {
+            guard (1...32).contains(maximumDepth) else {
+                throw HostClientError.invalidConfiguration(
+                    "The exploration depth limit must be between 1 and 32."
+                )
+            }
+        }
+        if let settleMilliseconds = command.settleMilliseconds {
+            guard (0...60_000).contains(settleMilliseconds) else {
+                throw HostClientError.invalidConfiguration(
+                    "The exploration settle time must be between 0 and 60000 milliseconds."
+                )
+            }
+        }
+        if let excluded = command.excludedStableIDs {
+            guard excluded.count <= 128,
+                  excluded.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 256 })
+            else {
+                throw HostClientError.invalidConfiguration(
+                    "Excluded stable IDs must be at most 128 non-empty strings of up to 256 bytes."
+                )
+            }
+        }
+        if let actorID = command.actorID {
+            guard !actorID.isEmpty, actorID.utf8.count <= 256 else {
+                throw HostClientError.invalidConfiguration(
+                    "The exploration actor ID must be a non-empty string of up to 256 bytes."
+                )
+            }
+        }
+        return try await sendJSON(
+            ExplorationOperationRef.self,
+            path: ["v1", "exploration", "operations"],
+            body: command,
+            expectedStatus: 201
+        )
+    }
+
+    public func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord {
+        guard Self.isTypedIdentifier(id, prefix: "operation") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            ExplorationOperationRecord.self,
+            method: "GET",
+            path: ["v1", "exploration", "operations", id]
+        )
+    }
+
+    public func cancelExploration(id: String) async throws -> ExplorationOperationRef {
+        guard Self.isTypedIdentifier(id, prefix: "operation") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        // The cancel route accepts no request body.
+        let response = try await request(
+            method: "POST",
+            path: ["v1", "exploration", "operations", id, "cancel"]
+        )
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(ExplorationOperationRef.self, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {

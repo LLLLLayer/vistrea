@@ -23,10 +23,30 @@ public actor FixtureHostClient: HostClient {
         let relation: String
     }
 
+    /// The deterministic scripted exploration Operation: it advances one
+    /// progress event per poll and succeeds on the fourth poll with a
+    /// three-state report; a requested cancellation settles it cancelled on
+    /// the next poll instead.
+    private struct ScriptedExplorationRun {
+        let operationID: String
+        let maximumActions: Int
+        var pollCount: Int = 0
+        var cancelRequested = false
+        var settledState: String?
+    }
+
     private var tuningPatchesByID: [String: StoredTuningPatch] = [:]
     private var tuningApplicationsByID: [String: TuningApplicationSummary] = [:]
     private var screenStatesByID: [String: ScreenStateDetail] = [:]
     private var wikiLinks: [StoredWikiLink] = []
+    private let automationConfigured: Bool
+    private var explorationRun: ScriptedExplorationRun?
+    /// How many times the scripted exploration Operation was polled; lets
+    /// tests prove the poll loop stopped.
+    public private(set) var explorationPollCount = 0
+    /// How many times the Screen Graph was requested; lets tests prove the
+    /// Canvas refreshed after exploration succeeded.
+    public private(set) var screenGraphLoadCount = 0
     /// A deterministic counter so fixture-minted identifiers and timestamps
     /// stay reproducible across runs.
     private var mintedCount: UInt64 = 0
@@ -38,9 +58,11 @@ public actor FixtureHostClient: HostClient {
         eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: []),
         reviewIssues: [ReviewIssueSummary] = [],
         canvasGraph: CanvasGraph? = nil,
-        wikiNodes: [WikiNodeSummary] = []
+        wikiNodes: [WikiNodeSummary] = [],
+        automationConfigured: Bool = true
     ) {
         self.status = status
+        self.automationConfigured = automationConfigured
         snapshotsByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.snapshotID.rawValue, $0) })
         self.objectsByHash = objectsByHash
         self.eventTimeline = eventTimeline
@@ -61,6 +83,7 @@ public actor FixtureHostClient: HostClient {
     }
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        screenGraphLoadCount += 1
         guard let canvasGraph else {
             throw HostClientError.server(
                 statusCode: 404,
@@ -445,6 +468,161 @@ public actor FixtureHostClient: HostClient {
         return WikiNodePage(items: related)
     }
 
+    // MARK: - Exploration Operations
+
+    public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
+        try requireAutomationProvider()
+        guard (1...500).contains(command.maximumActions) else {
+            throw Self.serverError(400, code: "invalid_argument", message: "The request was rejected as invalid.")
+        }
+        if let run = explorationRun, run.settledState == nil {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "An exploration operation is already running."
+            )
+        }
+        let run = ScriptedExplorationRun(
+            operationID: mintIdentifier("operation"),
+            maximumActions: command.maximumActions
+        )
+        explorationRun = run
+        return explorationRecord(for: run).operation
+    }
+
+    public func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord {
+        try requireAutomationProvider()
+        guard var run = explorationRun, run.operationID == id else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        explorationPollCount += 1
+        if run.settledState == nil {
+            if run.cancelRequested {
+                run.settledState = "cancelled"
+            } else {
+                run.pollCount += 1
+                if run.pollCount >= 4 {
+                    run.settledState = "succeeded"
+                }
+            }
+            explorationRun = run
+        }
+        return explorationRecord(for: run)
+    }
+
+    public func cancelExploration(id: String) async throws -> ExplorationOperationRef {
+        try requireAutomationProvider()
+        guard var run = explorationRun, run.operationID == id else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard run.settledState == nil else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The exploration operation is not running."
+            )
+        }
+        run.cancelRequested = true
+        explorationRun = run
+        return explorationRecord(for: run).operation
+    }
+
+    /// Mirrors the live Host: exploration routes require a configured device
+    /// automation provider.
+    private func requireAutomationProvider() throws {
+        guard automationConfigured else {
+            throw Self.serverError(
+                501,
+                code: "unsupported",
+                message: "No device automation provider is configured on this Host."
+            )
+        }
+    }
+
+    /// Materializes the scripted run into a deterministic OperationRecord.
+    private func explorationRecord(for run: ScriptedExplorationRun) -> ExplorationOperationRecord {
+        func time(_ sequence: Int) -> String {
+            String(format: "2026-07-12T02:00:%02dZ", sequence)
+        }
+        var events: [ExplorationOperationEventSummary] = [
+            ExplorationOperationEventSummary(sequence: 1, time: time(1), kind: "created", state: "queued"),
+            ExplorationOperationEventSummary(sequence: 2, time: time(2), kind: "started", state: "running"),
+        ]
+        let progressCount = min(run.pollCount, 3)
+        for index in 0..<progressCount {
+            let sequence = 3 + index
+            events.append(
+                ExplorationOperationEventSummary(
+                    sequence: UInt64(sequence),
+                    time: time(sequence),
+                    kind: "progressed",
+                    state: "running",
+                    progress: ExplorationProgressSummary(
+                        phase: "exploration.walk",
+                        completedUnits: UInt64(index + 1),
+                        totalUnits: UInt64(run.maximumActions),
+                        unit: "action",
+                        message: "Tapped demo.explore.step\(index + 1) and discovered a new state"
+                    )
+                )
+            )
+        }
+        var operationError: ExplorationOperationError?
+        var report: ExplorationReportSummary?
+        switch run.settledState {
+        case "succeeded":
+            let sequence = events.count + 1
+            events.append(
+                ExplorationOperationEventSummary(
+                    sequence: UInt64(sequence),
+                    time: time(sequence),
+                    kind: "succeeded",
+                    state: "succeeded"
+                )
+            )
+            report = ExplorationReportSummary(
+                discoveredStateIDs: [
+                    "screenstate_019f0000-0000-7000-8000-0000000000a1",
+                    "screenstate_019f0000-0000-7000-8000-0000000000a2",
+                    "screenstate_019f0000-0000-7000-8000-0000000000a3",
+                ],
+                actionCount: 3,
+                stoppedReason: "frontier_exhausted"
+            )
+        case "cancelled":
+            operationError = ExplorationOperationError(
+                code: "cancelled",
+                message: "The exploration run was cancelled by the caller."
+            )
+            let sequence = events.count + 1
+            events.append(
+                ExplorationOperationEventSummary(
+                    sequence: UInt64(sequence),
+                    time: time(sequence),
+                    kind: "cancelled",
+                    state: "cancelled",
+                    error: operationError
+                )
+            )
+        default:
+            break
+        }
+        let state = run.settledState ?? "running"
+        return ExplorationOperationRecord(
+            operation: ExplorationOperationRef(
+                operationID: run.operationID,
+                kind: "RunExploration",
+                state: state,
+                createdAt: time(1),
+                updatedAt: time(events.count),
+                error: operationError
+            ),
+            revision: UInt64(events.count),
+            events: events,
+            report: report
+        )
+    }
+
     // MARK: - Fixture helpers
 
     private func latestSnapshot() -> RuntimeSnapshot? {
@@ -540,6 +718,13 @@ public struct UnavailableHostClient: HostClient {
     public func getScreenState(id: String) async throws -> ScreenStateDetail { throw error }
     public func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary { throw error }
     public func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage { throw error }
+    public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
+        throw error
+    }
+    public func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord {
+        throw error
+    }
+    public func cancelExploration(id: String) async throws -> ExplorationOperationRef { throw error }
 }
 
 public enum CanonicalFixtureLoader {

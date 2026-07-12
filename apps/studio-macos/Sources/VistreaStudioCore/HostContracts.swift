@@ -480,6 +480,13 @@ public protocol HostClient: Sendable {
     func getScreenState(id: String) async throws -> ScreenStateDetail
     func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary
     func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage
+
+    // Exploration Operations over the configured device automation provider.
+    // A Host without an automation provider rejects these routes with
+    // HTTP 501 code "unsupported".
+    func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef
+    func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord
+    func cancelExploration(id: String) async throws -> ExplorationOperationRef
 }
 
 public enum HostClientError: Error, Equatable, Sendable {

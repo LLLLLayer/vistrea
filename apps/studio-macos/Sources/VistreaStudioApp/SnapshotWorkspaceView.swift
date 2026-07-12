@@ -77,6 +77,7 @@ struct SnapshotWorkspaceView: View {
 
 private struct CanvasPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var isExploreFormPresented = false
 
     private static let columnWidth: CGFloat = 230
     private static let rowHeight: CGFloat = 116
@@ -84,9 +85,23 @@ private struct CanvasPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: "Screen State Canvas", systemImage: "point.3.connected.trianglepath.dotted")
+            PaneHeader(title: "Screen State Canvas", systemImage: "point.3.connected.trianglepath.dotted") {
+                Button("Explore", systemImage: "figure.walk") {
+                    isExploreFormPresented = true
+                }
+                .disabled(model.isExploring)
+                .popover(isPresented: $isExploreFormPresented, arrowEdge: .bottom) {
+                    ExplorationFormView(model: model, isPresented: $isExploreFormPresented)
+                }
+            }
             Divider()
+            ExplorationStatusView(model: model)
             content
+        }
+        .onDisappear {
+            // The Host-side run continues; only the poll loop stops with
+            // the pane.
+            model.stopExplorationPolling()
         }
     }
 
@@ -205,6 +220,126 @@ private struct CanvasPane: View {
             height: CGFloat(height) * Self.rowHeight,
             alignment: .topLeading
         )
+    }
+}
+
+/// The small Explore form: a bounded action budget, the settle time, and
+/// the stable IDs the walk must never tap.
+private struct ExplorationFormView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @Binding var isPresented: Bool
+    @State private var maximumActions = 20
+    @State private var settleMilliseconds = 1_500
+    @State private var excludedStableIDs =
+        "android.debug.inspector.open,vistrea.inspector.capture,BackButton"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Explore the running application")
+                .font(.headline)
+            Stepper(
+                "Maximum actions: \(maximumActions)",
+                value: $maximumActions,
+                in: 1...500
+            )
+            Stepper(
+                "Settle milliseconds: \(settleMilliseconds)",
+                value: $settleMilliseconds,
+                in: 0...60_000,
+                step: 250
+            )
+            Text("Excluded stable IDs (comma-separated)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Excluded stable IDs", text: $excludedStableIDs)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Start exploration") {
+                    let excluded = excludedStableIDs
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    isPresented = false
+                    Task {
+                        await model.startExploration(
+                            maximumActions: maximumActions,
+                            settleMilliseconds: settleMilliseconds,
+                            excludedStableIDs: excluded
+                        )
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isExploring)
+            }
+        }
+        .padding(14)
+        .frame(width: 360)
+    }
+}
+
+/// The live exploration status line: progress while the Operation runs, the
+/// report summary once it succeeded, and the verbatim error otherwise.
+private struct ExplorationStatusView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        if model.isExploring || model.explorationReport != nil || model.explorationError != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if model.isExploring {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(progressLine)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer()
+                        Button("Cancel") {
+                            Task { await model.cancelExploration() }
+                        }
+                        .disabled(model.isCancellingExploration)
+                    }
+                }
+                if let report = model.explorationReport {
+                    Text(
+                        "Exploration succeeded: \(report.discoveredStateIDs.count) states discovered · \(report.actionCount) actions · stopped by \(report.stoppedReason)"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .textSelection(.enabled)
+                }
+                if let error = model.explorationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .accessibilityLabel("Exploration status")
+            Divider()
+        }
+    }
+
+    private var progressLine: String {
+        var parts: [String] = []
+        if let state = model.explorationState {
+            parts.append(state)
+        }
+        if let progress = model.explorationProgress {
+            if let phase = progress.phase {
+                parts.append(phase)
+            }
+            if let completed = progress.completedUnits, let total = progress.totalUnits {
+                parts.append("\(completed)/\(total) \(progress.unit ?? "units")")
+            }
+        }
+        if let message = model.explorationLastEventMessage {
+            parts.append(message)
+        }
+        return parts.isEmpty ? "Starting exploration…" : parts.joined(separator: " · ")
     }
 }
 
