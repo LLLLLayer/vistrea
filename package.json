@@ -19,6 +19,7 @@
     "test:agent-adapters": "pnpm build:host && node --test .build/typescript/tests/integration/agent-adapters.test.js",
     "test:e2e:ios-real-vertical": "pnpm build:host && VISTREA_RUN_IOS_REAL_VERTICAL=1 node --test .build/typescript/tests/e2e/ios-real-vertical-loop.test.js",
     "test:e2e:android-real-vertical": "pnpm build:host && VISTREA_RUN_ANDROID_REAL_VERTICAL=1 node --test .build/typescript/tests/e2e/android-real-vertical-loop.test.js",
+    "test:e2e:android-real-automation": "pnpm build:host && VISTREA_RUN_ANDROID_REAL_AUTOMATION=1 node --test .build/typescript/tests/e2e/android-real-automation-loop.test.js",
     "test:scenarios": "node --test examples/scenarios/tests/*.test.mjs",
     "check": "pnpm protocol:validate && pnpm scenarios:validate && pnpm typecheck && pnpm test:contract && pnpm test:host-contract && pnpm test:host-integration && pnpm test:scenarios"
   },

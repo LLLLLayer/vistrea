@@ -1,6 +1,7 @@
 export {
   AutomationEngine,
   AutomationError,
+  boundActionDigest,
   type ActionAuthorization,
   type AutomationActionKind,
   type AutomationActionResult,
@@ -20,3 +21,7 @@ export {
   type ResolvedActionTarget,
   type SemanticActionTarget,
 } from "./automation-engine.js";
+export {
+  AdbAutomationProvider,
+  type AdbAutomationProviderOptions,
+} from "./adb-provider.js";

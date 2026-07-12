@@ -607,7 +607,7 @@ function findNode(
   return undefined;
 }
 
-function boundActionDigest(
+export function boundActionDigest(
   sessionId: string,
   kind: string,
   resolution: ResolvedActionTarget | undefined,
