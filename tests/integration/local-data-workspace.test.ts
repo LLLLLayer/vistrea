@@ -8,8 +8,10 @@ import { test, type TestContext } from "node:test";
 import {
   isDataError,
   PROTOCOL_SCHEMA_IDS,
+  type CommitManifest,
   type ObjectRef,
   type ProtocolValidator,
+  type RefUpdatePrecondition,
   type RuntimeSnapshot,
 } from "../../data/api/index.js";
 import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
@@ -81,6 +83,75 @@ test("production local storage reopens one captured Snapshot and its exact objec
   );
   assert.deepEqual(await collect(await workspace.objects.open(fixture.object.hash)), fixture.bytes);
   await workspace.close();
+});
+
+test("a full pack moves committed history between two local Workspaces", async (t) => {
+  const validator = await validatorPromise;
+  const source = await LocalDataWorkspace.open({
+    workspaceRoot: await temporaryWorkspace(t),
+    validator,
+  });
+  const target = await LocalDataWorkspace.open({
+    workspaceRoot: await temporaryWorkspace(t),
+    validator,
+  });
+  t.after(async () => {
+    for (const workspace of [source, target]) {
+      try {
+        await workspace.close();
+      } catch {
+        // The workspace may already be closed by the test body.
+      }
+    }
+  });
+
+  const payload = Buffer.from('{"screens":["demo.home"]}', "utf8");
+  const graphObject = await source.objects.put(
+    (async function* () {
+      yield payload;
+    })(),
+    {
+      media_type: "application/vnd.vistrea.graph+json",
+      compression: "none",
+      logical_name: "graph-root.json",
+    },
+  );
+  source.data.registerVerifiedObjects([graphObject]);
+  const write = source.data.beginUnitOfWork("write");
+  const commit = write.versions.createCommit({
+    protocol_version: { major: 1, minor: 0 },
+    parents: [],
+    created_at: "2026-07-12T07:00:00.000Z",
+    author: { kind: "human", id: "exchange-test@vistrea.dev", extensions: {} },
+    message: "Record the exchanged runtime graph.",
+    roots: { runtime_graph: graphObject },
+    object_hashes: [graphObject.hash],
+    extensions: {},
+  } as unknown as CommitManifest);
+  write.versions.updateRef("teams/im/main", commit.commit_id, {
+    mode: "must_not_exist",
+  } as unknown as RefUpdatePrecondition);
+  write.commit();
+
+  const pack = await source.exchange.exportPack({
+    ref_names: ["teams/im/main"],
+    created_by: { kind: "human", id: "exchange-test@vistrea.dev", extensions: {} },
+  });
+  const transferred = await target.objects.put(await source.objects.open(pack.hash), {
+    expected_hash: pack.hash,
+    media_type: pack.media_type,
+    compression: pack.compression,
+    extensions: pack.extensions,
+  });
+  const result = await target.exchange.importPack({ pack: transferred });
+  assert.deepEqual(result.imported_commit_ids, [commit.commit_id]);
+  assert.deepEqual(result.imported_object_hashes, [graphObject.hash]);
+
+  const read = target.data.beginUnitOfWork("read");
+  assert.deepEqual(read.versions.getCommit(commit.commit_id), commit);
+  assert.equal(read.versions.resolveRef("teams/im/main").commit_id, commit.commit_id);
+  read.rollback();
+  assert.deepEqual(await collect(await target.objects.open(graphObject.hash)), payload);
 });
 
 async function temporaryWorkspace(t: TestContext): Promise<string> {

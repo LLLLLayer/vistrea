@@ -116,7 +116,8 @@ vistrea/
 │   ├── sync/
 │   │   └── README.md
 │   └── exchange/
-│       └── README.md
+│       ├── README.md
+│       └── pack-exchange.ts
 ├── services/
 │   ├── README.md
 │   └── hub/
@@ -310,7 +311,7 @@ Runtime data is not source code:
 └── cache/
 ```
 
-The entire `.vistrea/` directory is ignored. SQLite metadata and content-addressed object storage are implemented and verified. Portable exchange will use a defined `.vistrea-pack`, not a raw copy of a live SQLite database; that exchange implementation is still pending.
+The entire `.vistrea/` directory is ignored. SQLite metadata, content-addressed object storage, and portable `.vistrea-pack` export/import are implemented and verified. A pack is a defined framed byte stream (ADR-0006), not a raw copy of a live SQLite database.
 
 ## 7. Implemented toolchains and future projects
 
@@ -325,7 +326,7 @@ The first implementation keeps the language-neutral contracts while using toolch
 - UIKit and Android View as the verified initial native adapters;
 - authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API.
 
-Future SwiftUI/Compose capture adapters, automation providers, portable exchange, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future SwiftUI/Compose capture adapters, automation providers, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

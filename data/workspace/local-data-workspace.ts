@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { DataError } from "../api/errors.js";
 import type { Clock, IdGenerator, ProtocolValidator } from "../api/models.js";
-import type { ObjectStore, WorkspaceDataSource } from "../api/ports.js";
+import type { ExchangeService, ObjectStore, WorkspaceDataSource } from "../api/ports.js";
+import { PackExchangeService } from "../exchange/index.js";
 import {
   SQLiteDataStore,
   type MigrationAuthorization,
@@ -43,6 +44,7 @@ export class LocalDataWorkspace {
   readonly workspaceRoot: string;
   readonly data: WorkspaceDataSource;
   readonly objects: ObjectStore;
+  readonly exchange: ExchangeService;
   readonly #sqlite: SQLiteDataStore;
   readonly #lock: WorkspaceLock;
   #storageClosed = false;
@@ -53,11 +55,13 @@ export class LocalDataWorkspace {
     sqlite: SQLiteDataStore,
     objects: FileObjectStore,
     lock: WorkspaceLock,
+    validator: ProtocolValidator,
   ) {
     this.workspaceRoot = workspaceRoot;
     this.#sqlite = sqlite;
     this.data = sqlite;
     this.objects = objects;
+    this.exchange = new PackExchangeService({ data: sqlite, objects, validator });
     this.#lock = lock;
   }
 
@@ -92,7 +96,7 @@ export class LocalDataWorkspace {
         workspaceRoot,
         ...(options.clock === undefined ? {} : { clock: options.clock }),
       });
-      return new LocalDataWorkspace(workspaceRoot, sqlite, objects, lock);
+      return new LocalDataWorkspace(workspaceRoot, sqlite, objects, lock, options.validator);
     } catch (error) {
       try {
         sqlite?.close();

@@ -67,6 +67,12 @@ export const PROTOCOL_SCHEMA_IDS = {
     "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/RefUpdatePrecondition",
   objectRef: "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef",
   resourceRef: "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef",
+  actorRef: "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef",
+  exchangePackManifest: "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+  exchangePackHeader:
+    "https://vistrea.dev/schema/v1/exchange-pack.schema.json#/$defs/PackHeader",
+  exchangePackTrailer:
+    "https://vistrea.dev/schema/v1/exchange-pack.schema.json#/$defs/PackTrailer",
   mutationPrecondition:
     "https://vistrea.dev/schema/v1/common.schema.json#/$defs/MutationPrecondition",
   revisionPrecondition:
@@ -751,9 +757,44 @@ export interface SearchRebuildSource {
   readonly resource_kinds?: readonly string[];
 }
 
-export interface ExportPackCommand extends JsonObject {}
-export interface ImportPackCommand extends JsonObject {}
-export interface ImportPackResult extends JsonObject {}
+export interface ExportPackCommand {
+  /** Refs whose targets become pack heads and travel as PackRef entries. */
+  readonly ref_names?: readonly string[];
+  /** Additional unnamed head commits. */
+  readonly commit_ids?: readonly string[];
+  /**
+   * Commits the importer is assumed to already hold. A non-empty list makes
+   * the pack thin: objects reachable from these commits are listed as
+   * omitted_objects instead of being included.
+   */
+  readonly prerequisite_commit_ids?: readonly string[];
+  /** Protocol ActorRef describing who produced the pack. */
+  readonly created_by: JsonObject;
+  readonly message?: string;
+}
+
+export interface ImportPackCommand {
+  /** A verified `.vistrea-pack` object already present in the local Object Store. */
+  readonly pack: ObjectRef;
+}
+
+export interface PackRefConflict {
+  readonly name: string;
+  readonly pack_commit_id: string;
+  readonly local_commit_id: string;
+}
+
+export interface ImportPackResult {
+  readonly mode: "full" | "thin";
+  readonly imported_commit_ids: readonly string[];
+  readonly existing_commit_ids: readonly string[];
+  readonly imported_object_hashes: readonly string[];
+  readonly existing_object_hashes: readonly string[];
+  readonly created_refs: readonly Ref[];
+  readonly unchanged_ref_names: readonly string[];
+  readonly conflicting_refs: readonly PackRefConflict[];
+}
+
 export interface ExportReadableCommand extends JsonObject {}
 export interface RemoteRef extends JsonObject {}
 export interface SyncStatus extends JsonObject {}

@@ -8,3 +8,4 @@ Record schema format, transport, storage, implementation language, state dedupli
 - `0003-object-and-commit-identity.md`: accepted object, commit, ref, and Working Set identity
 - `0004-host-data-and-sqlite-migrations.md`: accepted Host/Data toolchain, SQLite driver, and migration policy
 - `0005-ios-first-vertical-loop.md`: accepted first native end-to-end slice and its boundary-level acceptance path
+- `0006-vistrea-pack-container.md`: accepted `.vistrea-pack` version 1 container framing and import verification order

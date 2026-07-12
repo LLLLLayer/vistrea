@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+  "title": "Vistrea Portable Exchange Pack Manifest",
+  "description": "JSON documents framed inside one `.vistrea-pack` byte stream. The container layout is: one PackHeader line, exactly manifest_byte_size bytes of one canonical PackManifest followed by one line feed, the encoded payload bytes of every entry in objects in listed order, and one PackTrailer line whose pack_sha256 covers every preceding byte. Identity-bearing JSON uses the canonical encoding from ADR-0003.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "format_version",
+    "protocol_version",
+    "mode",
+    "created_at",
+    "created_by",
+    "commits",
+    "refs",
+    "objects",
+    "omitted_objects",
+    "prerequisite_commit_ids",
+    "extensions"
+  ],
+  "properties": {
+    "format": { "const": "vistrea-pack" },
+    "format_version": { "const": 1 },
+    "protocol_version": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion" },
+    "mode": { "enum": ["full", "thin"] },
+    "created_at": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp" },
+    "created_by": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef" },
+    "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "commits": {
+      "description": "Included Commits in parent-first order: every parent of a listed Commit is either an earlier list entry or a prerequisite the importer must already hold.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Commit" }
+    },
+    "refs": {
+      "description": "Selected ref targets. Ref revisions are local Workspace state and never travel in a pack.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/PackRef" }
+    },
+    "objects": {
+      "description": "Included objects sorted by hash. Payload bytes follow the manifest in exactly this order.",
+      "type": "array",
+      "items": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" }
+    },
+    "omitted_objects": {
+      "description": "Thin packs list every reachable object that was deliberately not included.",
+      "type": "array",
+      "items": { "$ref": "https://vistrea.dev/schema/v1/object.schema.json#/$defs/ObjectRef" }
+    },
+    "prerequisite_commit_ids": {
+      "description": "Commits the importer must already hold before this pack can resolve. Empty for full packs.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/CommitId" }
+    },
+    "extensions": { "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions" }
+  },
+  "$defs": {
+    "PackHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "format_version", "manifest_byte_size"],
+      "properties": {
+        "format": { "const": "vistrea-pack" },
+        "format_version": { "const": 1 },
+        "manifest_byte_size": {
+          "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafePositiveInteger"
+        }
+      }
+    },
+    "PackRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "commit_id"],
+      "properties": {
+        "name": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/RefName" },
+        "commit_id": { "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/CommitId" }
+      }
+    },
+    "PackTrailer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pack_sha256"],
+      "properties": {
+        "pack_sha256": {
+          "description": "SHA-256 hex digest over every pack byte before this trailer line.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

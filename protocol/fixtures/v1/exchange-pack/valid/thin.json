@@ -1,0 +1,75 @@
+{
+  "format": "vistrea-pack",
+  "format_version": 1,
+  "protocol_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "mode": "thin",
+  "created_at": "2026-07-12T02:30:00Z",
+  "created_by": {
+    "kind": "human",
+    "id": "developer@example.com",
+    "extensions": {}
+  },
+  "commits": [
+    {
+      "commit_id": "commit:sha256:5e226b02ba82660c34ad273b97b66a12584055ff09ee2edda3bf59ee51a2a7f0",
+      "manifest": {
+        "protocol_version": {
+          "major": 1,
+          "minor": 0
+        },
+        "parents": [
+          "commit:sha256:f684c9a55458270197e2e68de29c7fd245b41673a949c46fe25e5caf76b20fd4"
+        ],
+        "created_at": "2026-07-12T01:00:00Z",
+        "author": {
+          "kind": "human",
+          "id": "developer@example.com",
+          "extensions": {}
+        },
+        "message": "Record the second Demo runtime graph revision.",
+        "build_context": {
+          "kind": "build",
+          "id": "build_019f0000-0000-7000-8000-000000000001"
+        },
+        "roots": {
+          "runtime_graph": {
+            "hash": "sha256:2d5e181dbf2a24599b1d8290b551dd1d21dcaedb4f62c12cfed2165a80614ac9",
+            "media_type": "application/vnd.vistrea.graph+json",
+            "byte_size": 25,
+            "compression": "none",
+            "logical_name": "graph-root-v2.json",
+            "extensions": {}
+          }
+        },
+        "object_hashes": [
+          "sha256:2d5e181dbf2a24599b1d8290b551dd1d21dcaedb4f62c12cfed2165a80614ac9"
+        ],
+        "extensions": {}
+      }
+    }
+  ],
+  "refs": [
+    {
+      "name": "teams/im/main",
+      "commit_id": "commit:sha256:5e226b02ba82660c34ad273b97b66a12584055ff09ee2edda3bf59ee51a2a7f0"
+    }
+  ],
+  "objects": [
+    {
+      "hash": "sha256:2d5e181dbf2a24599b1d8290b551dd1d21dcaedb4f62c12cfed2165a80614ac9",
+      "media_type": "application/vnd.vistrea.graph+json",
+      "byte_size": 25,
+      "compression": "none",
+      "logical_name": "graph-root-v2.json",
+      "extensions": {}
+    }
+  ],
+  "omitted_objects": [],
+  "prerequisite_commit_ids": [
+    "commit:sha256:f684c9a55458270197e2e68de29c7fd245b41673a949c46fe25e5caf76b20fd4"
+  ],
+  "extensions": {}
+}

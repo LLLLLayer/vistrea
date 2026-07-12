@@ -296,6 +296,11 @@ A pack contains:
 
 Pack exchange and Hub sync use the same manifest and object identity model.
 
+The version 1 pack manifest is a protocol model
+(`protocol/schema/v1/exchange-pack.schema.json`), the byte framing is fixed by
+ADR-0006, and `data/exchange/README.md` documents the implemented exporter and
+importer behavior.
+
 ## 9. Hub synchronization
 
 ```text

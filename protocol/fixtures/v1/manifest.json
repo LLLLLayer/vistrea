@@ -531,6 +531,42 @@
       "path": "timestamp/valid/nanosecond.json",
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp",
       "expectation": "schema-valid"
+    },
+    {
+      "path": "exchange-pack/valid/full.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "exchange-pack/valid/thin.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "exchange-pack/valid/header.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json#/$defs/PackHeader",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "exchange-pack/valid/trailer.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json#/$defs/PackTrailer",
+      "expectation": "schema-valid"
+    },
+    {
+      "path": "exchange-pack/invalid/unknown-format-version.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "const", "instance_path": "/format_version" }
+      ]
+    },
+    {
+      "path": "exchange-pack/invalid/missing-objects.json",
+      "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
+      "expectation": "schema-invalid",
+      "expected_schema_errors": [
+        { "keyword": "required", "instance_path": "", "missing_property": "objects" }
+      ]
     }
   ]
 }
