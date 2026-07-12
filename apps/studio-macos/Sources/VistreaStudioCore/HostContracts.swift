@@ -256,6 +256,65 @@ public struct ObjectByteRange: Equatable, Sendable {
     }
 }
 
+/// A presentation projection of one canonical Review Issue.
+///
+/// Studio lists issues without re-modeling the full protocol value, so this
+/// summary deliberately tolerates additional canonical fields.
+public struct ReviewIssueSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let issueID: String
+    public let revision: UInt64
+    public let title: String
+    public let category: String
+    public let severity: String
+    public let state: String
+    public let updatedAt: String
+
+    public var id: String { issueID }
+
+    public init(
+        issueID: String,
+        revision: UInt64,
+        title: String,
+        category: String,
+        severity: String,
+        state: String,
+        updatedAt: String
+    ) {
+        self.issueID = issueID
+        self.revision = revision
+        self.title = title
+        self.category = category
+        self.severity = severity
+        self.state = state
+        self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case issueID = "issue_id"
+        case revision
+        case title
+        case category
+        case severity
+        case state
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct ReviewIssuePage: Decodable, Equatable, Sendable {
+    public let items: [ReviewIssueSummary]
+    public let nextCursor: String?
+
+    public init(items: [ReviewIssueSummary], nextCursor: String? = nil) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+    }
+}
+
 public protocol HostClient: Sendable {
     func getStatus() async throws -> HostStatus
     func listSnapshots() async throws -> SnapshotPage
@@ -263,6 +322,7 @@ public protocol HostClient: Sendable {
     func getObject(hash: String, range: ObjectByteRange?) async throws -> Data
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot
     func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline
+    func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage
 }
 
 public enum HostClientError: Error, Equatable, Sendable {

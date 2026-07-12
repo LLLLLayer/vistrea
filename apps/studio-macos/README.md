@@ -12,6 +12,7 @@ The first native SwiftUI Snapshot workspace is implemented as a standalone Swift
 - iterative reconstruction of canonical flat UI nodes into a View Tree outline;
 - node selection and canonical property details;
 - a persisted Runtime event timeline pane with newest-first ordering, transient payload summaries, and the Host event-pump status;
+- a Review Issues pane listing persisted issues with lifecycle state, severity, and category, most recently updated first;
 - loading, empty, detail-error, connection-error, and capture-error states;
 - a capture action over the Host Local API;
 - a canonical fixture-backed development mode when no Host is configured.

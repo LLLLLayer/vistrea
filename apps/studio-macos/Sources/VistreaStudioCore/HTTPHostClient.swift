@@ -183,6 +183,29 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func listReviewIssues(states: [String]? = nil) async throws -> ReviewIssuePage {
+        if let states {
+            guard !states.isEmpty,
+                  states.count <= 8,
+                  states.allSatisfy({ $0.range(of: "^[a-z_]{1,32}$", options: .regularExpression) != nil })
+            else {
+                throw HostClientError.invalidIdentifier(states.joined(separator: ","))
+            }
+        }
+        let response = try await request(
+            method: "GET",
+            path: ["v1", "review-issues"],
+            query: states.map { [URLQueryItem(name: "states", value: $0.joined(separator: ","))] } ?? []
+        )
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(ReviewIssuePage.self, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {

@@ -54,6 +54,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var eventsPhase: EventTimelinePhase = .idle
     @Published public private(set) var events: [EventListItem] = []
     @Published public private(set) var reportedEventGaps: [EventSequenceGap] = []
+    @Published public private(set) var issuesPhase: EventTimelinePhase = .idle
+    @Published public private(set) var reviewIssues: [ReviewIssueSummary] = []
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isCapturing = false
     @Published public private(set) var operationError: String?
@@ -82,6 +84,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
 
         await loadEventTimeline()
+        await loadReviewIssues()
 
         do {
             let page = try await client.listSnapshots()
@@ -163,6 +166,19 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     public func dismissOperationError() {
         operationError = nil
+    }
+
+    /// Reloads the persisted Review Issues, most recently updated first.
+    public func loadReviewIssues() async {
+        issuesPhase = .loading
+        do {
+            let page = try await client.listReviewIssues(states: nil)
+            reviewIssues = page.items.sorted { $0.updatedAt > $1.updatedAt }
+            issuesPhase = reviewIssues.isEmpty ? .empty : .content
+        } catch {
+            reviewIssues = []
+            issuesPhase = .failure(Self.message(for: error))
+        }
     }
 
     /// Reloads the persisted Runtime event timeline, newest events first.

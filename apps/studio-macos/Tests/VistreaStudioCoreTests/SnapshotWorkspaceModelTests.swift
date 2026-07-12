@@ -171,6 +171,9 @@ private struct AlwaysFailingHostClient: HostClient {
     func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
         throw HostClientError.transport("offline")
     }
+    func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
+        throw HostClientError.transport("offline")
+    }
 }
 
 private actor OperationGateHostClient: HostClient {
@@ -221,6 +224,10 @@ private actor OperationGateHostClient: HostClient {
         EventTimeline(events: [], reportedGaps: [])
     }
 
+    func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
+        ReviewIssuePage(items: [])
+    }
+
     func isStatusWaiting() -> Bool { statusContinuation != nil }
     func isCaptureWaiting() -> Bool { captureContinuation != nil }
 
@@ -263,5 +270,46 @@ private struct CaptureResultHostClient: HostClient {
 
     func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
         EventTimeline(events: [], reportedGaps: [])
+    }
+
+    func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
+        ReviewIssuePage(items: [])
+    }
+}
+
+extension SnapshotWorkspaceModelTests {
+    func testReviewIssuesLoadMostRecentFirst() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let older = ReviewIssueSummary(
+            issueID: "issue_019f0000-0000-7000-8000-000000000001",
+            revision: 1,
+            title: "Older open issue",
+            category: "frame",
+            severity: "minor",
+            state: "open",
+            updatedAt: "2026-07-12T02:02:00Z"
+        )
+        let newer = ReviewIssueSummary(
+            issueID: "issue_019f0000-0000-7000-8000-000000000002",
+            revision: 4,
+            title: "Recently resolved issue",
+            category: "alpha",
+            severity: "major",
+            state: "resolved",
+            updatedAt: "2026-07-12T02:06:00Z"
+        )
+        let model = SnapshotWorkspaceModel(
+            client: FixtureHostClient(snapshots: [snapshot], reviewIssues: [older, newer])
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(model.issuesPhase, .content)
+        XCTAssertEqual(model.reviewIssues.map(\.issueID), [newer.issueID, older.issueID])
+        XCTAssertEqual(model.reviewIssues.first?.state, "resolved")
+
+        let emptyModel = SnapshotWorkspaceModel(client: FixtureHostClient(snapshots: [snapshot]))
+        await emptyModel.refresh()
+        XCTAssertEqual(emptyModel.issuesPhase, .empty)
     }
 }

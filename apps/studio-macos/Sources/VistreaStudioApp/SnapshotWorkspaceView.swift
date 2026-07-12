@@ -53,9 +53,73 @@ struct SnapshotWorkspaceView: View {
                     ViewTreePane(model: model)
                         .frame(minHeight: 220)
                 }
-                NodeDetailsPane(model: model)
-                    .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
+                VSplitView {
+                    NodeDetailsPane(model: model)
+                        .frame(minHeight: 260)
+                    ReviewIssuesPane(model: model)
+                        .frame(minHeight: 140)
+                }
+                .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
             }
+        }
+    }
+}
+
+private struct ReviewIssuesPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "Review Issues", systemImage: "checkmark.seal")
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.issuesPhase {
+        case .idle, .loading:
+            ProgressView("Loading Review Issues…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            Text("No Review Issues have been recorded yet.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.reviewIssues) { issue in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(issue.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(issue.state)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(issue.state == "resolved" ? Color.green : Color.orange)
+                        Text(issue.severity)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(issue.category)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(issue.updatedAt)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .padding(.vertical, 2)
+                .accessibilityLabel("Review issue \(issue.title), state \(issue.state)")
+            }
+            .listStyle(.sidebar)
         }
     }
 }

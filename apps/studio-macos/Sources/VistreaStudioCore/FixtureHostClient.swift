@@ -6,17 +6,27 @@ public actor FixtureHostClient: HostClient {
     private var snapshotsByID: [String: RuntimeSnapshot]
     private let objectsByHash: [String: Data]
     private let eventTimeline: EventTimeline
+    private let reviewIssues: [ReviewIssueSummary]
 
     public init(
         snapshots: [RuntimeSnapshot],
         objectsByHash: [String: Data] = [:],
         status: HostStatus = HostStatus(status: .ready, runtimeConnected: true, message: "Canonical fixture"),
-        eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: [])
+        eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: []),
+        reviewIssues: [ReviewIssueSummary] = []
     ) {
         self.status = status
         snapshotsByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.snapshotID.rawValue, $0) })
         self.objectsByHash = objectsByHash
         self.eventTimeline = eventTimeline
+        self.reviewIssues = reviewIssues
+    }
+
+    public func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
+        guard let states else {
+            return ReviewIssuePage(items: reviewIssues)
+        }
+        return ReviewIssuePage(items: reviewIssues.filter { states.contains($0.state) })
     }
 
     public func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
@@ -98,6 +108,7 @@ public struct UnavailableHostClient: HostClient {
     public func getObject(hash: String, range: ObjectByteRange?) async throws -> Data { throw error }
     public func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot { throw error }
     public func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline { throw error }
+    public func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage { throw error }
 }
 
 public enum CanonicalFixtureLoader {
