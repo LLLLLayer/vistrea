@@ -61,6 +61,13 @@ let package = Package(
             dependencies: ["VistreaRuntimeSwiftUI"]
         ),
         .testTarget(
+            name: "VistreaRuntimeUIKitTests",
+            dependencies: [
+                "VistreaRuntimeUIKit",
+                "VistreaRuntimeModels",
+            ]
+        ),
+        .testTarget(
             name: "VistreaRuntimeConnectionTests",
             dependencies: [
                 "VistreaRuntimeConnection",

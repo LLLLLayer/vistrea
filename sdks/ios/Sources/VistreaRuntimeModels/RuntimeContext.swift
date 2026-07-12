@@ -128,8 +128,15 @@ public struct RuntimeContext: Codable, Equatable, Sendable {
         guard !environmentID.isEmpty, environmentID.unicodeScalars.count <= 128 else {
             throw ProtocolModelError.invalidValue("Environment ID must contain 1 through 128 UTF-8 bytes.")
         }
+        if let accountProfileID, accountProfileID.isEmpty || accountProfileID.unicodeScalars.count > 128 {
+            throw ProtocolModelError.invalidValue("Account profile ID must contain 1 through 128 UTF-8 bytes.")
+        }
         if let featureContextRefs, Set(featureContextRefs).count != featureContextRefs.count {
             throw ProtocolModelError.invalidValue("Feature context references must be unique.")
+        }
+        if let featureContextRefs,
+           !featureContextRefs.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.count <= 256 }) {
+            throw ProtocolModelError.invalidValue("Feature context references must contain 1 through 256 UTF-8 bytes.")
         }
         guard locale.unicodeScalars.count >= 2, locale.unicodeScalars.count <= 64 else {
             throw ProtocolModelError.invalidValue("Locale must contain 2 through 64 UTF-8 bytes.")

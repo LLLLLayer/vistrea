@@ -5,6 +5,14 @@ import SwiftUI
 ///
 /// Raw values match the canonical `UiNode.role` vocabulary so annotated
 /// SwiftUI content classifies identically to native UIKit views.
+///
+/// The bridge has two deliberate limits. `.listItem` and `.container` carry
+/// no accessibility traits, so these structural roles do not round-trip
+/// through the accessibility bridge: the capture adapter records both as
+/// `"container"`. `.textField` maps to the search-field trait — the only
+/// trait the adapter can read back as `"text-field"` — and VoiceOver
+/// announces that trait as a search field, so annotate production text
+/// fields deliberately.
 public enum VistreaSemanticRole: String, CaseIterable, Sendable {
     case button
     case text
@@ -39,6 +47,11 @@ extension View {
     /// becomes accessibility traits the UIKit capture adapter maps back to
     /// the canonical role vocabulary, and the optional label becomes the
     /// accessibility label. The modifier never invokes business logic.
+    ///
+    /// Because `.listItem` and `.container` carry no traits, they are
+    /// captured as `"container"`, and `.textField` rides the search-field
+    /// trait that VoiceOver announces; see `VistreaSemanticRole` for the
+    /// full round-trip limits before annotating production text fields.
     public func vistreaSemantics(
         stableID: String,
         role: VistreaSemanticRole,

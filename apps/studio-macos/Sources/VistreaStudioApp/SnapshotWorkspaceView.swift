@@ -189,6 +189,7 @@ private struct CanvasPane: View {
 
 private struct LayerInspector3DPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var sceneCache = LayerSceneCache()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -202,12 +203,31 @@ private struct LayerInspector3DPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 SceneView(
-                    scene: LayerSceneBuilder.scene(for: model.layerBoxes),
+                    scene: sceneCache.scene(for: model.layerBoxes),
                     options: [.allowsCameraControl, .autoenablesDefaultLighting]
                 )
                 .accessibilityLabel("3D layer inspector with \(model.layerBoxes.count) layers")
             }
         }
+    }
+}
+
+/// Memoizes the built scene by its layer boxes so unrelated published changes
+/// do not rebuild it and reset the user's orbiting camera. The cache is only
+/// touched from main-actor `body` evaluations.
+private final class LayerSceneCache {
+    private var boxes: [LayerBox3D] = []
+    private var cached: SCNScene?
+
+    @MainActor
+    func scene(for boxes: [LayerBox3D]) -> SCNScene {
+        if let cached, boxes == self.boxes {
+            return cached
+        }
+        let built = LayerSceneBuilder.scene(for: boxes)
+        self.boxes = boxes
+        cached = built
+        return built
     }
 }
 
@@ -725,9 +745,9 @@ private struct TreeNodeRow: View {
     private var symbolName: String {
         switch node.role {
         case "button": "button.programmable"
-        case "text", "label": "textformat"
+        case "text": "textformat"
         case "image": "photo"
-        case "text_field": "character.cursor.ibeam"
+        case "text-field", "text-area": "character.cursor.ibeam"
         default: "square.on.square"
         }
     }

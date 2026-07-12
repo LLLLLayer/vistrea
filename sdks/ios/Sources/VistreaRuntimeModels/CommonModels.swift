@@ -256,6 +256,9 @@ public struct CapabilitySet: Codable, Equatable, Sendable {
         guard names.allSatisfy(ProtocolLexicalRules.isNamespaced) else {
             throw ProtocolModelError.invalidValue("Capability names must be namespaced.")
         }
+        guard names.allSatisfy({ $0.unicodeScalars.count <= 128 }) else {
+            throw ProtocolModelError.invalidValue("Capability names must contain 1 through 128 UTF-8 bytes.")
+        }
         self.names = names
         self.extensions = extensions
     }
@@ -293,7 +296,10 @@ public struct CaptureLimitationScope: Codable, Equatable, Sendable {
     public let nodeID: NodeID?
     public let field: String?
 
-    public init(treeID: TreeID? = nil, nodeID: NodeID? = nil, field: String? = nil) {
+    public init(treeID: TreeID? = nil, nodeID: NodeID? = nil, field: String? = nil) throws {
+        if let field, field.isEmpty || field.unicodeScalars.count > 256 {
+            throw ProtocolModelError.invalidValue("Capture limitation scope fields must contain 1 through 256 UTF-8 bytes.")
+        }
         self.treeID = treeID
         self.nodeID = nodeID
         self.field = field
@@ -308,9 +314,18 @@ public struct CaptureLimitationScope: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         try decoder.rejectUnknownKeys(CodingKeys.self)
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        treeID = try container.decodeIfPresent(TreeID.self, forKey: .treeID)
-        nodeID = try container.decodeIfPresent(NodeID.self, forKey: .nodeID)
-        field = try container.decodeIfPresent(String.self, forKey: .field)
+        let treeID = try container.decodeIfPresent(TreeID.self, forKey: .treeID)
+        let nodeID = try container.decodeIfPresent(NodeID.self, forKey: .nodeID)
+        let field = try container.decodeIfPresent(String.self, forKey: .field)
+        do {
+            try self.init(treeID: treeID, nodeID: nodeID, field: field)
+        } catch {
+            throw DecodingError.dataCorruptedError(
+                forKey: .field,
+                in: container,
+                debugDescription: String(describing: error)
+            )
+        }
     }
 }
 

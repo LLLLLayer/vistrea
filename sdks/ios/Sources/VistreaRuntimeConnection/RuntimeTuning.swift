@@ -45,7 +45,8 @@ enum RuntimeTuningProcessor {
         expectedSnapshotID: String,
         lastCapturedSnapshotID: String?,
         connectionID: String,
-        controller: any RuntimeTuningApplying
+        controller: any RuntimeTuningApplying,
+        activeTargetStableIDs: Set<String> = []
     ) async throws -> RuntimeTuningOutcome {
         guard case let .object(patchObject) = patch,
               case let .string(patchID)? = patchObject["patch_id"],
@@ -100,6 +101,17 @@ enum RuntimeTuningProcessor {
                     runtimeTarget: runtimeTarget,
                     reasonCode: "target_not_found",
                     message: "The change has no stable identifier to resolve a live view."
+                ))
+                continue
+            }
+            if activeTargetStableIDs.contains(stableID) {
+                // Stacking previews on one target makes restore order ambiguous,
+                // so a covered (stable_id, property) rejects instead of stacking.
+                rejected.append(RuntimeTuningRejection(
+                    changeID: changeID,
+                    runtimeTarget: runtimeTarget,
+                    reasonCode: "policy_blocked",
+                    message: "Another active tuning application already previews this target property."
                 ))
                 continue
             }

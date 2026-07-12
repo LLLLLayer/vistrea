@@ -114,7 +114,9 @@ public actor FixtureHostClient: HostClient {
             throw HostClientError.invalidRange
         }
         let upperBound = min(range.upperBound ?? UInt64(data.count - 1), UInt64(data.count - 1))
-        return data[Int(range.lowerBound)...Int(upperBound)]
+        // Materialize the slice so consumers see zero-based offsets, exactly
+        // like the bytes HTTPHostClient returns.
+        return Data(data[Int(range.lowerBound)...Int(upperBound)])
     }
 
     public func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot {

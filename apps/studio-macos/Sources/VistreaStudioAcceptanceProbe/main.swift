@@ -58,7 +58,11 @@ private enum VistreaStudioAcceptanceProbe {
             FileHandle.standardOutput.write(try encoder.encode(result))
             FileHandle.standardOutput.write(Data([0x0a]))
         } catch {
-            FileHandle.standardError.write(Data("Studio acceptance probe failed.\n".utf8))
+            // HostClientError descriptions never carry the bearer token; keep
+            // the diagnostic on one line for log scraping.
+            let reason = String(describing: error)
+                .replacingOccurrences(of: "\n", with: " ")
+            FileHandle.standardError.write(Data("Studio acceptance probe failed: \(reason)\n".utf8))
             exit(EXIT_FAILURE)
         }
     }

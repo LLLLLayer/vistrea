@@ -51,12 +51,23 @@ public final class URLSessionHostHTTPTransport: HostHTTPTransport, @unchecked Se
             if response.expectedContentLength > 0 {
                 data.reserveCapacity(min(effectiveLimit, Int(response.expectedContentLength)))
             }
+            // Buffer in bounded chunks: appending Data byte-by-byte is far too
+            // slow for Object responses, while the limit check still rejects
+            // the stream before it can buffer past effectiveLimit.
+            let chunkCapacity = 64 * 1_024
+            var chunk = [UInt8]()
+            chunk.reserveCapacity(chunkCapacity)
             for try await byte in bytes {
-                guard data.count < effectiveLimit else {
+                chunk.append(byte)
+                guard data.count + chunk.count <= effectiveLimit else {
                     throw HostClientError.responseTooLarge(limit: effectiveLimit)
                 }
-                data.append(byte)
+                if chunk.count == chunkCapacity {
+                    data.append(contentsOf: chunk)
+                    chunk.removeAll(keepingCapacity: true)
+                }
             }
+            data.append(contentsOf: chunk)
             let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, item in
                 result[String(describing: item.key).lowercased()] = String(describing: item.value)
             }

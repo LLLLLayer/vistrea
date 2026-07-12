@@ -399,7 +399,9 @@ struct WireEventStart: Decodable, Sendable {
         try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mode = try container.decode(String.self, forKey: .mode)
-        sequence = try container.decodeIfPresent(UInt64.self, forKey: .sequence)
+        // JSONSafeUInt rejects sequences above the JSON-safe bound at decode
+        // time so downstream `+ 1` cursor arithmetic can never overflow.
+        sequence = try container.decodeIfPresent(JSONSafeUInt.self, forKey: .sequence)?.rawValue
     }
 }
 
@@ -422,7 +424,12 @@ struct WireAcknowledgeEvents: Decodable, Sendable {
         type = try container.decode(String.self, forKey: .type)
         subscriptionID = try container.decode(String.self, forKey: .subscriptionID)
         eventEpochID = try container.decode(String.self, forKey: .eventEpochID)
-        durableThroughSequence = try container.decode(UInt64.self, forKey: .durableThroughSequence)
+        // JSONSafeUInt rejects acknowledgements above the JSON-safe bound at
+        // decode time so the recorder's `sequence + 1` release cannot overflow.
+        durableThroughSequence = try container.decode(
+            JSONSafeUInt.self,
+            forKey: .durableThroughSequence
+        ).rawValue
     }
 }
 

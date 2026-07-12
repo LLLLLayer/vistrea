@@ -320,6 +320,60 @@ extension RuntimeConnectionTests {
     }
 }
 
+extension RuntimeConnectionTests {
+    func testWireSequenceFieldsRejectValuesAboveTheJSONSafeBound() throws {
+        let overflow = ProtocolLexicalBounds.jsonSafeIntegerMaximum + 1
+        let subscribeSource = """
+        {"type":"subscribe_events","request_id":"request-1",\
+        "event_epoch_id":"epoch_019f0000-0000-7000-8000-000000000001",\
+        "event_kinds":["transient_presented"],\
+        "start":{"mode":"after_sequence","sequence":%SEQ%}}
+        """
+        let acknowledgeSource = """
+        {"type":"acknowledge_events","subscription_id":"subscription-1",\
+        "event_epoch_id":"epoch_019f0000-0000-7000-8000-000000000001",\
+        "durable_through_sequence":%SEQ%}
+        """
+
+        // An out-of-bound sequence fails decoding (the client maps decoding
+        // failures to a protocol violation) instead of trapping on `+ 1`.
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                WireSubscribeEvents.self,
+                from: Data(subscribeSource.replacingOccurrences(of: "%SEQ%", with: String(overflow)).utf8)
+            )
+        ) { error in
+            XCTAssertTrue(error is DecodingError, "Expected a decoding rejection, received \(error)")
+        }
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                WireAcknowledgeEvents.self,
+                from: Data(acknowledgeSource.replacingOccurrences(of: "%SEQ%", with: String(overflow)).utf8)
+            )
+        ) { error in
+            XCTAssertTrue(error is DecodingError, "Expected a decoding rejection, received \(error)")
+        }
+
+        // The inclusive JSON-safe maximum still decodes and survives cursor
+        // arithmetic without overflowing.
+        let maximum = ProtocolLexicalBounds.jsonSafeIntegerMaximum
+        let subscribe = try JSONDecoder().decode(
+            WireSubscribeEvents.self,
+            from: Data(subscribeSource.replacingOccurrences(of: "%SEQ%", with: String(maximum)).utf8)
+        )
+        XCTAssertEqual(subscribe.start.sequence.map { $0 + 1 }, maximum + 1)
+        let acknowledge = try JSONDecoder().decode(
+            WireAcknowledgeEvents.self,
+            from: Data(acknowledgeSource.replacingOccurrences(of: "%SEQ%", with: String(maximum)).utf8)
+        )
+        XCTAssertEqual(acknowledge.durableThroughSequence + 1, maximum + 1)
+    }
+}
+
+private enum ProtocolLexicalBounds {
+    static let jsonSafeIntegerMaximum: UInt64 = 9_007_199_254_740_991
+}
+
 private actor ScriptedTuningController: RuntimeTuningApplying {
     private var alphaByStableID: [String: Double]
 
@@ -469,5 +523,101 @@ extension RuntimeConnectionTests {
             }
             XCTAssertEqual(reason, expectedReason)
         }
+    }
+
+    func testTuningApplyRejectsTargetsCoveredByAnotherActiveApplication() async throws {
+        let controller = ScriptedTuningController([
+            "demo.home.open_catalog": 1.0,
+            "demo.home.title": 1.0,
+        ])
+        let snapshotID = "snapshot_019f0000-0000-7000-8000-000000000001"
+        let connectionID = "connection_019f0000-0000-7000-8000-000000000001"
+
+        // The first application previews the catalog target and stays active.
+        let first = try await RuntimeTuningProcessor.apply(
+            patch: Self.alphaPatch(preview: 0.7),
+            expectedSnapshotID: snapshotID,
+            lastCapturedSnapshotID: snapshotID,
+            connectionID: connectionID,
+            controller: controller
+        )
+        XCTAssertTrue(first.isActive)
+        let activeTargets = Set(first.restoreEntries.map(\.stableID))
+        XCTAssertEqual(activeTargets, ["demo.home.open_catalog"])
+
+        // A second apply covering the same (stable_id, property) rejects that
+        // change with policy_blocked instead of stacking a second preview,
+        // and the first application's preview value stays untouched.
+        let stacked = try await RuntimeTuningProcessor.apply(
+            patch: Self.alphaPatch(preview: 0.4),
+            expectedSnapshotID: snapshotID,
+            lastCapturedSnapshotID: snapshotID,
+            connectionID: connectionID,
+            controller: controller,
+            activeTargetStableIDs: activeTargets
+        )
+        XCTAssertFalse(stacked.isActive)
+        XCTAssertTrue(stacked.restoreEntries.isEmpty)
+        let stackedAlpha = await controller.alpha("demo.home.open_catalog")
+        XCTAssertEqual(stackedAlpha, 0.7)
+        guard case let .array(stackedRejected)? = stacked.application["rejected_changes"],
+              case let .object(stackedChange)? = stackedRejected.first,
+              case let .string(stackedReason)? = stackedChange["reason_code"]
+        else {
+            return XCTFail("The stacked rejection shape is incomplete.")
+        }
+        XCTAssertEqual(stackedReason, "policy_blocked")
+
+        // A non-overlapping target still applies while the first stays active.
+        let nonOverlapping = try await RuntimeTuningProcessor.apply(
+            patch: Self.alphaPatch(preview: 0.3, stableID: "demo.home.title"),
+            expectedSnapshotID: snapshotID,
+            lastCapturedSnapshotID: snapshotID,
+            connectionID: connectionID,
+            controller: controller,
+            activeTargetStableIDs: activeTargets
+        )
+        XCTAssertTrue(nonOverlapping.isActive)
+        let titleAlpha = await controller.alpha("demo.home.title")
+        XCTAssertEqual(titleAlpha, 0.3)
+        guard case let .array(nonOverlappingRejected)? =
+            nonOverlapping.application["rejected_changes"]
+        else {
+            return XCTFail("The non-overlapping application shape is incomplete.")
+        }
+        XCTAssertTrue(nonOverlappingRejected.isEmpty)
+    }
+
+    func testShutdownRestorePlanRunsApplicationsInReverseApplyOrder() async {
+        // Two hypothetical applications stacked on one target: the shutdown
+        // plan must write the first application's captured original last so
+        // the source-of-truth value wins over any intermediate preview.
+        let first = [
+            RuntimeTuningRestoreEntry(stableID: "demo.home.open_catalog", originalAlpha: 1.0),
+            RuntimeTuningRestoreEntry(stableID: "demo.home.title", originalAlpha: 0.9),
+        ]
+        let second = [
+            RuntimeTuningRestoreEntry(stableID: "demo.home.open_catalog", originalAlpha: 0.7),
+        ]
+        let plan = LoopbackRuntimeClient.shutdownRestorePlan(
+            forTuningsInApplyOrder: [first, second]
+        )
+        XCTAssertEqual(
+            plan.map(\.stableID),
+            ["demo.home.open_catalog", "demo.home.title", "demo.home.open_catalog"]
+        )
+        XCTAssertEqual(plan.map(\.originalAlpha), [0.7, 0.9, 1.0])
+
+        let controller = ScriptedTuningController([
+            "demo.home.open_catalog": 0.4,
+            "demo.home.title": 0.4,
+        ])
+        for entry in plan {
+            await controller.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+        }
+        let catalogAlpha = await controller.alpha("demo.home.open_catalog")
+        let titleAlpha = await controller.alpha("demo.home.title")
+        XCTAssertEqual(catalogAlpha, 1.0)
+        XCTAssertEqual(titleAlpha, 0.9)
     }
 }

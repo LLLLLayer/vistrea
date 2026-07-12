@@ -149,4 +149,96 @@ final class CanvasAndWikiTests: XCTestCase {
         XCTAssertEqual(model.canvasPhase, .empty)
         XCTAssertNil(model.canvasGraph)
     }
+
+    func testStaleWikiSearchResultIsDiscardedByANewerRequest() async throws {
+        let client = GatedWikiHostClient()
+        let model = SnapshotWorkspaceModel(client: client)
+
+        await client.blockNextSearch()
+        let staleTask = Task { await model.loadWiki(text: "stale") }
+        while !(await client.isSearchWaiting()) {
+            await Task.yield()
+        }
+
+        // The newer request completes first and owns the pane state.
+        await model.loadWiki(text: "fresh")
+        XCTAssertEqual(model.wikiNodes.map(\.title), ["fresh"])
+        XCTAssertEqual(model.wikiPhase, .content)
+
+        // Releasing the older request afterwards must not overwrite it.
+        await client.releaseSearch()
+        await staleTask.value
+        XCTAssertEqual(model.wikiNodes.map(\.title), ["fresh"])
+        XCTAssertEqual(model.wikiPhase, .content)
+    }
+}
+
+private actor GatedWikiHostClient: HostClient {
+    private var shouldBlockSearch = false
+    private var searchContinuation: CheckedContinuation<Void, Never>?
+
+    func blockNextSearch() {
+        shouldBlockSearch = true
+    }
+
+    func isSearchWaiting() -> Bool {
+        searchContinuation != nil
+    }
+
+    func releaseSearch() {
+        shouldBlockSearch = false
+        searchContinuation?.resume()
+        searchContinuation = nil
+    }
+
+    func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        if shouldBlockSearch {
+            shouldBlockSearch = false
+            await withCheckedContinuation { continuation in
+                searchContinuation = continuation
+            }
+        }
+        return WikiNodePage(items: [
+            WikiNodeSummary(
+                wikiNodeID: "wiki_019f0000-0000-7000-8000-000000000001",
+                kind: "screen",
+                title: text ?? "unfiltered",
+                summary: nil,
+                status: "published",
+                labels: []
+            ),
+        ])
+    }
+
+    func getStatus() async throws -> HostStatus {
+        HostStatus(status: .ready, runtimeConnected: true)
+    }
+
+    func listSnapshots() async throws -> SnapshotPage {
+        SnapshotPage(items: [])
+    }
+
+    func getSnapshot(id: String) async throws -> RuntimeSnapshot {
+        throw HostClientError.fixtureUnavailable("No Snapshot in this test double.")
+    }
+
+    func getObject(hash: String, range: ObjectByteRange?) async throws -> Data {
+        throw HostClientError.fixtureUnavailable("No binary fixture.")
+    }
+
+    func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot {
+        throw HostClientError.fixtureUnavailable("No capture in this test double.")
+    }
+
+    func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
+        EventTimeline(events: [], reportedGaps: [])
+    }
+
+    func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
+        ReviewIssuePage(items: [])
+    }
+
+    func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        throw HostClientError.fixtureUnavailable("No Screen Graph in this test double.")
+    }
 }

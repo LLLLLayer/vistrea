@@ -68,6 +68,12 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     private let client: any HostClient
     private var selectionGeneration = 0
+    // Per-pane request generations: a slow older response must never
+    // overwrite the state a newer request already applied.
+    private var canvasGeneration = 0
+    private var wikiGeneration = 0
+    private var issuesGeneration = 0
+    private var eventsGeneration = 0
 
     public init(client: any HostClient) {
         self.client = client
@@ -187,16 +193,24 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Reloads the materialized Screen Graph for the Canvas.
     public func loadCanvas(projectID: String, applicationID: String) async {
+        canvasGeneration += 1
+        let generation = canvasGeneration
         canvasPhase = .loading
         do {
             let graph = try await client.getScreenGraph(
                 projectID: projectID,
                 applicationID: applicationID
             )
+            guard generation == canvasGeneration else {
+                return
+            }
             canvasGraph = graph
             canvasStates = CanvasLayout.positions(for: graph)
             canvasPhase = graph.states.isEmpty ? .empty : .content
         } catch {
+            guard generation == canvasGeneration else {
+                return
+            }
             canvasGraph = nil
             canvasStates = []
             // A missing graph is an empty Canvas, not a failure banner.
@@ -212,12 +226,20 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Reloads the Deep Wiki nodes shown in the knowledge pane.
     public func loadWiki(text: String?) async {
+        wikiGeneration += 1
+        let generation = wikiGeneration
         wikiPhase = .loading
         do {
             let page = try await client.searchWikiNodes(text: text)
+            guard generation == wikiGeneration else {
+                return
+            }
             wikiNodes = page.items
             wikiPhase = wikiNodes.isEmpty ? .empty : .content
         } catch {
+            guard generation == wikiGeneration else {
+                return
+            }
             wikiNodes = []
             wikiPhase = .failure(Self.message(for: error))
         }
@@ -225,12 +247,20 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Reloads the persisted Review Issues, most recently updated first.
     public func loadReviewIssues() async {
+        issuesGeneration += 1
+        let generation = issuesGeneration
         issuesPhase = .loading
         do {
             let page = try await client.listReviewIssues(states: nil)
+            guard generation == issuesGeneration else {
+                return
+            }
             reviewIssues = page.items.sorted { $0.updatedAt > $1.updatedAt }
             issuesPhase = reviewIssues.isEmpty ? .empty : .content
         } catch {
+            guard generation == issuesGeneration else {
+                return
+            }
             reviewIssues = []
             issuesPhase = .failure(Self.message(for: error))
         }
@@ -238,9 +268,14 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Reloads the persisted Runtime event timeline, newest events first.
     public func loadEventTimeline() async {
+        eventsGeneration += 1
+        let generation = eventsGeneration
         eventsPhase = .loading
         do {
             let timeline = try await client.getEventTimeline(eventEpochID: nil)
+            guard generation == eventsGeneration else {
+                return
+            }
             let ordered = timeline.events.sorted { left, right in
                 if left.eventEpochID.rawValue != right.eventEpochID.rawValue {
                     return left.eventEpochID.rawValue > right.eventEpochID.rawValue
@@ -251,6 +286,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             reportedEventGaps = timeline.reportedGaps
             eventsPhase = events.isEmpty ? .empty : .content
         } catch {
+            guard generation == eventsGeneration else {
+                return
+            }
             events = []
             reportedEventGaps = []
             eventsPhase = .failure(Self.message(for: error))

@@ -115,7 +115,11 @@ private struct InteropFixtureClient {
             }
             try await client.runUntilClosed()
         } catch {
-            FileHandle.standardError.write(Data("Runtime interop client failed.\n".utf8))
+            // RuntimeConnectionError descriptions never carry authorization
+            // material; keep the diagnostic on one line for log scraping.
+            let reason = String(describing: error)
+                .replacingOccurrences(of: "\n", with: " ")
+            FileHandle.standardError.write(Data("Runtime interop client failed: \(reason)\n".utf8))
             exit(EXIT_FAILURE)
         }
     }

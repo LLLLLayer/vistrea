@@ -42,7 +42,9 @@ public final class UIKitRuntimeSnapshotCaptureProvider: RuntimeSnapshotCapturePr
             // ignore a field mask that the current slice cannot satisfy.
             throw RuntimeConnectionError.protocolViolation
         }
-        let result = try adapter.capture(
+        // The async adapter overload keeps PNG encoding and hashing off the
+        // main actor; only the hierarchy walk and render run on it.
+        let result = try await adapter.capture(
             windows: windowProvider(),
             scenarioID: scenarioIDProvider(),
             includeScreenshot: request.screenshot == .reference

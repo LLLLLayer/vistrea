@@ -33,6 +33,9 @@ private struct ActiveTuningState: Sendable {
     var application: [String: JSONValue]
     let restoreEntries: [RuntimeTuningRestoreEntry]
     var ttlTask: Task<Void, Never>?
+    /// Monotonic apply position so shutdown can restore applications in
+    /// reverse apply order even though the dictionary itself is unordered.
+    let applyOrder: UInt64
 }
 
 /// Authenticated Snapshot-only Runtime client for the Node loopback Host.
@@ -66,6 +69,7 @@ public actor LoopbackRuntimeClient {
     private var eventPumpTask: Task<Void, Never>?
     private var lastCapturedSnapshotID: String?
     private var activeTunings: [String: ActiveTuningState] = [:]
+    private var tuningApplyCounter: UInt64 = 0
     private var closeWaiters: [CheckedContinuation<Void, any Error>] = []
     private var terminalError: RuntimeConnectionError?
 
@@ -679,6 +683,11 @@ public actor LoopbackRuntimeClient {
         if let ttl = message.command.previewTtlMs, !(100...3_600_000).contains(ttl) {
             throw RuntimeConnectionError.protocolViolation
         }
+        // The actor serializes tuning state, so this set stays consistent with
+        // the applications the processor could otherwise stack against.
+        let activeTargetStableIDs = Set(
+            activeTunings.values.flatMap { $0.restoreEntries.map(\.stableID) }
+        )
         let outcome: RuntimeTuningOutcome
         do {
             outcome = try await RuntimeTuningProcessor.apply(
@@ -686,7 +695,8 @@ public actor LoopbackRuntimeClient {
                 expectedSnapshotID: message.command.expectedSnapshotID,
                 lastCapturedSnapshotID: lastCapturedSnapshotID,
                 connectionID: connectionID,
-                controller: tuningController
+                controller: tuningController,
+                activeTargetStableIDs: activeTargetStableIDs
             )
         } catch {
             try await send(WireTuningError(requestID: message.requestID, code: "conflict"))
@@ -710,10 +720,12 @@ public actor LoopbackRuntimeClient {
                     await self?.expireTuning(applicationID: applicationID)
                 }
             }
+            tuningApplyCounter += 1
             activeTunings[applicationID] = ActiveTuningState(
                 application: application,
                 restoreEntries: outcome.restoreEntries,
-                ttlTask: ttlTask
+                ttlTask: ttlTask,
+                applyOrder: tuningApplyCounter
             )
         }
         try await send(
@@ -767,6 +779,15 @@ public actor LoopbackRuntimeClient {
         } catch {
             // The preview is already restored; a vanished connection needs no report.
         }
+    }
+
+    /// Flattens active applications into one restore sequence in reverse apply
+    /// order, reversing each application's own entries as well, so the first
+    /// application's captured originals are written last and win.
+    static func shutdownRestorePlan(
+        forTuningsInApplyOrder tunings: [[RuntimeTuningRestoreEntry]]
+    ) -> [RuntimeTuningRestoreEntry] {
+        tunings.reversed().flatMap { $0.reversed() }
     }
 
     private func restoreEntries(_ entries: [RuntimeTuningRestoreEntry]) async {
@@ -862,7 +883,6 @@ public actor LoopbackRuntimeClient {
             throw RuntimeConnectionError.protocolViolation
         }
         try Task.checkCancellation()
-        lastCapturedSnapshotID = payload.snapshot.snapshotID.rawValue
         try await send(
             WireCaptureResult(
                 requestID: requestID,
@@ -911,6 +931,10 @@ public actor LoopbackRuntimeClient {
         guard claimCaptureTerminal(requestID: requestID, token: token) else {
             throw CancellationError()
         }
+        // The tuning staleness check may only reference Snapshots whose
+        // capture bodies the Host fully received; a cancelled or failed
+        // capture never claims the terminal and never stamps.
+        lastCapturedSnapshotID = payload.snapshot.snapshotID.rawValue
         do {
             try await send(WireCaptureComplete(requestID: requestID))
         } catch let connectionError as RuntimeConnectionError {
@@ -1024,21 +1048,24 @@ public actor LoopbackRuntimeClient {
         eventPumpTask?.cancel()
         eventPumpTask = nil
         eventSubscriptionID = nil
-        let tuningsToRestore = activeTunings.values.map(\.restoreEntries)
+        let tuningsInApplyOrder = activeTunings.values
+            .sorted { $0.applyOrder < $1.applyOrder }
+            .map(\.restoreEntries)
         for active in activeTunings.values {
             active.ttlTask?.cancel()
         }
         activeTunings.removeAll()
-        if let tuningController, !tuningsToRestore.isEmpty {
+        let restorePlan = Self.shutdownRestorePlan(forTuningsInApplyOrder: tuningsInApplyOrder)
+        if let tuningController, !restorePlan.isEmpty {
             // Disconnect, close, and failure always revert active previews.
+            // Applications restore in reverse apply order so the earliest
+            // captured originals are written last and win.
             Task {
-                for entries in tuningsToRestore {
-                    for entry in entries.reversed() {
-                        await tuningController.setAlpha(
-                            stableID: entry.stableID,
-                            value: entry.originalAlpha
-                        )
-                    }
+                for entry in restorePlan {
+                    await tuningController.setAlpha(
+                        stableID: entry.stableID,
+                        value: entry.originalAlpha
+                    )
                 }
             }
         }
