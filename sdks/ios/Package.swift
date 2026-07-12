@@ -25,6 +25,10 @@ let package = Package(
             name: "VistreaRuntimeUIKitConnection",
             targets: ["VistreaRuntimeUIKitConnection"]
         ),
+        .library(
+            name: "VistreaRuntimeSwiftUI",
+            targets: ["VistreaRuntimeSwiftUI"]
+        ),
         .executable(
             name: "VistreaRuntimeInteropFixtureClient",
             targets: ["VistreaRuntimeInteropFixtureClient"]
@@ -40,6 +44,7 @@ let package = Package(
             name: "VistreaRuntimeUIKit",
             dependencies: ["VistreaRuntimeModels"]
         ),
+        .target(name: "VistreaRuntimeSwiftUI"),
         .target(
             name: "VistreaRuntimeUIKitConnection",
             dependencies: [
@@ -50,6 +55,10 @@ let package = Package(
         .testTarget(
             name: "VistreaRuntimeModelsTests",
             dependencies: ["VistreaRuntimeModels"]
+        ),
+        .testTarget(
+            name: "VistreaRuntimeSwiftUITests",
+            dependencies: ["VistreaRuntimeSwiftUI"]
         ),
         .testTarget(
             name: "VistreaRuntimeConnectionTests",

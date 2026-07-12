@@ -16,4 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "vistrea-android-protocol"
 include(":runtime-android")
+include(":runtime-compose")
 include(":runtime-connection")

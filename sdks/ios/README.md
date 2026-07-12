@@ -49,7 +49,9 @@ This first TCP loopback slice connects directly from the iOS Simulator. A physic
 
 The adapter is compiled only where UIKit is available. It is included only by internal Debug Demo App builds in the current vertical slice.
 
-The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews only their alpha on the main actor. Automatic UIKit event observation, additional tuning properties, and the SwiftUI semantic adapter remain separate follow-up capabilities.
+The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews only their alpha on the main actor.
+
+`VistreaRuntimeSwiftUI` is the SwiftUI semantic annotation bridge: `.vistreaSemantics(stableID:role:label:)` declares the cross-platform `stable_id`, a canonical role, and an optional label as standard accessibility facts, and the UIKit capture adapter maps declared accessibility traits back to the canonical role vocabulary for hosted content whose view classes are private. A full SwiftUI semantic-tree capture adapter, automatic UIKit event observation, and additional tuning properties remain separate follow-up capabilities.
 
 ## Verify
 

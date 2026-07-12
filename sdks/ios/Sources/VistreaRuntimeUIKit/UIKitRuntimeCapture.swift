@@ -415,8 +415,33 @@ public final class UIKitRuntimeCaptureAdapter {
         case is UITableView, is UICollectionView: "list"
         case is UIScrollView: "scroll-view"
         case is UINavigationBar: "navigation-bar"
-        default: "container"
+        default: traitRole(for: view) ?? "container"
         }
+    }
+
+    /// Hosted content (SwiftUI in particular) renders through private view
+    /// classes; declared accessibility traits still carry the semantic role.
+    private static func traitRole(for view: UIView) -> String? {
+        let traits = view.accessibilityTraits
+        if traits.contains(.button) {
+            return "button"
+        }
+        if traits.contains(.header) {
+            return "header"
+        }
+        if traits.contains(.link) {
+            return "link"
+        }
+        if traits.contains(.image) {
+            return "image"
+        }
+        if traits.contains(.staticText) {
+            return "text"
+        }
+        if traits.contains(.searchField) {
+            return "text-field"
+        }
+        return nil
     }
 
     private static func actions(for view: UIView) -> [UiAction] {
