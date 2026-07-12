@@ -36,13 +36,13 @@ The verified Snapshot loops do not imply that the complete product is implemente
 | Android Runtime SDK and Demo App | `android-view-runtime-loop-1` | In progress | Canonical models, all shared scenarios, View/ViewGroup capture, Debug Inspector, protected Runtime connection, Release exclusion, verified first Snapshot loop, negotiated event streaming, and protected alpha tuning previews exist; automatic View event observation and the Compose adapter remain | 6 Node/Kotlin interop tests, 17 connection unit tests, 5 API 36.1 instrumentation tests, release-boundary verification, and real Android E2E; commits `1925b3a`, `d11dd52`, and `4eebcb3` |
 | Vistrea Studio | `snapshot-studio-1` | In progress | Native SwiftUI Host status, capture/list, screenshot, 2D tree, node details, scenario/build/source context, Runtime event timeline pane, fixture mode, and production acceptance probe; broader product modes remain | 22 Studio tests and Release build; commits `6ccf9f2`, `534517d`, and `fa9bf88` |
 | Agent integrations | `snapshot-agent-adapters-1` | In progress | Strict JSON CLI and official-SDK stdio MCP expose status, Snapshot capture/list/get, and the Runtime event timeline through one authenticated Host client; `vistrea-inspect-runtime` composes inspection | 2 Agent adapter integration tests including the events round trip; commits `2e1d157`, `3dcef77`, and `e34d6da` |
-| Automation and exploration | `interfaces-draft-1` | Planned | WDA/UIAutomator contracts and scenario expectations only | No provider or exploration implementation |
+| Automation and exploration | `automation-exploration-1` | In progress | Structural Screen State identity with dedup into one coherent materialized Screen Graph (Engine, Host API, CLI, MCP); semantic action resolution with stale conflicts, risk policy, and confirmation binding; real adb and WebDriverAgent providers behind one port; bounded deterministic exploration with frozen graph version tags and diffs (ADR-0007); the Android real-input acceptance is verified, the iOS WebDriverAgent acceptance is implemented and awaits a Simulator run | Graph, automation, WDA wire, and exploration integration suites inside 59 Host integrations plus the passed `pnpm test:e2e:android-real-automation`; commits `ec12b1f`, `8417cab`, and `80781ba` |
 | Design review and tuning | `design-review-1` | Verified | Design reference/asset registration, confirmed-region frame comparison with stable-ID node resolution, the full Review Issue lifecycle (legal transitions, atomic evidence-backed verification, canonical bundle semantics), and protected alpha tuning (canonical TuningPatch/TuningApplication, negotiated `design.tuning`, rejection reasons, TTL/disconnect reversion) through Engine, Host API, CLI, MCP, and a Studio issues pane; more allowlisted properties and the comparison workbench remain | 49 Host integrations including tuning transport/engine and both native tuning interops; commits `1f40a2f`, `c62694e`, `d7f7b9b`, `3511bb5`, and `4eebcb3` |
 | Canvas and Deep Wiki | `protocol-v1` | Planned | Protocol models, Data ports, and product interaction design only | No complete product persistence or UI workflow |
 | Validation and build diff | `protocol-v1` | Planned | Protocol models, fixtures, and scenario expectations only | No production validator Engine slice |
 | Vistrea Hub | `interfaces-draft-1` | Planned | Optional synchronization and collaboration contract only | No service implementation |
 
-Platform `implementation_status` remains `in-progress` in `examples/scenarios/manifest.json` because only `runtime.snapshot` and `runtime.connection` are verified. The broader per-platform capabilities remain planned.
+Platform `implementation_status` remains `in-progress` in `examples/scenarios/manifest.json`. Verified per-platform capabilities now cover `runtime.snapshot`, `runtime.connection`, `runtime.events`, and `design.tuning` on both platforms, plus `automation.actions` and `state-identity.normalization` on Android; the iOS automation capabilities and both `exploration.graph` entries are `implemented` pending real-device verification.
 
 ## Accepted decisions
 
@@ -97,6 +97,9 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `d7f7b9b` | Applied and reverted protected tuning through the Host, Engine, CLI, and MCP. |
 | `3511bb5` | Previewed and reverted alpha tuning in the iOS Runtime. |
 | `4eebcb3` | Previewed and reverted alpha tuning in the Android Runtime. |
+| `ec12b1f` | Deduplicated Screen States and Transitions into the coherent materialized Screen Graph. |
+| `8417cab` | Resolved and authorized semantic device actions in the Automation Engine. |
+| `80781ba` | Drove real Android input through the adb automation provider. |
 
 ## Native vertical-loop evidence
 
@@ -171,13 +174,20 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-12 | iOS Runtime tuning | `swift test --package-path sdks/ios` in Debug and Release; `node --test .build/typescript/tests/integration/ios-runtime-client-interop.test.js` | 22 of 22 tests passed in each configuration; 6 of 6 interop tests passed with the Swift client applying, explicitly reverting, conflict-rejecting, stale-rejecting, and TTL-expiring alpha previews against the Node Host |
 | 2026-07-12 | Android Runtime tuning | `./gradlew test :runtime-android:assembleDebug :runtime-android:assembleRelease :runtime-android:lintDebug`; release boundary script; `node --test .build/typescript/tests/integration/android-runtime-client-interop.test.js`; Demo `assembleDebug assembleRelease test lintDebug` | All builds, 17 connection unit tests, the Release boundary, Demo gates, and 6 of 6 interop tests passed with the Kotlin client mirroring the full apply/revert/conflict/stale/TTL tuning sequence |
 | 2026-07-12 | Complete executable check after protected tuning | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 49 Host integrations, and 14 Scenario tests passed |
+| 2026-07-12 | Screen State identity, dedup, and graph surfaces | `pnpm test:host-integration` | 53 of 53 tests passed, including structural-identity dedup, transition occurrence counting, semantic revalidation on every graph write, production SQLite reopen, the Host `screen-graph` routes, and the CLI/MCP graph round trip |
+| 2026-07-12 | Automation Engine semantic actions | `pnpm test:host-integration` | 55 of 55 tests passed, including stale-target conflicts, coordinate mapping, capability negotiation, risk policy with confirmation-token binding, timeout, cancellation, and busy/closed session gating |
+| 2026-07-12 | Real Android adb automation acceptance | `pnpm test:e2e:android-real-automation` | 1 of 1 passed on a dedicated API 36.1 emulator: a real InputManager tap resolved from the persisted Snapshot navigated Home to Catalog, system back returned to Home under one structural identity (deduplicated, no third state), and the Host recorded 2 states, 2 transitions, and a resolvable path |
+| 2026-07-12 | WebDriverAgent wire protocol | `node --test .build/typescript/tests/integration/wda-provider.test.js` | 2 of 2 passed against a local fixture driver: W3C pointer sequences in logical points, edge-pop back, `/wda/keys` typing, launch, single cached session with one recreation on invalidation, and tampered-authorization rejection before any wire traffic |
+| 2026-07-12 | Deterministic exploration and path versioning | `node --test .build/typescript/tests/integration/exploration-engine.test.js` | 2 of 2 passed: depth-first discovery of three screens with physical back, zero new records on a repeat run, action-budget stop, frozen version tags, and a precise partial-versus-complete coverage diff |
+| 2026-07-12 | Complete executable check after Phase 3 engines | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 59 Host integrations, and 14 Scenario tests passed |
 
 ## Known follow-up gaps
 
 - Readable Markdown/HTML exports (`exportReadable`) and compressed pack payload support remain later exchange slices.
 - Compressed Object fixtures do not yet include executable gzip/zstd and byte-range vectors.
 - Automatic UIKit and Android View event observation is not implemented; the verified event slice reports transients through explicit Demo instrumentation of the bounded recorders.
-- WDA and UIAutomator providers, action safety enforcement, exploration, recovery, and Screen State deduplication are not implemented.
+- The iOS WebDriverAgent automation acceptance is implemented but not yet executed on a Simulator; run `pnpm test:e2e:ios-real-automation` with `VISTREA_WDA_PROJECT` pointing at a WebDriverAgent checkout to verify it, which also covers the real exploration segment now appended to the Android acceptance.
+- Exploration recovery after crashes, AI-assisted planning, state restoration, and `clear_text`/`dismiss` provider actions are not implemented; exploration is bounded depth-first with physical back navigation.
 - Protected tuning covers only the alpha property; additional allowlisted properties, tuning-driven re-verification composition, and the full design comparison workbench (overlay, pixel diff, Studio review mode) remain later slices.
 - Full Screen State Canvas, Deep Wiki persistence/search/history, product versioning workflows, validation, and build diff are not implemented.
 - SwiftUI and Compose capture adapters remain future platform work.
@@ -185,5 +195,6 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 
 ## Next milestones
 
-1. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
-2. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
+1. Verify the iOS WebDriverAgent automation acceptance on a Simulator and re-run the extended Android acceptance with its exploration segment.
+2. Build the full Canvas and Deep Wiki persistence workflows over the verified Screen Graph.
+3. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
