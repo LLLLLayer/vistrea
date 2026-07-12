@@ -37,7 +37,7 @@ The verified Snapshot loops do not imply that the complete product is implemente
 | Vistrea Studio | `snapshot-studio-1` | In progress | Native SwiftUI Host status, capture/list, screenshot, 2D tree, node details, scenario/build/source context, Runtime event timeline pane, fixture mode, and production acceptance probe; broader product modes remain | 22 Studio tests and Release build; commits `6ccf9f2`, `534517d`, and `fa9bf88` |
 | Agent integrations | `snapshot-agent-adapters-1` | In progress | Strict JSON CLI and official-SDK stdio MCP expose status, Snapshot capture/list/get, and the Runtime event timeline through one authenticated Host client; `vistrea-inspect-runtime` composes inspection | 2 Agent adapter integration tests including the events round trip; commits `2e1d157`, `3dcef77`, and `e34d6da` |
 | Automation and exploration | `interfaces-draft-1` | Planned | WDA/UIAutomator contracts and scenario expectations only | No provider or exploration implementation |
-| Design review and tuning | `protocol-v1` | Planned | Protocol models, fixtures, interface behavior, and Studio interaction design only | No live comparison, issue, or protected tuning loop |
+| Design review and tuning | `design-review-1` | In progress | Design reference/asset registration, confirmed-region frame comparison with stable-ID node resolution, and the full Review Issue lifecycle (legal transitions, atomic evidence-backed verification, canonical bundle semantics) through Engine, Host API, CLI, MCP, and a Studio issues pane; protected tuning remains | Design engine integrations, Host API design flow, CLI/MCP adapter round trip, and 23 Studio tests; commits `1f40a2f` and `c62694e` |
 | Canvas and Deep Wiki | `protocol-v1` | Planned | Protocol models, Data ports, and product interaction design only | No complete product persistence or UI workflow |
 | Validation and build diff | `protocol-v1` | Planned | Protocol models, fixtures, and scenario expectations only | No production validator Engine slice |
 | Vistrea Hub | `interfaces-draft-1` | Planned | Optional synchronization and collaboration contract only | No service implementation |
@@ -92,6 +92,8 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `7824f29` | Streamed iOS Runtime events through the bounded recorder and Demo transient reporting. |
 | `d11dd52` | Streamed Android Runtime events through the bounded recorder and Demo transient reporting. |
 | `fa9bf88` | Added the persisted Runtime event timeline pane to Studio. |
+| `1f40a2f` | Added design comparisons and the verified Review Issue lifecycle across Engine, Host, CLI, and MCP. |
+| `c62694e` | Listed persisted Review Issues in Studio. |
 
 ## Native vertical-loop evidence
 
@@ -160,6 +162,8 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-12 | Android Runtime events | `./gradlew :runtime-connection:testDebugUnitTest`; Node/Kotlin interop; Demo `assembleDebug assembleRelease test lintDebug`; release boundary script | Recorder units, scripted event interop, Demo builds/tests/lint, and the Release boundary all passed |
 | 2026-07-12 | Studio event timeline | `swift test --package-path apps/studio-macos`; Release build | 22 of 22 tests and the Release build passed |
 | 2026-07-12 | Complete executable check after Runtime events | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 39 Host integrations, and 14 Scenario tests passed |
+| 2026-07-12 | Design review engine, Host API, and adapters | `pnpm test:host-integration` | 43 of 43 tests passed, including stable-ID comparison differences, legal/illegal issue transitions, atomic evidence-backed verification, canonical bundle semantics, and the CLI/MCP design round trip |
+| 2026-07-12 | Studio Review Issues pane | `swift test --package-path apps/studio-macos`; Release build | 23 of 23 tests and the Release build passed |
 
 ## Known follow-up gaps
 
@@ -167,13 +171,13 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 - Compressed Object fixtures do not yet include executable gzip/zstd and byte-range vectors.
 - Automatic UIKit and Android View event observation is not implemented; the verified event slice reports transients through explicit Demo instrumentation of the bounded recorders.
 - WDA and UIAutomator providers, action safety enforcement, exploration, recovery, and Screen State deduplication are not implemented.
-- Design reference comparison, Review Issue workflow, protected allowlisted tuning, Tuning Patch re-verification, and design-oriented Studio modes are not implemented.
+- Protected allowlisted tuning, Tuning Patch re-verification, and the full design comparison workbench (overlay, pixel diff, Studio review mode) are not implemented; the verified slice covers frame comparison and the issue lifecycle.
 - Full Screen State Canvas, Deep Wiki persistence/search/history, product versioning workflows, validation, and build diff are not implemented.
 - SwiftUI and Compose capture adapters remain future platform work.
 - CI orchestration and Vistrea Hub synchronization, permissions, discovery, and collaboration are not implemented.
 
 ## Next milestones
 
-1. Implement one design-reference comparison, one Review Issue flow, and one protected allowlisted tuning property with apply/revert and re-verification.
+1. Implement one protected allowlisted tuning property with apply/revert and re-verification over the Runtime connection.
 2. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
 3. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
