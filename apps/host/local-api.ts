@@ -19,6 +19,7 @@ import {
   CaptureSnapshotUseCase,
   GetSnapshotQuery,
   ListSnapshotsQuery,
+  LoopbackTransportError,
   type CaptureSnapshotCommand,
   type RuntimeCapturePort,
 } from "../../engine/connection/index.js";
@@ -41,6 +42,8 @@ export type HostLocalApiBindAddress = "127.0.0.1" | "::1";
 
 export interface HostLocalApiDependencies {
   readonly runtime: RuntimeCapturePort;
+  /** Reports live Runtime readiness without exposing transport state to API consumers. */
+  readonly isRuntimeConnected?: () => boolean;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
   readonly validator: ProtocolValidator;
@@ -146,6 +149,7 @@ export async function startHostLocalApi(
         capture,
         getSnapshot,
         listSnapshots,
+        isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         workspace: options.workspace,
         objects: options.objects,
       }).catch((error: unknown) => sendError(response, requestId, error));
@@ -203,6 +207,7 @@ interface RequestHandlerContext {
   readonly capture: CaptureSnapshotUseCase;
   readonly getSnapshot: GetSnapshotQuery;
   readonly listSnapshots: ListSnapshotsQuery;
+  readonly isRuntimeConnected: () => boolean;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
 }
@@ -221,7 +226,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     const health = context.workspace.checkHealth();
     writeJson(response, 200, {
       status: health.ok ? "ready" : "degraded",
-      runtime_connected: true,
+      runtime_connected: context.isRuntimeConnected(),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
     return;
@@ -943,6 +948,55 @@ function toPublicError(error: unknown): PublicError {
           code: error.code,
           message: "The Host could not complete the request.",
           retryable: error.retryable,
+        };
+    }
+  }
+  if (error instanceof LoopbackTransportError) {
+    switch (error.code) {
+      case "timeout":
+        return {
+          status: 504,
+          code: error.code,
+          message: "The Runtime capture timed out.",
+          retryable: true,
+        };
+      case "unavailable":
+        return {
+          status: 503,
+          code: error.code,
+          message: "An authorized Runtime connection is not available.",
+          retryable: true,
+        };
+      case "resource_exhausted":
+        return {
+          status: 507,
+          code: error.code,
+          message: "The Runtime capture exceeded an authorized resource limit.",
+          retryable: false,
+        };
+      case "unsupported":
+      case "forbidden":
+        return {
+          status: 422,
+          code: error.code,
+          message: "The Runtime cannot perform the requested capture.",
+          retryable: false,
+        };
+      case "cancelled":
+        return {
+          status: 409,
+          code: error.code,
+          message: "The Runtime capture was cancelled.",
+          retryable: true,
+        };
+      case "unauthenticated":
+      case "protocol_error":
+      case "remote_error":
+        return {
+          status: 502,
+          code: error.code,
+          message: "The Runtime connection rejected or failed the capture.",
+          retryable: false,
         };
     }
   }

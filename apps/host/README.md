@@ -54,6 +54,46 @@ Errors use one sanitized shape:
 
 ## Composition
 
+`startLocalHost` is the production local composition root. It acquires the
+Workspace ownership lock, opens SQLite metadata and the file-backed Object
+Store, starts the authenticated Runtime listener, tracks the active Runtime
+session, and then starts the Local API. Its Runtime token and API bearer token
+are independent and rotate on every start.
+
+```ts
+const host = await startLocalHost({
+  workspaceRoot: "/absolute/path/to/workspace",
+  validator,
+});
+
+await host.waitForRuntime();
+// Pass host.runtime only to an authorized Debug/Internal App process.
+// Pass host.api only to Studio or an authorized local Agent adapter.
+await host.close();
+```
+
+Before a Runtime is authenticated, `/v1/status` reports
+`runtime_connected: false` and capture returns a sanitized retryable
+`unavailable` response. Reconnecting a Runtime does not reopen storage or
+change the Local API token.
+
+The executable composition writes credentials to a newly created mode-`0600`
+ephemeral descriptor instead of printing them or accepting them in arguments:
+
+```bash
+node .build/typescript/apps/host/serve.js \
+  --workspace /absolute/path/to/workspace \
+  --connection-file /private/tmp/vistrea-host.json
+```
+
+Stdout contains only the process ID, Workspace path, and descriptor path. A
+clean `SIGINT` or `SIGTERM` closes API, Runtime, and storage ownership in order,
+then removes the descriptor. The descriptor contains live secrets and must
+never be committed or shared.
+
+For focused adapter tests, `startHostLocalApi` can still be composed directly
+over explicit ports:
+
 ```ts
 const api = await startHostLocalApi({
   host: "127.0.0.1",
