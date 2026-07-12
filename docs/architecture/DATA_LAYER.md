@@ -63,6 +63,7 @@ This keeps every product surface on one fact base and prevents a separate privat
 ```text
 .vistrea/
 ├── workspace.json
+├── .host.lock
 ├── metadata.sqlite
 ├── objects/
 │   └── sha256/ab/cdef...
@@ -72,6 +73,8 @@ This keeps every product surface on one fact base and prevents a separate privat
 ```
 
 This layout is a logical Workspace bundle, not a requirement that data live inside a source checkout. During repository development, `.vistrea/` is the default disposable local path. Studio users may choose another Workspace location, and packaged applications may default to an Application Support directory. `workspace.json` may link to a source repository URI and Git SHA without requiring co-location.
+
+`.host.lock` is the exclusive writable-Host ownership record. It contains no secret and is removed only after the metadata store closes cleanly. SQLite locks still protect transactions, but they do not replace this product-level process boundary. Crash-stale lock recovery is an explicit maintenance operation; normal open never breaks another owner's lock automatically.
 
 ### `workspace.json`
 

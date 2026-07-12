@@ -31,7 +31,7 @@ Current objective:
 | Host/Data implementation stack | Host/Data architecture owner | `stack-1` | Verified | Node/TypeScript runtime, SQLite driver, process boundary, migrations, backup, and recovery | ADR and migration runbook reviewed; document checks and `pnpm check` passed |
 | SQLite metadata store | SQLite adapter owner | `sqlite-1` | Verified | Real SQLite transactions, all nine repositories, exact-byte migrations, durable ObjectRef catalog and associations, reopen, health, and corruption rejection | 9 SQLite contracts pass inside the 30-test Host contract suite |
 | Content-addressed Object Store | Object Store owner | `objects-1` | Verified | Encoded-byte SHA-256 storage, atomic publication, encryption metadata, range reads, retention, recovery, and symlink-safe paths | 11 Object Store contracts pass inside the 30-test Host contract suite |
-| Host Snapshot Engine | Connection Engine owner | `fixture-engine-1` | In progress | Fixture-backed Capture/Get/List, Object-before-metadata ordering, validation, rollback/orphan behavior, and authenticated loopback transport | 4 Snapshot Engine integration tests pass; transport implementation active |
+| Host Snapshot Engine | Connection Engine owner | `loopback-engine-1` | Verified | Capture/Get/List, Object-before-metadata ordering, validation, rollback/orphan behavior, authenticated bounded loopback transport, and production local Workspace composition | 14 Engine, transport, and local Workspace integration tests pass |
 | iOS Runtime SDK and Demo App | iOS vertical-loop owner | `uikit-capture-1` | In progress | Canonical Swift models, real UIKit hierarchy/screenshot capture, shared data-driven scenarios, and a Debug-only in-app Inspector are verified; Host connection and protected tuning remain | 9 Swift model tests, Simulator build/launch, and 1 UI navigation/capture test pass; commit `be60c0b` |
 | Android Runtime SDK | Android adapter owner | `models-1` | In progress | Canonical Kotlin Runtime Snapshot models are verified; View capture, Inspector, connection, and protected tuning remain | 8 Gradle tests and changed-code detekt review pass; commit `1812e63` |
 | Vistrea Studio | Unassigned | `studio-draft-1` | Planned | First vertical-loop UI | Interaction design only |
@@ -104,11 +104,15 @@ No current architecture or protocol issue blocks the first vertical loop. iOS UI
 
 ## Active implementation slice: Phase 0B
 
-1. Convert the documented Data ports into language-owned contracts generated from or checked against the shared schemas.
-2. Implement a deterministic in-memory `DataUnitOfWork` reference adapter.
-3. Add contract tests for atomic Commit/ref update, optimistic concurrency, immutable records, and rollback.
-4. Record the Host/Data toolchain and SQLite migration choice in an ADR.
-5. Implement SQLite metadata and the file-backed content-addressed Object Store behind the same tests.
+The local foundation is complete and verified:
+
+1. Language-owned Data ports and the deterministic in-memory `DataUnitOfWork` reference adapter.
+2. Shared contract tests for immutable records, rollback, optimistic concurrency, and atomic Commit/ref update.
+3. The accepted Node/TypeScript Host and SQLite migration architecture.
+4. Production SQLite metadata and file-backed content-addressed Object Store adapters.
+5. Snapshot Engine composition through an authenticated loopback Runtime transport and exclusive local Workspace ownership.
+
+The active slice is now product composition: Host Local API, native Runtime client, Studio, and CLI/MCP adapters over the same Engine and Data ports.
 
 ## Known follow-up gaps
 
@@ -138,6 +142,7 @@ No current architecture or protocol issue blocks the first vertical loop. iOS UI
 | 2026-07-12 | iOS UIKit Runtime capture and Demo App | `swift test --package-path sdks/ios`; Simulator package/app builds; `VistreaDemoAppUITests`; commit `be60c0b` | 9 model tests and 1 real navigation-to-Inspector UI test passed; all 12 shared Scenario fixtures decoded at launch and the captured View Tree was non-empty |
 | 2026-07-12 | Production local storage | `pnpm test:host-contract` | 30 of 30 tests passed: 10 shared repository, 11 Object Store, and 9 SQLite migration/reopen/transaction contracts |
 | 2026-07-12 | Integrated Phase 0B check | `pnpm check` | 78 protocol fixtures, 24 protocol contracts, 30 Host contracts, 4 Snapshot Engine integrations, and 12 Scenario tests passed |
+| 2026-07-12 | Snapshot Engine, Runtime transport, and local Workspace | `pnpm test:host-integration` | 14 of 14 tests passed, covering authenticated loopback capture, bounded framing, Object transfer integrity, cancellation, Engine rollback, exclusive Host ownership, and production reopen |
 | 2026-07-12 | Final architecture and interface review | Parallel read-only document, interface, and protocol audits | No remaining P0/P1 findings |
 | 2026-07-12 | Documentation language | Han-character scan over project Markdown | Passed |
 | 2026-07-12 | Documentation integrity | Local-link and code-fence validation | Passed |
@@ -171,11 +176,12 @@ No current architecture or protocol issue blocks the first vertical loop. iOS UI
 - Started production SQLite metadata and file-backed Object Store implementations behind the verified Data contracts.
 - Implemented and committed the native UIKit Demo App, all shared Scenario IDs, real canonical hierarchy/screenshot capture, and a Debug-only in-app Runtime Inspector.
 - Completed production SQLite metadata and file-backed Object Store adapters, including exact-byte packaged migrations, durable reopen, encryption metadata, retention recovery, and symlink-safe content paths.
+- Completed and verified the Snapshot Engine, HMAC-authenticated loopback Runtime transport, strict bounded Object transfer, and exclusive production `LocalDataWorkspace` composition.
 
 ## Next milestones
 
-1. Finish the authenticated loopback Runtime transport and compose the Snapshot Engine with production local storage.
-2. Implement the standalone Host local API, first Studio screen, CLI, and MCP adapters over the same Engine use cases.
-3. Run and record the complete `demo.navigation.basic` iOS Data-reopen vertical loop.
-4. Finish the Android Demo App and Runtime capture against the same Scenario IDs.
+1. Implement the standalone Host Local API over the verified Snapshot Engine and production Workspace.
+2. Connect the iOS Runtime SDK to that Host and render the first persisted Snapshot in Studio.
+3. Add CLI and MCP adapters over the same Host/Engine operations and record the complete `demo.navigation.basic` iOS Data-reopen loop.
+4. Finish Android Runtime capture and connection against the same Scenario IDs and Host protocol.
 5. Advance automation, graph exploration, design review, tuning, and validation slice by slice.

@@ -56,7 +56,7 @@ interface HostWelcome {
   enabled_capabilities: CapabilitySet;
   session_policy: SessionPolicy;
   host_proof: string;
-  event_epoch: EventEpochDescriptor;
+  event_epoch?: EventEpochDescriptor;
 }
 ```
 
@@ -82,6 +82,8 @@ Handshake must verify:
 - maximum payload, event rate, and session duration.
 
 `HostWelcome.selected_version` must exactly equal a version listed by both `HostChallenge` and `ClientHello`. Ready-state Snapshots, events, and batches use that selected version. A capability is usable only when it appears in `enabled_capabilities`; schema readability alone does not negotiate behavior.
+
+`event_epoch` is required when `runtime.events` is enabled and omitted when the Host negotiates a Snapshot-only session. A later capability upgrade requires a new handshake rather than adding an epoch to an existing session implicitly.
 
 ## 5. Snapshot capture
 
