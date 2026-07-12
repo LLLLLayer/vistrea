@@ -29,7 +29,7 @@
       "limitations": []
     },
     "android": {
-      "implementation_status": "planned",
+      "implementation_status": "in-progress",
       "initial_adapter": "view-viewgroup",
       "capabilities": {
         "runtime.snapshot": "planned",
@@ -44,7 +44,9 @@
         "validation.rules": "planned",
         "validation.build-diff": "planned"
       },
-      "limitations": []
+      "limitations": [
+        "The native Demo App and Debug View Tree are implemented; canonical View capture and Host Runtime connection remain planned."
+      ]
     }
   },
   "profiles": [

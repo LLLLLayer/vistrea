@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Vistrea Demo</string>
+    <string name="scenario_context_format">%1$s  •  %2$s  •  seed %3$d</string>
+    <string name="scenario_launcher_context_format">Shared Scenario launcher  •  %1$s</string>
+    <string name="scenario_chooser_item_format">%1$s\n%2$s</string>
+    <string name="launch_configuration_error">Launch configuration error</string>
+</resources>
