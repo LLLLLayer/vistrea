@@ -66,6 +66,37 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isCapturing = false
     @Published public private(set) var operationError: String?
 
+    // Tuning preview state (Debug-only Host capability).
+    @Published public private(set) var tuningPhase: EventTimelinePhase = .idle
+    @Published public private(set) var activeTuning: [TuningApplicationSummary] = []
+    @Published public private(set) var lastTuningApplication: TuningApplicationSummary?
+    @Published public private(set) var tuningError: String?
+    @Published public private(set) var isApplyingTuning = false
+    @Published public private(set) var revertingTuningIDs: Set<String> = []
+
+    // Review Issue lifecycle state.
+    @Published public private(set) var selectedIssueID: String?
+    @Published public private(set) var selectedIssue: ReviewIssueSummary?
+    @Published public private(set) var issueDetailPhase: SnapshotDetailPhase = .idle
+    @Published public private(set) var isTransitioningIssue = false
+    @Published public private(set) var issueTransitionError: String?
+    @Published public private(set) var issueConflictNote: String?
+
+    // Deep Wiki editing state.
+    @Published public private(set) var isSavingWikiNode = false
+    @Published public private(set) var wikiEditingNode: WikiNodeDetail?
+    @Published public private(set) var wikiEditPhase: SnapshotDetailPhase = .idle
+    @Published public private(set) var wikiWriteError: String?
+    @Published public private(set) var wikiConflictNote: String?
+
+    // Canvas Screen State details and knowledge links.
+    @Published public private(set) var selectedCanvasStateID: String?
+    @Published public private(set) var canvasStateDetail: ScreenStateDetail?
+    @Published public private(set) var canvasStatePhase: SnapshotDetailPhase = .idle
+    @Published public private(set) var relatedWikiNodes: [WikiNodeSummary] = []
+    @Published public private(set) var isLinkingWikiNode = false
+    @Published public private(set) var canvasLinkError: String?
+
     private let client: any HostClient
     private var selectionGeneration = 0
     // Per-pane request generations: a slow older response must never
@@ -74,6 +105,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     private var wikiGeneration = 0
     private var issuesGeneration = 0
     private var eventsGeneration = 0
+    private var tuningGeneration = 0
+    private var issueDetailGeneration = 0
+    private var wikiEditGeneration = 0
+    private var canvasStateGeneration = 0
 
     public init(client: any HostClient) {
         self.client = client
@@ -98,6 +133,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         await loadEventTimeline()
         await loadReviewIssues()
         await loadWiki(text: nil)
+        await loadActiveTuning()
 
         do {
             let page = try await client.listSnapshots()
@@ -293,6 +329,409 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             reportedEventGaps = []
             eventsPhase = .failure(Self.message(for: error))
         }
+    }
+
+    // MARK: - Tuning preview (Debug-only Host capability)
+
+    /// Reloads the active tuning previews. A Host without an authorized
+    /// Runtime rejects this route; the failure text is shown inline.
+    public func loadActiveTuning() async {
+        tuningGeneration += 1
+        let generation = tuningGeneration
+        tuningPhase = .loading
+        do {
+            let page = try await client.listActiveTuningApplications()
+            guard generation == tuningGeneration else {
+                return
+            }
+            activeTuning = page.items
+            tuningPhase = activeTuning.isEmpty ? .empty : .content
+        } catch {
+            guard generation == tuningGeneration else {
+                return
+            }
+            activeTuning = []
+            tuningPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    /// Creates a single-change alpha Tuning Patch bound to the selected node
+    /// and applies it with the selected Snapshot as the expected Snapshot.
+    public func previewAlpha(_ value: Double) async {
+        guard !isApplyingTuning else {
+            return
+        }
+        guard let snapshot = selectedSnapshot,
+              let node = selectedNode,
+              let stableID = node.stableID
+        else {
+            tuningError = "Select a node with a stable ID to preview tuning."
+            return
+        }
+        isApplyingTuning = true
+        tuningError = nil
+        defer { isApplyingTuning = false }
+        let draft = TuningPatchDraft(
+            title: "Studio alpha preview for \(stableID)",
+            targetSnapshotID: snapshot.id,
+            changes: [
+                TuningChangeDraft(
+                    target: TuningNodeTargetDraft(
+                        snapshotID: snapshot.id,
+                        treeID: snapshot.tree.treeID,
+                        nodeID: node.id,
+                        stableID: stableID
+                    ),
+                    property: "alpha",
+                    originalValue: TuningNumberValueDraft(value: node.alpha ?? 1),
+                    previewValue: TuningNumberValueDraft(value: value)
+                ),
+            ],
+            createdBy: .studio
+        )
+        do {
+            let patch = try await client.createTuningPatch(draft)
+            lastTuningApplication = try await client.applyTuningPatch(
+                patchID: patch.patchID,
+                previewTTLMilliseconds: nil
+            )
+        } catch {
+            tuningError = Self.message(for: error)
+            return
+        }
+        await loadActiveTuning()
+    }
+
+    /// Reverts one active tuning preview and refreshes the active list.
+    public func revertTuning(id: String) async {
+        guard !revertingTuningIDs.contains(id) else {
+            return
+        }
+        revertingTuningIDs.insert(id)
+        tuningError = nil
+        defer { revertingTuningIDs.remove(id) }
+        do {
+            let reverted = try await client.revertTuningApplication(id: id)
+            if lastTuningApplication?.tuningApplicationID == reverted.tuningApplicationID {
+                lastTuningApplication = reverted
+            }
+        } catch {
+            tuningError = Self.message(for: error)
+            return
+        }
+        await loadActiveTuning()
+    }
+
+    // MARK: - Review Issue lifecycle
+
+    /// The legal target states for the selected issue, from the canonical
+    /// Review Issue lifecycle.
+    public var legalIssueTransitions: [String] {
+        guard let state = selectedIssue?.state else {
+            return []
+        }
+        return ReviewIssueLifecycle.legalTargets(from: state)
+    }
+
+    /// Selects one Review Issue and loads its current persisted revision.
+    public func selectReviewIssue(id: String?) async {
+        issueDetailGeneration += 1
+        let generation = issueDetailGeneration
+        selectedIssueID = id
+        issueTransitionError = nil
+        issueConflictNote = nil
+        guard let id else {
+            selectedIssue = nil
+            issueDetailPhase = .idle
+            return
+        }
+        selectedIssue = nil
+        issueDetailPhase = .loading
+        do {
+            let issue = try await client.getReviewIssue(id: id)
+            guard generation == issueDetailGeneration else {
+                return
+            }
+            selectedIssue = issue
+            issueDetailPhase = .content
+        } catch {
+            guard generation == issueDetailGeneration else {
+                return
+            }
+            issueDetailPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    /// Applies one lifecycle transition to the selected issue. An
+    /// optimistic-concurrency conflict reloads the issue and leaves a note.
+    public func transitionSelectedIssue(to state: String, reason: String?) async {
+        guard !isTransitioningIssue, let issue = selectedIssue else {
+            return
+        }
+        isTransitioningIssue = true
+        issueTransitionError = nil
+        issueConflictNote = nil
+        defer { isTransitioningIssue = false }
+        do {
+            let updated = try await client.transitionReviewIssue(
+                id: issue.issueID,
+                ReviewIssueTransitionRequest(
+                    expectedRevision: issue.revision,
+                    toState: state,
+                    reason: reason,
+                    changedBy: .studio
+                )
+            )
+            selectedIssue = updated
+            issueDetailPhase = .content
+            applyIssueToList(updated)
+        } catch {
+            if Self.isConflict(error) {
+                issueConflictNote =
+                    "This issue changed elsewhere. The latest revision is shown; review it before retrying."
+                await reloadIssueAfterConflict(issueID: issue.issueID)
+            } else {
+                issueTransitionError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: - Deep Wiki editing
+
+    /// Creates one Deep Wiki node and refreshes the knowledge pane.
+    /// Returns true when the node was persisted.
+    public func createWikiNode(
+        kind: String,
+        title: String,
+        summary: String?,
+        markdown: String
+    ) async -> Bool {
+        guard !isSavingWikiNode else {
+            return false
+        }
+        isSavingWikiNode = true
+        wikiWriteError = nil
+        defer { isSavingWikiNode = false }
+        do {
+            _ = try await client.createWikiNode(
+                WikiNodeDraft(
+                    kind: kind,
+                    title: title,
+                    summary: summary,
+                    markdown: markdown,
+                    createdBy: .studio
+                )
+            )
+        } catch {
+            wikiWriteError = Self.message(for: error)
+            return false
+        }
+        await loadWiki(text: nil)
+        return true
+    }
+
+    /// Loads one full Wiki node for editing.
+    public func beginWikiEdit(nodeID: String) async {
+        wikiEditGeneration += 1
+        let generation = wikiEditGeneration
+        wikiEditingNode = nil
+        wikiConflictNote = nil
+        wikiWriteError = nil
+        wikiEditPhase = .loading
+        do {
+            let node = try await client.getWikiNode(id: nodeID)
+            guard generation == wikiEditGeneration else {
+                return
+            }
+            wikiEditingNode = node
+            wikiEditPhase = .content
+        } catch {
+            guard generation == wikiEditGeneration else {
+                return
+            }
+            wikiEditPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    /// Ends the Wiki editing session without saving.
+    public func endWikiEdit() {
+        wikiEditGeneration += 1
+        wikiEditingNode = nil
+        wikiEditPhase = .idle
+        wikiConflictNote = nil
+        wikiWriteError = nil
+    }
+
+    /// Saves one Wiki node revision guarded by the loaded revision. An
+    /// optimistic-concurrency conflict reloads the node and leaves a note.
+    /// Returns true when the revision was persisted.
+    public func saveWikiEdit(
+        title: String?,
+        summary: String?,
+        markdown: String?,
+        toStatus: String?
+    ) async -> Bool {
+        guard !isSavingWikiNode, let node = wikiEditingNode else {
+            return false
+        }
+        isSavingWikiNode = true
+        wikiWriteError = nil
+        wikiConflictNote = nil
+        defer { isSavingWikiNode = false }
+        do {
+            let updated = try await client.reviseWikiNode(
+                id: node.wikiNodeID,
+                WikiNodeRevisionDraft(
+                    expectedRevision: node.revision,
+                    title: title,
+                    summary: summary,
+                    markdown: markdown,
+                    toStatus: toStatus,
+                    updatedBy: .studio
+                )
+            )
+            wikiEditingNode = updated
+            wikiEditPhase = .content
+        } catch {
+            if Self.isConflict(error) {
+                wikiConflictNote =
+                    "This node changed elsewhere. The latest revision has been reloaded; reapply your edits."
+                await reloadWikiEditAfterConflict(nodeID: node.wikiNodeID)
+            } else {
+                wikiWriteError = Self.message(for: error)
+            }
+            return false
+        }
+        await loadWiki(text: nil)
+        return true
+    }
+
+    // MARK: - Canvas Screen State details and knowledge links
+
+    /// Selects one Canvas Screen State and loads its persisted detail plus
+    /// the Wiki nodes already linked to it.
+    public func selectCanvasState(id: String?) async {
+        canvasStateGeneration += 1
+        let generation = canvasStateGeneration
+        selectedCanvasStateID = id
+        canvasLinkError = nil
+        relatedWikiNodes = []
+        canvasStateDetail = nil
+        guard let id else {
+            canvasStatePhase = .idle
+            return
+        }
+        canvasStatePhase = .loading
+        do {
+            let detail = try await client.getScreenState(id: id)
+            guard generation == canvasStateGeneration else {
+                return
+            }
+            canvasStateDetail = detail
+            canvasStatePhase = .content
+        } catch {
+            guard generation == canvasStateGeneration else {
+                return
+            }
+            canvasStatePhase = .failure(Self.message(for: error))
+            return
+        }
+        await loadRelatedWikiNodes(stateID: id, generation: generation)
+    }
+
+    /// Links one Wiki node to the selected Screen State with a `relates_to`
+    /// relation, then refreshes the linked-node list.
+    public func linkSelectedCanvasState(toWikiNode nodeID: String) async {
+        guard !isLinkingWikiNode, let stateID = selectedCanvasStateID else {
+            return
+        }
+        isLinkingWikiNode = true
+        canvasLinkError = nil
+        defer { isLinkingWikiNode = false }
+        do {
+            _ = try await client.createWikiLink(
+                WikiLinkDraft(
+                    sourceNodeID: nodeID,
+                    target: ResourceTargetDraft(kind: "screen_state", id: stateID),
+                    relation: "relates_to",
+                    createdBy: .studio
+                )
+            )
+        } catch {
+            canvasLinkError = Self.message(for: error)
+            return
+        }
+        await loadRelatedWikiNodes(stateID: stateID, generation: canvasStateGeneration)
+    }
+
+    private func loadRelatedWikiNodes(stateID: String, generation: Int) async {
+        do {
+            let page = try await client.relatedWikiNodes(kind: "screen_state", id: stateID)
+            guard generation == canvasStateGeneration else {
+                return
+            }
+            relatedWikiNodes = page.items
+        } catch {
+            guard generation == canvasStateGeneration else {
+                return
+            }
+            relatedWikiNodes = []
+            canvasLinkError = Self.message(for: error)
+        }
+    }
+
+    private func reloadIssueAfterConflict(issueID: String) async {
+        issueDetailGeneration += 1
+        let generation = issueDetailGeneration
+        do {
+            let latest = try await client.getReviewIssue(id: issueID)
+            guard generation == issueDetailGeneration, selectedIssueID == issueID else {
+                return
+            }
+            selectedIssue = latest
+            issueDetailPhase = .content
+            applyIssueToList(latest)
+        } catch {
+            guard generation == issueDetailGeneration, selectedIssueID == issueID else {
+                return
+            }
+            issueDetailPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    private func reloadWikiEditAfterConflict(nodeID: String) async {
+        wikiEditGeneration += 1
+        let generation = wikiEditGeneration
+        do {
+            let node = try await client.getWikiNode(id: nodeID)
+            guard generation == wikiEditGeneration else {
+                return
+            }
+            wikiEditingNode = node
+            wikiEditPhase = .content
+        } catch {
+            guard generation == wikiEditGeneration else {
+                return
+            }
+            wikiEditPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    private func applyIssueToList(_ issue: ReviewIssueSummary) {
+        guard let index = reviewIssues.firstIndex(where: { $0.issueID == issue.issueID }) else {
+            return
+        }
+        reviewIssues[index] = issue
+        reviewIssues.sort { $0.updatedAt > $1.updatedAt }
+    }
+
+    private static func isConflict(_ error: Error) -> Bool {
+        guard let hostError = error as? HostClientError,
+              case let .server(statusCode, _, code, _, _) = hostError
+        else {
+            return false
+        }
+        return statusCode == 409 || code == "conflict"
     }
 
     private func apply(snapshot: RuntimeSnapshot) throws {

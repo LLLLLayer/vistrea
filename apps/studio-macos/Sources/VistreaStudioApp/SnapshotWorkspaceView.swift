@@ -109,9 +109,16 @@ private struct CanvasPane: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .content:
-            ScrollView([.horizontal, .vertical]) {
-                canvasContent
-                    .padding(24)
+            HStack(spacing: 0) {
+                ScrollView([.horizontal, .vertical]) {
+                    canvasContent
+                        .padding(24)
+                }
+                if model.selectedCanvasStateID != nil {
+                    Divider()
+                    CanvasStateDetailPanel(model: model)
+                        .frame(width: 280)
+                }
             }
         }
     }
@@ -120,6 +127,8 @@ private struct CanvasPane: View {
         let positions = model.canvasStates
         let graph = model.canvasGraph
         let entryIDs = Set(graph?.entryStateIDs ?? [])
+        let selectedID = model.selectedCanvasStateID
+        let linkedSelected = !model.relatedWikiNodes.isEmpty
         let centers = Dictionary(uniqueKeysWithValues: positions.map { positioned in
             (
                 positioned.id,
@@ -153,10 +162,17 @@ private struct CanvasPane: View {
                     Text(positioned.state.kind)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if entryIDs.contains(positioned.id) {
-                        Text("entry")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.blue)
+                    HStack(spacing: 6) {
+                        if entryIDs.contains(positioned.id) {
+                            Text("entry")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.blue)
+                        }
+                        if positioned.id == selectedID, linkedSelected {
+                            Label("linked", systemImage: "book")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.purple)
+                        }
                     }
                 }
                 .padding(10)
@@ -168,14 +184,19 @@ private struct CanvasPane: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(
-                            entryIDs.contains(positioned.id) ? Color.blue : Color.secondary.opacity(0.4),
-                            lineWidth: entryIDs.contains(positioned.id) ? 2 : 1
+                            positioned.id == selectedID
+                                ? Color.accentColor
+                                : entryIDs.contains(positioned.id) ? Color.blue : Color.secondary.opacity(0.4),
+                            lineWidth: positioned.id == selectedID || entryIDs.contains(positioned.id) ? 2 : 1
                         )
                 )
                 .offset(
                     x: CGFloat(positioned.column) * Self.columnWidth,
                     y: CGFloat(positioned.row) * Self.rowHeight
                 )
+                .onTapGesture {
+                    Task { await model.selectCanvasState(id: positioned.id) }
+                }
                 .accessibilityLabel("Screen state \(positioned.state.title)")
             }
         }
@@ -184,6 +205,121 @@ private struct CanvasPane: View {
             height: CGFloat(height) * Self.rowHeight,
             alignment: .topLeading
         )
+    }
+}
+
+/// The selected Screen State's persisted details plus its Deep Wiki links.
+private struct CanvasStateDetailPanel: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var linkFilter = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Screen State")
+                        .font(.headline)
+                    Spacer()
+                    Button("Close", systemImage: "xmark.circle") {
+                        Task { await model.selectCanvasState(id: nil) }
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                }
+                switch model.canvasStatePhase {
+                case .idle:
+                    EmptyView()
+                case .loading:
+                    ProgressView("Loading the Screen State…")
+                        .controlSize(.small)
+                case let .failure(message):
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                case .content:
+                    if let detail = model.canvasStateDetail {
+                        stateFields(for: detail)
+                        Divider()
+                        linkedNodes
+                        Divider()
+                        linkControls
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private func stateFields(for detail: ScreenStateDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Title", value: detail.title)
+            LabeledContent("Kind", value: detail.kind)
+            LabeledContent("Status", value: detail.status)
+            LabeledContent("First seen", value: detail.firstSeen)
+            LabeledContent("Last seen", value: detail.lastSeen)
+            LabeledContent("Snapshot") {
+                Text(detail.canonicalSnapshotID)
+                    .font(.caption.monospaced())
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+        }
+        .font(.caption)
+    }
+
+    @ViewBuilder
+    private var linkedNodes: some View {
+        Text("Linked wiki nodes")
+            .font(.caption.weight(.semibold))
+        if model.relatedWikiNodes.isEmpty {
+            Text("No wiki node links this state yet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(model.relatedWikiNodes) { node in
+                Label("\(node.title) · \(node.kind)", systemImage: "book")
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var linkControls: some View {
+        Text("Link to wiki node")
+            .font(.caption.weight(.semibold))
+        TextField("Filter wiki nodes…", text: $linkFilter)
+            .textFieldStyle(.roundedBorder)
+        let candidates = model.wikiNodes.filter { node in
+            linkFilter.isEmpty || node.title.lowercased().contains(linkFilter.lowercased())
+        }
+        if candidates.isEmpty {
+            Text("No wiki node matches. Create one in the Wiki tab first.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(candidates.prefix(6)) { node in
+                HStack {
+                    Text(node.title)
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("Link") {
+                        Task { await model.linkSelectedCanvasState(toWikiNode: node.id) }
+                    }
+                    .font(.caption)
+                    .disabled(model.isLinkingWikiNode)
+                }
+            }
+        }
+        if let error = model.canvasLinkError {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        }
     }
 }
 
@@ -278,10 +414,17 @@ enum LayerSceneBuilder {
 private struct WikiPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var searchText = ""
+    @State private var isCreating = false
+    @State private var editingNode: WikiNodeSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: "Deep Wiki", systemImage: "book")
+            PaneHeader(title: "Deep Wiki", systemImage: "book") {
+                Button("New node", systemImage: "plus") {
+                    isCreating = true
+                }
+                .disabled(model.isSavingWikiNode)
+            }
             Divider()
             HStack(spacing: 8) {
                 TextField("Search knowledge…", text: $searchText)
@@ -297,6 +440,12 @@ private struct WikiPane: View {
             Divider()
             content
         }
+        .sheet(isPresented: $isCreating) {
+            WikiNodeCreateSheet(model: model)
+        }
+        .sheet(item: $editingNode) { node in
+            WikiNodeEditSheet(model: model, nodeID: node.id)
+        }
     }
 
     @ViewBuilder
@@ -306,7 +455,7 @@ private struct WikiPane: View {
             ProgressView("Loading the Deep Wiki…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .empty:
-            Text("No knowledge matches. Create Wiki nodes through the CLI, MCP, or an agent.")
+            Text("No knowledge matches. Create the first Wiki node with the New node button.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding()
@@ -319,35 +468,211 @@ private struct WikiPane: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .content:
             List(model.wikiNodes) { node in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(node.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    HStack(spacing: 6) {
-                        Text(node.kind)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.blue)
-                        Text(node.status)
-                            .font(.caption)
-                            .foregroundStyle(node.status == "published" ? Color.green : Color.secondary)
-                        ForEach(node.labels.prefix(3), id: \.self) { label in
-                            Text(label)
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(node.title)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                        HStack(spacing: 6) {
+                            Text(node.kind)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.blue)
+                            Text(node.status)
+                                .font(.caption)
+                                .foregroundStyle(node.status == "published" ? Color.green : Color.secondary)
+                            ForEach(node.labels.prefix(3), id: \.self) { label in
+                                Text(label)
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        if let summary = node.summary {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
                     }
-                    if let summary = node.summary {
-                        Text(summary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                    Spacer()
+                    Button("Edit") {
+                        editingNode = node
                     }
+                    .font(.caption)
                 }
                 .padding(.vertical, 2)
                 .accessibilityLabel("Wiki node \(node.title), \(node.status)")
             }
             .listStyle(.sidebar)
         }
+    }
+}
+
+/// The New node sheet: kind, title, summary, and Markdown content.
+private struct WikiNodeCreateSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind = "note"
+    @State private var title = ""
+    @State private var summary = ""
+    @State private var markdown = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("New Wiki node")
+                .font(.headline)
+            Picker("Kind", selection: $kind) {
+                ForEach(WikiVocabulary.nodeKinds, id: \.self) { kind in
+                    Text(kind).tag(kind)
+                }
+            }
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+            TextField("Summary (optional)", text: $summary)
+                .textFieldStyle(.roundedBorder)
+            Text("Markdown")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $markdown)
+                .font(.body.monospaced())
+                .frame(minHeight: 160)
+                .border(Color.secondary.opacity(0.4))
+            if let error = model.wikiWriteError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Create") {
+                    Task {
+                        let created = await model.createWikiNode(
+                            kind: kind,
+                            title: title,
+                            summary: summary.isEmpty ? nil : summary,
+                            markdown: markdown
+                        )
+                        if created {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isSavingWikiNode || title.isEmpty || markdown.isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 460)
+    }
+}
+
+/// The Edit sheet: loads the full node, revises it guarded by its revision,
+/// and offers only legal status transitions.
+private struct WikiNodeEditSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let nodeID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var summary = ""
+    @State private var markdown = ""
+    @State private var status = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Edit Wiki node")
+                .font(.headline)
+            switch model.wikiEditPhase {
+            case .idle, .loading:
+                ProgressView("Loading the Wiki node…")
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            case let .failure(message):
+                Text(message)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            case .content:
+                if let node = model.wikiEditingNode {
+                    editor(for: node)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Close") {
+                    model.endWikiEdit()
+                    dismiss()
+                }
+                if let node = model.wikiEditingNode {
+                    Button("Save") {
+                        Task {
+                            let saved = await model.saveWikiEdit(
+                                title: title == node.title ? nil : title,
+                                summary: summary.isEmpty ? nil : summary,
+                                markdown: markdown == (node.markdown ?? "") ? nil : markdown,
+                                toStatus: status == node.status ? nil : status
+                            )
+                            if saved {
+                                model.endWikiEdit()
+                                dismiss()
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isSavingWikiNode || title.isEmpty)
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 460)
+        .task {
+            await model.beginWikiEdit(nodeID: nodeID)
+        }
+        .onChange(of: model.wikiEditingNode) {
+            syncFields()
+        }
+    }
+
+    private func editor(for node: WikiNodeDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(node.kind) · revision \(node.revision)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let note = model.wikiConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            TextField("Title", text: $title)
+                .textFieldStyle(.roundedBorder)
+            TextField("Summary (optional)", text: $summary)
+                .textFieldStyle(.roundedBorder)
+            Text("Markdown")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextEditor(text: $markdown)
+                .font(.body.monospaced())
+                .frame(minHeight: 160)
+                .border(Color.secondary.opacity(0.4))
+            Picker("Status", selection: $status) {
+                Text(node.status).tag(node.status)
+                ForEach(WikiVocabulary.legalStatusTargets(from: node.status), id: \.self) { target in
+                    Text(target).tag(target)
+                }
+            }
+            if let error = model.wikiWriteError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func syncFields() {
+        guard let node = model.wikiEditingNode else { return }
+        title = node.title
+        summary = node.summary ?? ""
+        markdown = node.markdown ?? ""
+        status = node.status
     }
 }
 
@@ -381,7 +706,7 @@ private struct ReviewIssuesPane: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .content:
-            List(model.reviewIssues) { issue in
+            List(model.reviewIssues, selection: issueSelection) { issue in
                 VStack(alignment: .leading, spacing: 3) {
                     Text(issue.title)
                         .font(.subheadline.weight(.semibold))
@@ -403,10 +728,96 @@ private struct ReviewIssuesPane: View {
                         .lineLimit(1)
                 }
                 .padding(.vertical, 2)
+                .tag(issue.id)
                 .accessibilityLabel("Review issue \(issue.title), state \(issue.state)")
             }
             .listStyle(.sidebar)
+            Divider()
+            ReviewIssueDetailPanel(model: model)
         }
+    }
+
+    private var issueSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedIssueID },
+            set: { id in
+                guard id != model.selectedIssueID else { return }
+                Task { await model.selectReviewIssue(id: id) }
+            }
+        )
+    }
+}
+
+/// The selected issue's lifecycle detail with only legal transitions offered.
+private struct ReviewIssueDetailPanel: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var reason = ""
+
+    var body: some View {
+        Group {
+            switch model.issueDetailPhase {
+            case .idle:
+                Text("Select an issue to manage its lifecycle.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(8)
+            case .loading:
+                ProgressView("Loading issue…")
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity)
+                    .padding(8)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(8)
+            case .content:
+                if let issue = model.selectedIssue {
+                    detail(for: issue)
+                }
+            }
+        }
+    }
+
+    private func detail(for issue: ReviewIssueSummary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(issue.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            Text("State \(issue.state) · revision \(issue.revision)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let note = model.issueConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            TextField("Transition reason (optional)", text: $reason)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.isTransitioningIssue)
+            HStack(spacing: 6) {
+                ForEach(model.legalIssueTransitions, id: \.self) { target in
+                    Button(target) {
+                        let transitionReason = reason.isEmpty ? nil : reason
+                        Task {
+                            await model.transitionSelectedIssue(to: target, reason: transitionReason)
+                        }
+                    }
+                    .font(.caption)
+                    .disabled(model.isTransitioningIssue)
+                }
+            }
+            if let error = model.issueTransitionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Issue lifecycle for \(issue.title), state \(issue.state)")
     }
 }
 
@@ -786,6 +1197,14 @@ private struct NodeDetailsPane: View {
                             }
                         }
                     }
+                    if node.stableID != nil {
+                        Section("Tuning Preview (Debug)") {
+                            TuningPreviewControls(model: model, node: node)
+                        }
+                        Section("Active Previews") {
+                            ActiveTuningList(model: model)
+                        }
+                    }
                 }
                 .listStyle(.inset)
             } else {
@@ -795,6 +1214,116 @@ private struct NodeDetailsPane: View {
                     description: Text("Select a node in the View Tree to inspect its canonical properties.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// The Debug-only alpha preview controls for one selected node.
+private struct TuningPreviewControls: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let node: NodePresentation
+    @State private var alphaValue: Double = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LabeledContent(
+                "Source alpha",
+                value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
+            )
+            Slider(value: $alphaValue, in: 0...1) {
+                Text("Alpha")
+            }
+            HStack {
+                Text(alphaValue.formatted(.number.precision(.fractionLength(2))))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Preview alpha") {
+                    Task { await model.previewAlpha(alphaValue) }
+                }
+                .disabled(model.isApplyingTuning)
+            }
+            if model.isApplyingTuning {
+                ProgressView("Applying preview…")
+                    .controlSize(.small)
+            }
+            if let error = model.tuningError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            if let outcome = model.lastTuningApplication {
+                TuningOutcomeView(application: outcome)
+            }
+        }
+        .onAppear { alphaValue = node.alpha ?? 1 }
+        .onChange(of: node.id) {
+            alphaValue = node.alpha ?? 1
+        }
+    }
+}
+
+/// The applied-versus-rejected outcome of the most recent tuning application.
+private struct TuningOutcomeView: View {
+    let application: TuningApplicationSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Preview \(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(application.rejectedChanges.isEmpty ? Color.green : Color.orange)
+            ForEach(application.rejectedChanges) { change in
+                Text("\(change.reasonCode): \(change.message)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityLabel(
+            "Tuning preview \(application.status), \(application.appliedChanges.count) applied, \(application.rejectedChanges.count) rejected"
+        )
+    }
+}
+
+/// The active tuning previews with one Revert button each.
+private struct ActiveTuningList: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        switch model.tuningPhase {
+        case .idle, .loading:
+            ProgressView("Loading active previews…")
+                .controlSize(.small)
+        case .empty:
+            Text("No active tuning previews.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case let .failure(message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        case .content:
+            ForEach(model.activeTuning) { application in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(application.tuningApplicationID)
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("\(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Revert") {
+                        Task { await model.revertTuning(id: application.id) }
+                    }
+                    .disabled(model.revertingTuningIDs.contains(application.id))
+                }
+                .accessibilityLabel("Active tuning preview, status \(application.status)")
             }
         }
     }

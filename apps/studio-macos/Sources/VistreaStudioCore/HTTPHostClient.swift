@@ -260,6 +260,165 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func createTuningPatch(_ draft: TuningPatchDraft) async throws -> TuningPatchSummary {
+        guard (try? SnapshotID(validating: draft.targetSnapshotID)) != nil else {
+            throw HostClientError.invalidIdentifier(draft.targetSnapshotID)
+        }
+        return try await sendJSON(
+            TuningPatchSummary.self,
+            path: ["v1", "tuning-patches"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func applyTuningPatch(
+        patchID: String,
+        previewTTLMilliseconds: Int? = nil
+    ) async throws -> TuningApplicationSummary {
+        guard Self.isTypedIdentifier(patchID, prefix: "patch") else {
+            throw HostClientError.invalidIdentifier(patchID)
+        }
+        if let previewTTLMilliseconds {
+            guard (100...3_600_000).contains(previewTTLMilliseconds) else {
+                throw HostClientError.invalidConfiguration(
+                    "The tuning preview TTL must be between 100 and 3600000 milliseconds."
+                )
+            }
+        }
+        return try await sendJSON(
+            TuningApplicationSummary.self,
+            path: ["v1", "tuning-applications"],
+            body: TuningApplicationRequestBody(
+                patchID: patchID,
+                previewTTLMilliseconds: previewTTLMilliseconds
+            ),
+            expectedStatus: 201
+        )
+    }
+
+    public func revertTuningApplication(id: String) async throws -> TuningApplicationSummary {
+        guard Self.isTypedIdentifier(id, prefix: "tuningapp") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await sendJSON(
+            TuningApplicationSummary.self,
+            path: ["v1", "tuning-applications", id, "revert"],
+            body: EmptyJSONBody(),
+            expectedStatus: 200
+        )
+    }
+
+    public func listActiveTuningApplications() async throws -> TuningApplicationPage {
+        try await requestJSON(
+            TuningApplicationPage.self,
+            method: "GET",
+            path: ["v1", "tuning-applications", "active"]
+        )
+    }
+
+    public func getReviewIssue(id: String) async throws -> ReviewIssueSummary {
+        guard Self.isTypedIdentifier(id, prefix: "issue") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            ReviewIssueSummary.self,
+            method: "GET",
+            path: ["v1", "review-issues", id]
+        )
+    }
+
+    public func transitionReviewIssue(
+        id: String,
+        _ transition: ReviewIssueTransitionRequest
+    ) async throws -> ReviewIssueSummary {
+        guard Self.isTypedIdentifier(id, prefix: "issue") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await sendJSON(
+            ReviewIssueSummary.self,
+            path: ["v1", "review-issues", id, "transitions"],
+            body: transition,
+            expectedStatus: 200
+        )
+    }
+
+    public func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail {
+        try await sendJSON(
+            WikiNodeDetail.self,
+            path: ["v1", "wiki", "nodes"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func getWikiNode(id: String) async throws -> WikiNodeDetail {
+        guard Self.isTypedIdentifier(id, prefix: "wiki") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            WikiNodeDetail.self,
+            method: "GET",
+            path: ["v1", "wiki", "nodes", id]
+        )
+    }
+
+    public func reviseWikiNode(
+        id: String,
+        _ draft: WikiNodeRevisionDraft
+    ) async throws -> WikiNodeDetail {
+        guard Self.isTypedIdentifier(id, prefix: "wiki") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await sendJSON(
+            WikiNodeDetail.self,
+            path: ["v1", "wiki", "nodes", id, "revisions"],
+            body: draft,
+            expectedStatus: 200
+        )
+    }
+
+    public func getScreenState(id: String) async throws -> ScreenStateDetail {
+        guard Self.isTypedIdentifier(id, prefix: "screenstate") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            ScreenStateDetail.self,
+            method: "GET",
+            path: ["v1", "screen-states", id]
+        )
+    }
+
+    public func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary {
+        guard Self.isTypedIdentifier(draft.sourceNodeID, prefix: "wiki") else {
+            throw HostClientError.invalidIdentifier(draft.sourceNodeID)
+        }
+        return try await sendJSON(
+            WikiLinkSummary.self,
+            path: ["v1", "wiki", "links"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage {
+        guard kind.range(of: "^[a-z][a-z0-9._-]*$", options: .regularExpression) != nil,
+              !id.isEmpty,
+              id.utf8.count <= 320
+        else {
+            throw HostClientError.invalidIdentifier("\(kind)/\(id)")
+        }
+        return try await requestJSON(
+            WikiNodePage.self,
+            method: "GET",
+            path: ["v1", "wiki", "related"],
+            query: [
+                URLQueryItem(name: "kind", value: kind),
+                URLQueryItem(name: "id", value: id),
+            ]
+        )
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {
@@ -285,10 +444,39 @@ public struct HTTPHostClient: HostClient, Sendable {
     private func requestJSON<Value: Decodable>(
         _ type: Value.Type,
         method: String,
-        path: [String]
+        path: [String],
+        query: [URLQueryItem] = []
     ) async throws -> Value {
-        let response = try await request(method: method, path: path)
+        let response = try await request(method: method, path: path, query: query)
         try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(type, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
+    /// Encodes one write command, posts it, and decodes the frozen result.
+    private func sendJSON<Body: Encodable, Value: Decodable>(
+        _ type: Value.Type,
+        path: [String],
+        body: Body,
+        expectedStatus: Int
+    ) async throws -> Value {
+        let encodedBody: Data
+        do {
+            encodedBody = try JSONEncoder().encode(body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+        let response = try await request(
+            method: "POST",
+            path: path,
+            headers: ["Content-Type": "application/json"],
+            body: encodedBody
+        )
+        try requireStatus(response, expected: [expectedStatus])
         try requireJSONSize(response.body)
         do {
             return try JSONDecoder().decode(type, from: response.body)
@@ -367,6 +555,14 @@ public struct HTTPHostClient: HostClient, Sendable {
         return digest.count == 64 && digest.allSatisfy { byte in
             (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
         }
+    }
+
+    /// Validates one canonical typed UUIDv7 identifier such as
+    /// `patch_019f0000-0000-7000-8000-000000000001`.
+    private static func isTypedIdentifier(_ value: String, prefix: String) -> Bool {
+        let pattern =
+            "^\(prefix)_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        return value.range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func isHostBearerToken(_ value: String) -> Bool {
@@ -460,3 +656,17 @@ public struct HTTPHostClient: HostClient, Sendable {
         return parsed
     }
 }
+
+/// The `POST /v1/tuning-applications` command body.
+private struct TuningApplicationRequestBody: Encodable {
+    let patchID: String
+    let previewTTLMilliseconds: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case patchID = "patch_id"
+        case previewTTLMilliseconds = "preview_ttl_ms"
+    }
+}
+
+/// An explicit empty JSON object body for parameterless POST routes.
+private struct EmptyJSONBody: Encodable {}

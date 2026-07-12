@@ -90,6 +90,8 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
     public let frame: RectPresentation?
     public let accessibilityLabel: String?
     public let actions: [String]
+    /// The captured visual alpha, when the Runtime reported one.
+    public let alpha: Double?
     public let fields: [DetailField]
 
     init(node: UiNode) {
@@ -104,6 +106,7 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         frame = node.frame.map(RectPresentation.init)
         accessibilityLabel = node.accessibility?.label
         actions = node.actions.map(\.rawValue)
+        alpha = node.visual?.alpha
 
         var result = [
             DetailField(label: "Node ID", value: node.nodeID.rawValue),
@@ -121,6 +124,11 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         }
         if !actions.isEmpty {
             result.append(DetailField(label: "Actions", value: actions.joined(separator: ", ")))
+        }
+        if let alpha = node.visual?.alpha {
+            result.append(
+                DetailField(label: "Alpha", value: alpha.formatted(.number.precision(.fractionLength(0...2))))
+            )
         }
         if let visible = node.state.visible {
             result.append(DetailField(label: "Visible", value: visible ? "Yes" : "No"))
@@ -164,6 +172,7 @@ public struct ObjectTreePresentation: Equatable, Sendable {
 }
 
 public struct UiTreeProjection: Equatable, Sendable {
+    public let treeID: String
     public let kind: String
     public let roots: [UiTreeNode]
     public let nodesByID: [String: NodePresentation]
@@ -215,6 +224,7 @@ public enum UiTreeProjector {
         switch tree.payload {
         case let .object(reference, nodeCount, encoding):
             return UiTreeProjection(
+                treeID: tree.treeID.rawValue,
                 kind: tree.kind.rawValue,
                 roots: [],
                 nodesByID: [:],
@@ -305,6 +315,7 @@ public enum UiTreeProjector {
         }
 
         return UiTreeProjection(
+            treeID: tree.treeID.rawValue,
             kind: tree.kind.rawValue,
             roots: rootIDs.compactMap { built[$0] },
             nodesByID: presentations,

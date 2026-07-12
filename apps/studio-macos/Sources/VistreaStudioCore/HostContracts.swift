@@ -457,6 +457,29 @@ public protocol HostClient: Sendable {
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage
     func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph
     func searchWikiNodes(text: String?) async throws -> WikiNodePage
+
+    // Tuning preview writes (Debug-only Host capability).
+    func createTuningPatch(_ draft: TuningPatchDraft) async throws -> TuningPatchSummary
+    func applyTuningPatch(patchID: String, previewTTLMilliseconds: Int?) async throws -> TuningApplicationSummary
+    func revertTuningApplication(id: String) async throws -> TuningApplicationSummary
+    func listActiveTuningApplications() async throws -> TuningApplicationPage
+
+    // Review Issue lifecycle writes.
+    func getReviewIssue(id: String) async throws -> ReviewIssueSummary
+    func transitionReviewIssue(
+        id: String,
+        _ request: ReviewIssueTransitionRequest
+    ) async throws -> ReviewIssueSummary
+
+    // Deep Wiki writes.
+    func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail
+    func getWikiNode(id: String) async throws -> WikiNodeDetail
+    func reviseWikiNode(id: String, _ draft: WikiNodeRevisionDraft) async throws -> WikiNodeDetail
+
+    // Canvas Screen State details and knowledge links.
+    func getScreenState(id: String) async throws -> ScreenStateDetail
+    func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary
+    func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage
 }
 
 public enum HostClientError: Error, Equatable, Sendable {

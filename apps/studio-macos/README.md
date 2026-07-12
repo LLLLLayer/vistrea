@@ -16,9 +16,15 @@ The first native SwiftUI Snapshot workspace is implemented as a standalone Swift
 - a Screen State Canvas tab rendering the materialized Screen Graph with a deterministic layered layout: entry states in the first column, breadth-first depth columns, unreachable states last, and observed transitions drawn as edges;
 - a 3D Layer Inspector tab exploding the selected Snapshot's captured hierarchy into depth-ordered SceneKit layers with camera control, interactive nodes highlighted;
 - a Deep Wiki tab searching persisted knowledge nodes by text with kind, status, and label facets;
-- loading, empty, detail-error, connection-error, and capture-error states;
+- a Debug-only alpha tuning preview in the node-details pane: a slider plus Preview button creates a single-change Tuning Patch bound to the selected node and Snapshot, applies it over the live Runtime, shows applied versus rejected changes with the canonical rejection reason codes verbatim, and lists active previews with per-row Revert; a Host without an authorized Runtime degrades to inline error text;
+- Review Issue lifecycle transitions: selecting an issue loads its persisted revision and offers only the legal target states from the canonical lifecycle (`open`, `in_progress`, `ready_for_verification`, `resolved`, `wont_fix`) with an optional reason; optimistic-concurrency conflicts reload the issue and show a changed-elsewhere note;
+- Deep Wiki editing: a New node sheet (schema kind picker, title, summary, Markdown) and a per-node Edit sheet that loads the full node, revises it guarded by `expected_revision`, and offers only legal status transitions; conflicts reload the node and show a changed-elsewhere note;
+- Canvas Screen State details: clicking a state opens a side panel with its persisted title, kind, status, first/last seen, and canonical Snapshot ID, lists the Wiki nodes already linked to it, and can create a `relates_to` Wiki link to the state;
+- loading, empty, detail-error, connection-error, capture-error, and write-conflict states;
 - a capture action over the Host Local API;
-- a canonical fixture-backed development mode when no Host is configured.
+- a canonical fixture-backed development mode when no Host is configured, including in-memory fixture implementations of every write flow above.
+
+Every write is stamped with the Studio actor `{"kind": "human", "id": "studio"}`.
 
 The presentation layer depends on the `HostClient` abstraction. It does not access SQLite, Workspace paths, Object Store paths, or Runtime transports directly. Reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
 
@@ -58,6 +64,14 @@ The adapter consumes these frozen local endpoints:
 - `GET /v1/snapshots/:id`
 - `GET /v1/objects/:hash`
 - `POST /v1/captures`
+- `GET /v1/events`
+- `GET /v1/review-issues` and `GET /v1/review-issues/:id`
+- `POST /v1/review-issues/:id/transitions`
+- `POST /v1/tuning-patches`
+- `POST /v1/tuning-applications`, `POST /v1/tuning-applications/:id/revert`, and `GET /v1/tuning-applications/active`
+- `GET /v1/screen-graph` and `GET /v1/screen-states/:id`
+- `GET /v1/wiki/nodes`, `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes/:id`, and `POST /v1/wiki/nodes/:id/revisions`
+- `POST /v1/wiki/links` and `GET /v1/wiki/related`
 
 Canonical Runtime Snapshot responses use the strict shared decoder. Host envelopes also reject unknown core fields.
 URLSession streams into bounded buffers before decoding: JSON responses are capped at 64 MiB and Object responses at 256 MiB. Full Object reads verify `ETag`, `Content-Length`, and SHA-256; byte ranges verify `ETag`, `Content-Length`, canonical `Content-Range`, and exact body length.
