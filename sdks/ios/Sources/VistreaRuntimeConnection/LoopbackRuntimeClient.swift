@@ -42,9 +42,11 @@ public actor LoopbackRuntimeClient {
 
     public private(set) var state: RuntimeConnectionState = .disconnected
     public private(set) var connectionID: String?
+    public private(set) var eventStreamingEnabled = false
 
     private let configuration: LoopbackRuntimeClientConfiguration
     private let captureProvider: any RuntimeSnapshotCaptureProvider
+    private let eventRecorder: RuntimeEventRecorder?
     private var connection: NWConnection?
     private var lineDecoder: BoundedJSONLineDecoder
     private var handshakePhase: HandshakePhase = .awaitingChallenge
@@ -52,15 +54,19 @@ public actor LoopbackRuntimeClient {
     private var receiveTask: Task<Void, Never>?
     private var handshakeTimeoutTask: Task<Void, Never>?
     private var captureTasks: [String: CaptureTaskEntry] = [:]
+    private var eventSubscriptionID: String?
+    private var eventPumpTask: Task<Void, Never>?
     private var closeWaiters: [CheckedContinuation<Void, any Error>] = []
     private var terminalError: RuntimeConnectionError?
 
     public init(
         configuration: LoopbackRuntimeClientConfiguration,
-        captureProvider: any RuntimeSnapshotCaptureProvider
+        captureProvider: any RuntimeSnapshotCaptureProvider,
+        eventRecorder: RuntimeEventRecorder? = nil
     ) {
         self.configuration = configuration
         self.captureProvider = captureProvider
+        self.eventRecorder = eventRecorder
         lineDecoder = BoundedJSONLineDecoder(
             maximumLineBytes: configuration.maximumInboundLineBytes
         )
@@ -256,7 +262,7 @@ public actor LoopbackRuntimeClient {
                 throw RuntimeConnectionError.protocolViolation
             }
             let welcome = try decode(WireHostWelcome.self, from: data)
-            try accept(welcome, context: context)
+            try await accept(welcome, context: context)
         }
     }
 
@@ -281,7 +287,20 @@ public actor LoopbackRuntimeClient {
 
         let clientNonce = makeNonce()
         let versions = [RuntimeConnectionAuthentication.version]
-        let capabilities = [RuntimeConnectionAuthentication.snapshotCapability]
+        var capabilities = [RuntimeConnectionAuthentication.snapshotCapability]
+        var wireEpoch: WireEventEpoch?
+        if let eventRecorder {
+            let epoch = await eventRecorder.epoch
+            capabilities = [
+                RuntimeConnectionAuthentication.eventsCapability,
+                RuntimeConnectionAuthentication.snapshotCapability,
+            ]
+            wireEpoch = WireEventEpoch(
+                eventEpochID: epoch.eventEpochID,
+                oldestRetainedSequence: epoch.oldestRetainedSequence,
+                nextSequence: epoch.nextSequence
+            )
+        }
         let proof = RuntimeConnectionAuthentication.clientProof(
             key: configuration.authorizationKey,
             connectionAttemptID: challenge.connectionAttemptID,
@@ -307,19 +326,27 @@ public actor LoopbackRuntimeClient {
                 capabilities: capabilities,
                 selectedAuthMethod: RuntimeConnectionAuthentication.method,
                 clientNonce: clientNonce,
-                challengeResponse: proof
+                challengeResponse: proof,
+                eventEpoch: wireEpoch
             )
         )
     }
 
-    private func accept(_ welcome: WireHostWelcome, context: HandshakeContext) throws {
+    private func accept(_ welcome: WireHostWelcome, context: HandshakeContext) async throws {
         let normalizedCapabilities = RuntimeConnectionAuthentication.normalize(
             capabilities: welcome.enabledCapabilities
         )
+        let snapshotOnly = [RuntimeConnectionAuthentication.snapshotCapability]
+        let snapshotAndEvents = [
+            RuntimeConnectionAuthentication.eventsCapability,
+            RuntimeConnectionAuthentication.snapshotCapability,
+        ]
+        let allowedCapabilitySets =
+            eventRecorder == nil ? [snapshotOnly] : [snapshotOnly, snapshotAndEvents]
         guard welcome.type == "host_welcome",
               isBoundedString(welcome.connectionID, maximumUTF8Bytes: 128),
               welcome.selectedVersion == RuntimeConnectionAuthentication.version,
-              normalizedCapabilities == [RuntimeConnectionAuthentication.snapshotCapability],
+              allowedCapabilitySets.contains(normalizedCapabilities),
               RuntimeConnectionAuthentication.verifyHostProof(
                 welcome.hostProof,
                 key: configuration.authorizationKey,
@@ -333,6 +360,19 @@ public actor LoopbackRuntimeClient {
               )
         else {
             throw RuntimeConnectionError.authenticationFailed
+        }
+        let eventsEnabled = normalizedCapabilities == snapshotAndEvents
+        if eventsEnabled {
+            guard let eventRecorder,
+                  let welcomeEpoch = welcome.eventEpoch,
+                  await welcomeEpoch.eventEpochID == eventRecorder.epoch.eventEpochID
+            else {
+                throw RuntimeConnectionError.negotiationFailed
+            }
+        } else {
+            guard welcome.eventEpoch == nil else {
+                throw RuntimeConnectionError.negotiationFailed
+            }
         }
         let policy = welcome.sessionPolicy
         guard (1_024...(64 * 1_024 * 1_024)).contains(policy.maximumLineBytes),
@@ -355,6 +395,7 @@ public actor LoopbackRuntimeClient {
             maximumChunkBytes: policy.maximumChunkBytes
         )
         connectionID = welcome.connectionID
+        eventStreamingEnabled = eventsEnabled
         state = .ready
     }
 
@@ -390,6 +431,12 @@ public actor LoopbackRuntimeClient {
             try startCapture(try decode(WireCaptureRequest.self, from: data))
         case "capture_cancel":
             try await cancelCapture(try decode(WireCaptureCancel.self, from: data))
+        case "subscribe_events":
+            try await subscribeEvents(try decode(WireSubscribeEvents.self, from: data))
+        case "acknowledge_events":
+            try await acknowledgeEvents(try decode(WireAcknowledgeEvents.self, from: data))
+        case "unsubscribe_events":
+            try unsubscribeEvents(try decode(WireUnsubscribeEvents.self, from: data))
         case "disconnect":
             let message = try decode(WireDisconnect.self, from: data)
             guard message.type == "disconnect" else {
@@ -462,6 +509,142 @@ public actor LoopbackRuntimeClient {
         } catch {
             shutdown(state: .failed, error: .unavailable)
         }
+    }
+
+    private func subscribeEvents(_ message: WireSubscribeEvents) async throws {
+        guard message.type == "subscribe_events",
+              isRequestID(message.requestID),
+              eventStreamingEnabled,
+              let eventRecorder,
+              eventSubscriptionID == nil,
+              !message.eventKinds.isEmpty,
+              message.eventKinds.count <= 16,
+              Set(message.eventKinds).count == message.eventKinds.count
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        let requestedKinds = message.eventKinds.compactMap(RuntimeEventKind.init(rawValue:))
+        guard requestedKinds.count == message.eventKinds.count else {
+            try await send(WireSubscribeError(
+                requestID: message.requestID,
+                code: "unsupported",
+                oldestAvailableSequence: nil,
+                nextSequence: nil
+            ))
+            return
+        }
+        let limit = message.maxBatchSize ?? 256
+        guard (1...1_024).contains(limit) else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+
+        let epoch = await eventRecorder.epoch
+        var cursor: UInt64
+        switch message.start.mode {
+        case "after_sequence":
+            guard let sequence = message.start.sequence else {
+                throw RuntimeConnectionError.protocolViolation
+            }
+            cursor = sequence
+        case "oldest_retained":
+            cursor = epoch.oldestRetainedSequence > 0 ? epoch.oldestRetainedSequence - 1 : 0
+        case "tail":
+            cursor = epoch.nextSequence - 1
+        default:
+            throw RuntimeConnectionError.protocolViolation
+        }
+        if message.eventEpochID != epoch.eventEpochID
+            || (message.start.mode == "after_sequence" && cursor + 1 < epoch.oldestRetainedSequence) {
+            // The requested epoch or range is no longer resolvable; report the
+            // recoverable boundary instead of silently skipping evidence.
+            try await send(WireSubscribeError(
+                requestID: message.requestID,
+                code: "conflict",
+                oldestAvailableSequence: epoch.oldestRetainedSequence,
+                nextSequence: epoch.nextSequence
+            ))
+            return
+        }
+
+        let subscriptionID = makeNonce()
+        eventSubscriptionID = subscriptionID
+        try await send(WireSubscribeResult(requestID: message.requestID, subscriptionID: subscriptionID))
+        let kinds = Set(requestedKinds)
+        eventPumpTask = Task { [weak self] in
+            await self?.pumpEvents(
+                subscriptionID: subscriptionID,
+                cursor: cursor,
+                kinds: kinds,
+                limit: limit
+            )
+        }
+    }
+
+    private func pumpEvents(
+        subscriptionID: String,
+        cursor initialCursor: UInt64,
+        kinds: Set<RuntimeEventKind>,
+        limit: Int
+    ) async {
+        guard let eventRecorder else {
+            return
+        }
+        var cursor = initialCursor
+        while state == .ready, eventSubscriptionID == subscriptionID, !Task.isCancelled {
+            do {
+                if let batch = try await eventRecorder.batchAfter(
+                    cursor: cursor,
+                    kinds: kinds,
+                    limit: limit
+                ) {
+                    guard state == .ready, eventSubscriptionID == subscriptionID else {
+                        return
+                    }
+                    try await send(WireEventBatch(subscriptionID: subscriptionID, batch: batch))
+                    cursor = batch.lastSequence.rawValue
+                } else {
+                    await eventRecorder.waitForEvents(after: cursor)
+                }
+            } catch is CancellationError {
+                return
+            } catch let error as RuntimeConnectionError {
+                if state == .ready {
+                    shutdown(state: .failed, error: error)
+                }
+                return
+            } catch {
+                if state == .ready {
+                    shutdown(state: .failed, error: .protocolViolation)
+                }
+                return
+            }
+        }
+    }
+
+    private func acknowledgeEvents(_ message: WireAcknowledgeEvents) async throws {
+        guard message.type == "acknowledge_events",
+              eventStreamingEnabled,
+              let eventRecorder,
+              message.subscriptionID == eventSubscriptionID
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        let epoch = await eventRecorder.epoch
+        guard message.eventEpochID == epoch.eventEpochID else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        await eventRecorder.releaseThrough(sequence: message.durableThroughSequence)
+    }
+
+    private func unsubscribeEvents(_ message: WireUnsubscribeEvents) throws {
+        guard message.type == "unsubscribe_events",
+              message.subscriptionID == eventSubscriptionID
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        eventPumpTask?.cancel()
+        eventPumpTask = nil
+        eventSubscriptionID = nil
     }
 
     private func cancelCapture(_ message: WireCaptureCancel) async throws {
@@ -699,6 +882,9 @@ public actor LoopbackRuntimeClient {
             entry.task.cancel()
         }
         captureTasks.removeAll()
+        eventPumpTask?.cancel()
+        eventPumpTask = nil
+        eventSubscriptionID = nil
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         connection = nil

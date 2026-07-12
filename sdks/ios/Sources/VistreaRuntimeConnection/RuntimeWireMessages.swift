@@ -37,6 +37,32 @@ struct WireHostChallenge: Decodable, Sendable {
     }
 }
 
+struct WireEventEpoch: Codable, Equatable, Sendable {
+    let eventEpochID: String
+    let oldestRetainedSequence: UInt64
+    let nextSequence: UInt64
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case eventEpochID = "event_epoch_id"
+        case oldestRetainedSequence = "oldest_retained_sequence"
+        case nextSequence = "next_sequence"
+    }
+
+    init(eventEpochID: String, oldestRetainedSequence: UInt64, nextSequence: UInt64) {
+        self.eventEpochID = eventEpochID
+        self.oldestRetainedSequence = oldestRetainedSequence
+        self.nextSequence = nextSequence
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eventEpochID = try container.decode(String.self, forKey: .eventEpochID)
+        oldestRetainedSequence = try container.decode(UInt64.self, forKey: .oldestRetainedSequence)
+        nextSequence = try container.decode(UInt64.self, forKey: .nextSequence)
+    }
+}
+
 struct WireClientHello: Encodable, Sendable {
     let type = "client_hello"
     let connectionAttemptID: String
@@ -47,6 +73,7 @@ struct WireClientHello: Encodable, Sendable {
     let selectedAuthMethod: String
     let clientNonce: String
     let challengeResponse: String
+    let eventEpoch: WireEventEpoch?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -58,6 +85,21 @@ struct WireClientHello: Encodable, Sendable {
         case selectedAuthMethod = "selected_auth_method"
         case clientNonce = "client_nonce"
         case challengeResponse = "challenge_response"
+        case eventEpoch = "event_epoch"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(connectionAttemptID, forKey: .connectionAttemptID)
+        try container.encode(runtimeInstanceID, forKey: .runtimeInstanceID)
+        try container.encode(buildConfiguration, forKey: .buildConfiguration)
+        try container.encode(supportedVersions, forKey: .supportedVersions)
+        try container.encode(capabilities, forKey: .capabilities)
+        try container.encode(selectedAuthMethod, forKey: .selectedAuthMethod)
+        try container.encode(clientNonce, forKey: .clientNonce)
+        try container.encode(challengeResponse, forKey: .challengeResponse)
+        try container.encodeIfPresent(eventEpoch, forKey: .eventEpoch)
     }
 }
 
@@ -68,6 +110,7 @@ struct WireHostWelcome: Decodable, Sendable {
     let enabledCapabilities: [String]
     let hostProof: String
     let sessionPolicy: WireSessionPolicy
+    let eventEpoch: WireEventEpoch?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case type
@@ -76,6 +119,7 @@ struct WireHostWelcome: Decodable, Sendable {
         case enabledCapabilities = "enabled_capabilities"
         case hostProof = "host_proof"
         case sessionPolicy = "session_policy"
+        case eventEpoch = "event_epoch"
     }
 
     init(from decoder: Decoder) throws {
@@ -90,6 +134,7 @@ struct WireHostWelcome: Decodable, Sendable {
         enabledCapabilities = try container.decode([String].self, forKey: .enabledCapabilities)
         hostProof = try container.decode(String.self, forKey: .hostProof)
         sessionPolicy = try container.decode(WireSessionPolicy.self, forKey: .sessionPolicy)
+        eventEpoch = try container.decodeIfPresent(WireEventEpoch.self, forKey: .eventEpoch)
     }
 }
 
@@ -309,6 +354,160 @@ struct WireCaptureError: Encodable, Sendable {
         case requestID = "request_id"
         case code
         case message
+    }
+}
+
+struct WireSubscribeEvents: Decodable, Sendable {
+    let type: String
+    let requestID: String
+    let eventEpochID: String
+    let eventKinds: [String]
+    let start: WireEventStart
+    let maxBatchSize: Int?
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case requestID = "request_id"
+        case eventEpochID = "event_epoch_id"
+        case eventKinds = "event_kinds"
+        case start
+        case maxBatchSize = "max_batch_size"
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        eventEpochID = try container.decode(String.self, forKey: .eventEpochID)
+        eventKinds = try container.decode([String].self, forKey: .eventKinds)
+        start = try container.decode(WireEventStart.self, forKey: .start)
+        maxBatchSize = try container.decodeIfPresent(Int.self, forKey: .maxBatchSize)
+    }
+}
+
+struct WireEventStart: Decodable, Sendable {
+    let mode: String
+    let sequence: UInt64?
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case mode
+        case sequence
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decode(String.self, forKey: .mode)
+        sequence = try container.decodeIfPresent(UInt64.self, forKey: .sequence)
+    }
+}
+
+struct WireAcknowledgeEvents: Decodable, Sendable {
+    let type: String
+    let subscriptionID: String
+    let eventEpochID: String
+    let durableThroughSequence: UInt64
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case subscriptionID = "subscription_id"
+        case eventEpochID = "event_epoch_id"
+        case durableThroughSequence = "durable_through_sequence"
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        subscriptionID = try container.decode(String.self, forKey: .subscriptionID)
+        eventEpochID = try container.decode(String.self, forKey: .eventEpochID)
+        durableThroughSequence = try container.decode(UInt64.self, forKey: .durableThroughSequence)
+    }
+}
+
+struct WireUnsubscribeEvents: Decodable, Sendable {
+    let type: String
+    let subscriptionID: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case subscriptionID = "subscription_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        subscriptionID = try container.decode(String.self, forKey: .subscriptionID)
+    }
+}
+
+struct WireSubscribeResult: Encodable, Sendable {
+    let type = "subscribe_result"
+    let requestID: String
+    let subscriptionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case requestID = "request_id"
+        case subscriptionID = "subscription_id"
+    }
+}
+
+struct WireSubscribeError: Encodable, Sendable {
+    let type = "subscribe_error"
+    let requestID: String
+    let code: String
+    let oldestAvailableSequence: UInt64?
+    let nextSequence: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case requestID = "request_id"
+        case code
+        case oldestAvailableSequence = "oldest_available_sequence"
+        case nextSequence = "next_sequence"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(requestID, forKey: .requestID)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(oldestAvailableSequence, forKey: .oldestAvailableSequence)
+        try container.encodeIfPresent(nextSequence, forKey: .nextSequence)
+    }
+}
+
+struct WireEventBatch: Encodable, Sendable {
+    let type = "event_batch"
+    let subscriptionID: String
+    let batch: RuntimeEventBatch
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case subscriptionID = "subscription_id"
+        case batch
+    }
+}
+
+struct WireEventsClosed: Encodable, Sendable {
+    let type = "events_closed"
+    let subscriptionID: String
+    let code: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case subscriptionID = "subscription_id"
+        case code
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(subscriptionID, forKey: .subscriptionID)
+        try container.encodeIfPresent(code, forKey: .code)
     }
 }
 

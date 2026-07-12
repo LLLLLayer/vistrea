@@ -7,6 +7,9 @@ import VistreaRuntimeUIKitConnection
 
 @MainActor
 final class DebugRuntimeConnectionController {
+    /// The Debug-only event recorder shared with observing view controllers.
+    private(set) static var sharedEventRecorder: RuntimeEventRecorder?
+
     private let client: LoopbackRuntimeClient
     private var runTask: Task<Void, Never>?
 
@@ -54,9 +57,12 @@ final class DebugRuntimeConnectionController {
                 authorizationToken: Data(token.utf8),
                 buildConfiguration: .debug
             )
+            let eventRecorder = try RuntimeEventRecorder()
+            Self.sharedEventRecorder = eventRecorder
             client = LoopbackRuntimeClient(
                 configuration: configuration,
-                captureProvider: captureProvider
+                captureProvider: captureProvider,
+                eventRecorder: eventRecorder
             )
         } catch {
             return nil

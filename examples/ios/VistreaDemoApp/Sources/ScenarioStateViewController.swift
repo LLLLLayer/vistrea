@@ -1,6 +1,9 @@
 import UIKit
 import VistreaRuntimeModels
 import VistreaRuntimeUIKit
+#if DEBUG
+import VistreaRuntimeConnection
+#endif
 
 final class ScenarioStateViewController: UIViewController {
     private let scenario: ScenarioDefinition
@@ -8,6 +11,9 @@ final class ScenarioStateViewController: UIViewController {
     private let profile: String
     private let preferredWaitStepID: String?
     private var automaticTransition: DispatchWorkItem?
+#if DEBUG
+    private var presentedTransientNodeIDs: [String] = []
+#endif
 
     init(
         scenario: ScenarioDefinition,
@@ -38,12 +44,68 @@ final class ScenarioStateViewController: UIViewController {
         scheduleWaitTransitionIfNeeded()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+#if DEBUG
+        recordTransientPresentation()
+#endif
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+#if DEBUG
+        recordTransientDismissal()
+#endif
         if isMovingFromParent || navigationController?.isBeingDismissed == true {
             automaticTransition?.cancel()
         }
     }
+
+#if DEBUG
+    /// Reports transient banner appearance as canonical Runtime events.
+    private func recordTransientPresentation() {
+        guard let recorder = DebugRuntimeConnectionController.sharedEventRecorder,
+              presentedTransientNodeIDs.isEmpty,
+              let state = scenario.state(id: stateID),
+              state.kind == "transient"
+        else {
+            return
+        }
+        let waitMilliseconds = scenario.steps(from: stateID, profile: profile)
+            .first { $0.action.kind == "wait" }?
+            .action.durationMilliseconds
+        let bannerNodeIDs = state.requiredNodeIDs.filter {
+            scenario.stableNode(id: $0)?.role == "banner"
+        }
+        presentedTransientNodeIDs = bannerNodeIDs
+        for nodeID in bannerNodeIDs {
+            let draft = RuntimeEventDraft(
+                kind: .transientPresented,
+                stableID: try? StableID(validating: nodeID),
+                durationMilliseconds: waitMilliseconds.map(Double.init),
+                payload: ["text": .string(Self.humanTitle(nodeID))]
+            )
+            Task { try? await recorder.record(draft) }
+        }
+    }
+
+    private func recordTransientDismissal() {
+        guard let recorder = DebugRuntimeConnectionController.sharedEventRecorder,
+              !presentedTransientNodeIDs.isEmpty
+        else {
+            return
+        }
+        let nodeIDs = presentedTransientNodeIDs
+        presentedTransientNodeIDs = []
+        for nodeID in nodeIDs {
+            let draft = RuntimeEventDraft(
+                kind: .transientDismissed,
+                stableID: try? StableID(validating: nodeID)
+            )
+            Task { try? await recorder.record(draft) }
+        }
+    }
+#endif
 
     private func configureInspector() {
 #if DEBUG

@@ -258,6 +258,88 @@ test(
 );
 
 test(
+  "Swift Runtime client streams negotiated, ordered, acknowledged event batches",
+  { skip: swiftAvailable ? false : "Swift is unavailable on this host." },
+  async (t) => {
+    const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+    const child = spawnSwiftClient(host.endpoint.host, host.endpoint.port, authorizationToken, {
+      VISTREA_RUNTIME_EVENTS: "scripted",
+    });
+    const childOutput = collectChildOutput(child);
+    let session: LoopbackRuntimeSession | undefined;
+    t.after(async () => {
+      session?.close();
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+      }
+      await host.close();
+    });
+
+    session = await withTimeout(host.acceptSession(), 60_000, "Swift Runtime handshake");
+    assert.deepEqual(session.enabledCapabilities, ["runtime.events", "runtime.snapshot"]);
+    const epoch = session.eventEpoch;
+    assert.ok(epoch !== undefined);
+    assert.match(
+      epoch.eventEpochId,
+      /^epoch_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    assert.equal(epoch.oldestRetainedSequence, 1);
+    assert.ok(epoch.nextSequence >= 3);
+
+    const subscription = await withTimeout(
+      session.subscribeEvents({
+        eventEpochId: epoch.eventEpochId,
+        eventKinds: [
+          "transient_presented",
+          "transient_dismissed",
+          "layout_changed",
+        ],
+        start: { mode: "oldest_retained" },
+      }),
+      10_000,
+      "Swift event subscription",
+    );
+
+    const first = record(await withTimeout(subscription.nextBatch(), 10_000, "first event batch"));
+    assert.equal(first["event_epoch_id"], epoch.eventEpochId);
+    assert.equal(first["first_sequence"], 1);
+    assert.equal(first["dropped_event_count"], 0);
+    const firstEvents = first["events"] as readonly Record<string, unknown>[];
+    assert.ok(firstEvents.length >= 2);
+    assert.equal(firstEvents[0]?.["kind"], "transient_presented");
+    assert.equal(firstEvents[0]?.["sequence"], 1);
+    assert.equal(firstEvents[0]?.["stable_id"], "demo.toast.success");
+    assert.deepEqual(firstEvents[0]?.["payload"], { text: "Saved successfully" });
+    assert.equal(firstEvents[1]?.["kind"], "transient_dismissed");
+    assert.equal(firstEvents[1]?.["sequence"], 2);
+    subscription.acknowledge(first["last_sequence"] as number);
+
+    // Later scripted layout events keep streaming after the acknowledgement.
+    let lastSequence = first["last_sequence"] as number;
+    const deadline = Date.now() + 15_000;
+    let sawLiveLayoutEvent = false;
+    while (!sawLiveLayoutEvent && Date.now() < deadline) {
+      const batch = record(
+        await withTimeout(subscription.nextBatch(), 10_000, "live event batch"),
+      );
+      assert.equal(batch["event_epoch_id"], epoch.eventEpochId);
+      assert.equal((batch["first_sequence"] as number) > lastSequence, true);
+      lastSequence = batch["last_sequence"] as number;
+      subscription.acknowledge(lastSequence);
+      const events = batch["events"] as readonly Record<string, unknown>[];
+      sawLiveLayoutEvent = events.some((event) => event["kind"] === "layout_changed");
+    }
+    assert.equal(sawLiveLayoutEvent, true);
+
+    session.close();
+    const exit = await withTimeout(childOutput, 10_000, "Swift Runtime process exit");
+    assert.equal(exit.code, 0, exit.stderr);
+    assert.equal(exit.stdout.includes(authorizationToken), false);
+    assert.equal(exit.stderr.includes(authorizationToken), false);
+  },
+);
+
+test(
   "Swift Runtime authentication failure never emits authorization material",
   { skip: swiftAvailable ? false : "Swift is unavailable on this host." },
   async (t) => {
@@ -290,6 +372,7 @@ function spawnSwiftClient(
   host: string,
   port: number,
   token: string,
+  environment: Readonly<Record<string, string>> = {},
 ): ChildProcessWithoutNullStreams {
   return spawn(
     "swift",
@@ -310,6 +393,7 @@ function spawnSwiftClient(
         ...process.env,
         VISTREA_RUNTIME_TOKEN: token,
         VISTREA_RUNTIME_FIXTURE: fixturePath,
+        ...environment,
       },
       stdio: ["pipe", "pipe", "pipe"],
     },

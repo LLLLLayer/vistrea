@@ -207,3 +207,115 @@ final class RuntimeConnectionTests: XCTestCase {
         XCTAssertTrue(errors.allSatisfy { !$0.description.contains(secret) })
     }
 }
+
+extension RuntimeConnectionTests {
+    func testEventRecorderAssignsMonotonicSequencesAndBoundedRetention() async throws {
+        let recorder = try RuntimeEventRecorder(maximumRetainedEvents: 3)
+        let initial = await recorder.epoch
+        XCTAssertTrue(initial.eventEpochID.hasPrefix("epoch_"))
+        XCTAssertEqual(initial.oldestRetainedSequence, 1)
+        XCTAssertEqual(initial.nextSequence, 1)
+
+        for index in 1...5 {
+            let event = try await recorder.record(
+                RuntimeEventDraft(
+                    kind: index % 2 == 0 ? .transientDismissed : .transientPresented,
+                    stableID: try StableID(validating: "demo.toast.success")
+                )
+            )
+            XCTAssertEqual(event.sequence.rawValue, UInt64(index))
+            XCTAssertEqual(event.eventEpochID.rawValue, initial.eventEpochID)
+        }
+        let afterOverflow = await recorder.epoch
+        XCTAssertEqual(afterOverflow.oldestRetainedSequence, 3)
+        XCTAssertEqual(afterOverflow.nextSequence, 6)
+
+        // A batch spanning released sequences reports them as dropped evidence.
+        let overflowBatch = try await recorder.batchAfter(
+            cursor: 0,
+            kinds: Set(RuntimeEventKind.allCases),
+            limit: 16
+        )
+        let batch = try XCTUnwrap(overflowBatch)
+        XCTAssertEqual(batch.firstSequence.rawValue, 1)
+        XCTAssertEqual(batch.lastSequence.rawValue, 5)
+        XCTAssertEqual(batch.droppedEventCount.rawValue, 2)
+        XCTAssertEqual(batch.events.map(\.sequence.rawValue), [3, 4, 5])
+    }
+
+    func testEventRecorderFiltersKindsAcknowledgesAndDrains() async throws {
+        let recorder = try RuntimeEventRecorder()
+        try await recorder.record(RuntimeEventDraft(kind: .transientPresented))
+        try await recorder.record(RuntimeEventDraft(kind: .layoutChanged))
+        try await recorder.record(RuntimeEventDraft(kind: .transientDismissed))
+
+        let filteredBatch = try await recorder.batchAfter(
+            cursor: 0,
+            kinds: [.transientPresented, .transientDismissed],
+            limit: 16
+        )
+        let filtered = try XCTUnwrap(filteredBatch)
+        XCTAssertEqual(filtered.firstSequence.rawValue, 1)
+        XCTAssertEqual(filtered.lastSequence.rawValue, 3)
+        XCTAssertEqual(filtered.droppedEventCount.rawValue, 0)
+        XCTAssertEqual(filtered.events.map(\.kind), [.transientPresented, .transientDismissed])
+
+        let drained = try await recorder.batchAfter(
+            cursor: filtered.lastSequence.rawValue,
+            kinds: [.transientPresented],
+            limit: 16
+        )
+        XCTAssertNil(drained)
+
+        await recorder.releaseThrough(sequence: 3)
+        let released = await recorder.epoch
+        XCTAssertEqual(released.oldestRetainedSequence, 4)
+        XCTAssertEqual(released.nextSequence, 4)
+    }
+
+    func testEventBatchEncodingMatchesCanonicalWireShape() throws {
+        let epoch = try EventEpochID(validating: "epoch_019f0000-0000-7000-8000-000000000001")
+        let event = try RuntimeEvent(
+            eventID: EventID(validating: "event_019f0000-0000-7000-8000-000000000001"),
+            protocolVersion: ProtocolVersion(minor: 0),
+            eventEpochID: epoch,
+            sequence: JSONSafeUInt(validating: 1),
+            time: EventTime(wallTime: Timestamp(validating: "2026-07-12T00:00:01.100Z")),
+            kind: .transientPresented,
+            stableID: StableID(validating: "demo.toast.success"),
+            durationMilliseconds: 2_000,
+            payload: ["text": .string("Saved successfully")]
+        )
+        let batch = try RuntimeEventBatch(
+            protocolVersion: ProtocolVersion(minor: 0),
+            eventEpochID: epoch,
+            firstSequence: JSONSafeUInt(validating: 1),
+            lastSequence: JSONSafeUInt(validating: 1),
+            events: [event],
+            droppedEventCount: JSONSafeUInt(validating: 0)
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(batch)) as? [String: Any]
+        )
+        XCTAssertEqual(encoded["event_epoch_id"] as? String, epoch.rawValue)
+        XCTAssertEqual(encoded["first_sequence"] as? Int, 1)
+        XCTAssertEqual(encoded["dropped_event_count"] as? Int, 0)
+        let events = try XCTUnwrap(encoded["events"] as? [[String: Any]])
+        XCTAssertEqual(events[0]["kind"] as? String, "transient_presented")
+        XCTAssertEqual(events[0]["duration_ms"] as? Double, 2_000)
+        XCTAssertEqual((events[0]["payload"] as? [String: Any])?["text"] as? String, "Saved successfully")
+
+        XCTAssertThrowsError(
+            try RuntimeEventBatch(
+                protocolVersion: ProtocolVersion(minor: 0),
+                eventEpochID: epoch,
+                firstSequence: JSONSafeUInt(validating: 2),
+                lastSequence: JSONSafeUInt(validating: 2),
+                events: [event],
+                droppedEventCount: JSONSafeUInt(validating: 0)
+            )
+        )
+    }
+}

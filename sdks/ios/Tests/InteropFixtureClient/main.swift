@@ -61,10 +61,41 @@ private struct InteropFixtureClient {
                 runtimeInstanceID: "runtime.swift.interop",
                 buildConfiguration: .debug
             )
+            var recorder: RuntimeEventRecorder?
+            var scriptTask: Task<Void, Never>?
+            if environment["VISTREA_RUNTIME_EVENTS"] == "scripted" {
+                let scripted = try RuntimeEventRecorder()
+                try await scripted.record(RuntimeEventDraft(
+                    kind: .transientPresented,
+                    stableID: StableID(validating: "demo.toast.success"),
+                    durationMilliseconds: 2_000,
+                    payload: ["text": .string("Saved successfully")]
+                ))
+                try await scripted.record(RuntimeEventDraft(
+                    kind: .transientDismissed,
+                    stableID: StableID(validating: "demo.toast.success")
+                ))
+                recorder = scripted
+                scriptTask = Task {
+                    // Keep a slow deterministic stream flowing so the Host can
+                    // observe live batches after its subscription starts.
+                    for _ in 0..<20 {
+                        try? await Task.sleep(nanoseconds: 200_000_000)
+                        guard !Task.isCancelled else {
+                            return
+                        }
+                        try? await scripted.record(RuntimeEventDraft(kind: .layoutChanged))
+                    }
+                }
+            }
             let client = LoopbackRuntimeClient(
                 configuration: configuration,
-                captureProvider: FixtureCaptureProvider(payload: payload)
+                captureProvider: FixtureCaptureProvider(payload: payload),
+                eventRecorder: recorder
             )
+            defer {
+                scriptTask?.cancel()
+            }
             try await client.runUntilClosed()
         } catch {
             FileHandle.standardError.write(Data("Runtime interop client failed.\n".utf8))
