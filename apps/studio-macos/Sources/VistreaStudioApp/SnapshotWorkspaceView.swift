@@ -1,4 +1,5 @@
 import AppKit
+import SceneKit
 import SwiftUI
 import VistreaStudioCore
 
@@ -48,8 +49,17 @@ struct SnapshotWorkspaceView: View {
                 }
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
                 VSplitView {
-                    ScreenshotPane(model: model)
-                        .frame(minHeight: 280)
+                    TabView {
+                        ScreenshotPane(model: model)
+                            .tabItem { Label("Screenshot", systemImage: "photo") }
+                        CanvasPane(model: model)
+                            .tabItem { Label("Canvas", systemImage: "point.3.connected.trianglepath.dotted") }
+                        LayerInspector3DPane(model: model)
+                            .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
+                        WikiPane(model: model)
+                            .tabItem { Label("Wiki", systemImage: "book") }
+                    }
+                    .frame(minHeight: 280)
                     ViewTreePane(model: model)
                         .frame(minHeight: 220)
                 }
@@ -61,6 +71,262 @@ struct SnapshotWorkspaceView: View {
                 }
                 .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
             }
+        }
+    }
+}
+
+private struct CanvasPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    private static let columnWidth: CGFloat = 230
+    private static let rowHeight: CGFloat = 116
+    private static let cardSize = CGSize(width: 200, height: 92)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "Screen State Canvas", systemImage: "point.3.connected.trianglepath.dotted")
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.canvasPhase {
+        case .idle, .loading:
+            ProgressView("Loading the Screen Graph…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            Text("No Screen States have been observed yet. Record state observations to build the Canvas.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            ScrollView([.horizontal, .vertical]) {
+                canvasContent
+                    .padding(24)
+            }
+        }
+    }
+
+    private var canvasContent: some View {
+        let positions = model.canvasStates
+        let graph = model.canvasGraph
+        let entryIDs = Set(graph?.entryStateIDs ?? [])
+        let centers = Dictionary(uniqueKeysWithValues: positions.map { positioned in
+            (
+                positioned.id,
+                CGPoint(
+                    x: CGFloat(positioned.column) * Self.columnWidth + Self.cardSize.width / 2,
+                    y: CGFloat(positioned.row) * Self.rowHeight + Self.cardSize.height / 2
+                )
+            )
+        })
+        let width = (positions.map(\.column).max() ?? 0) + 1
+        let height = (positions.map(\.row).max() ?? 0) + 1
+        return ZStack(alignment: .topLeading) {
+            Canvas { context, _ in
+                for transition in graph?.transitions ?? [] {
+                    guard let source = centers[transition.sourceStateID],
+                          let target = centers[transition.targetStateID]
+                    else {
+                        continue
+                    }
+                    var path = Path()
+                    path.move(to: source)
+                    path.addLine(to: target)
+                    context.stroke(path, with: .color(.secondary.opacity(0.6)), lineWidth: 1.5)
+                }
+            }
+            ForEach(positions) { positioned in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(positioned.state.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Text(positioned.state.kind)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if entryIDs.contains(positioned.id) {
+                        Text("entry")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .padding(10)
+                .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(
+                            entryIDs.contains(positioned.id) ? Color.blue : Color.secondary.opacity(0.4),
+                            lineWidth: entryIDs.contains(positioned.id) ? 2 : 1
+                        )
+                )
+                .offset(
+                    x: CGFloat(positioned.column) * Self.columnWidth,
+                    y: CGFloat(positioned.row) * Self.rowHeight
+                )
+                .accessibilityLabel("Screen state \(positioned.state.title)")
+            }
+        }
+        .frame(
+            width: CGFloat(width) * Self.columnWidth,
+            height: CGFloat(height) * Self.rowHeight,
+            alignment: .topLeading
+        )
+    }
+}
+
+private struct LayerInspector3DPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "3D Layer Inspector", systemImage: "square.3.layers.3d")
+            Divider()
+            if model.layerBoxes.isEmpty {
+                Text("Select a Runtime Snapshot to explode its layers in 3D.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                SceneView(
+                    scene: LayerSceneBuilder.scene(for: model.layerBoxes),
+                    options: [.allowsCameraControl, .autoenablesDefaultLighting]
+                )
+                .accessibilityLabel("3D layer inspector with \(model.layerBoxes.count) layers")
+            }
+        }
+    }
+}
+
+enum LayerSceneBuilder {
+    private static let scale: CGFloat = 0.01
+    private static let layerSpacing: CGFloat = 0.16
+
+    static func scene(for boxes: [LayerBox3D]) -> SCNScene {
+        let scene = SCNScene()
+        scene.background.contents = NSColor.windowBackgroundColor
+        let bounds = boxes.reduce(CGRect.zero) { partial, box in
+            partial.union(CGRect(x: box.x, y: box.y, width: box.width, height: box.height))
+        }
+        for box in boxes {
+            let plane = SCNBox(
+                width: CGFloat(box.width) * scale,
+                height: CGFloat(box.height) * scale,
+                length: 0.01,
+                chamferRadius: 0
+            )
+            let material = SCNMaterial()
+            material.diffuse.contents = box.isInteractive
+                ? NSColor.systemOrange.withAlphaComponent(0.55)
+                : NSColor.systemBlue.withAlphaComponent(0.35)
+            material.isDoubleSided = true
+            plane.materials = [material]
+            let node = SCNNode(geometry: plane)
+            node.name = box.nodeID
+            node.position = SCNVector3(
+                (CGFloat(box.x + box.width / 2) - bounds.midX) * scale,
+                (bounds.midY - CGFloat(box.y + box.height / 2)) * scale,
+                CGFloat(box.depth) * layerSpacing
+            )
+            scene.rootNode.addChildNode(node)
+        }
+        let camera = SCNCamera()
+        camera.zFar = 100
+        let cameraNode = SCNNode()
+        cameraNode.camera = camera
+        let extent = max(bounds.width, bounds.height) * scale
+        cameraNode.position = SCNVector3(extent * 0.7, extent * 0.35, extent * 1.4)
+        cameraNode.look(at: SCNVector3(0, 0, 0))
+        scene.rootNode.addChildNode(cameraNode)
+        return scene
+    }
+}
+
+private struct WikiPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var searchText = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "Deep Wiki", systemImage: "book")
+            Divider()
+            HStack(spacing: 8) {
+                TextField("Search knowledge…", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
+                    }
+                Button("Search") {
+                    Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
+                }
+            }
+            .padding(8)
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.wikiPhase {
+        case .idle, .loading:
+            ProgressView("Loading the Deep Wiki…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            Text("No knowledge matches. Create Wiki nodes through the CLI, MCP, or an agent.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.wikiNodes) { node in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(node.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(node.kind)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.blue)
+                        Text(node.status)
+                            .font(.caption)
+                            .foregroundStyle(node.status == "published" ? Color.green : Color.secondary)
+                        ForEach(node.labels.prefix(3), id: \.self) { label in
+                            Text(label)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    if let summary = node.summary {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(.vertical, 2)
+                .accessibilityLabel("Wiki node \(node.title), \(node.status)")
+            }
+            .listStyle(.sidebar)
         }
     }
 }

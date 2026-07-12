@@ -56,6 +56,12 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var reportedEventGaps: [EventSequenceGap] = []
     @Published public private(set) var issuesPhase: EventTimelinePhase = .idle
     @Published public private(set) var reviewIssues: [ReviewIssueSummary] = []
+    @Published public private(set) var canvasPhase: EventTimelinePhase = .idle
+    @Published public private(set) var canvasGraph: CanvasGraph?
+    @Published public private(set) var canvasStates: [CanvasLayout.PositionedState] = []
+    @Published public private(set) var wikiPhase: EventTimelinePhase = .idle
+    @Published public private(set) var wikiNodes: [WikiNodeSummary] = []
+    @Published public private(set) var layerBoxes: [LayerBox3D] = []
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isCapturing = false
     @Published public private(set) var operationError: String?
@@ -85,9 +91,20 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
         await loadEventTimeline()
         await loadReviewIssues()
+        await loadWiki(text: nil)
 
         do {
             let page = try await client.listSnapshots()
+            if let first = page.items.first {
+                await loadCanvas(
+                    projectID: first.runtimeContext.projectID.rawValue,
+                    applicationID: first.runtimeContext.applicationID
+                )
+            } else {
+                canvasPhase = .empty
+                canvasGraph = nil
+                canvasStates = []
+            }
             snapshots = page.items.map(SnapshotListItem.init(summary:))
             guard !snapshots.isEmpty else {
                 clearSelection()
@@ -168,6 +185,44 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         operationError = nil
     }
 
+    /// Reloads the materialized Screen Graph for the Canvas.
+    public func loadCanvas(projectID: String, applicationID: String) async {
+        canvasPhase = .loading
+        do {
+            let graph = try await client.getScreenGraph(
+                projectID: projectID,
+                applicationID: applicationID
+            )
+            canvasGraph = graph
+            canvasStates = CanvasLayout.positions(for: graph)
+            canvasPhase = graph.states.isEmpty ? .empty : .content
+        } catch {
+            canvasGraph = nil
+            canvasStates = []
+            // A missing graph is an empty Canvas, not a failure banner.
+            if let clientError = error as? HostClientError,
+               case let .server(statusCode, _, _, _, _) = clientError,
+               statusCode == 404 {
+                canvasPhase = .empty
+            } else {
+                canvasPhase = .failure(Self.message(for: error))
+            }
+        }
+    }
+
+    /// Reloads the Deep Wiki nodes shown in the knowledge pane.
+    public func loadWiki(text: String?) async {
+        wikiPhase = .loading
+        do {
+            let page = try await client.searchWikiNodes(text: text)
+            wikiNodes = page.items
+            wikiPhase = wikiNodes.isEmpty ? .empty : .content
+        } catch {
+            wikiNodes = []
+            wikiPhase = .failure(Self.message(for: error))
+        }
+    }
+
     /// Reloads the persisted Review Issues, most recently updated first.
     public func loadReviewIssues() async {
         issuesPhase = .loading
@@ -210,6 +265,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     private func apply(presentation: SnapshotPresentation) {
         selectedSnapshot = presentation
         detailPhase = .content
+        layerBoxes = LayerProjection.boxes(from: presentation.tree)
         let initialNodeID = presentation.tree.roots.first?.id
         selectedNodeID = initialNodeID
         selectedNode = initialNodeID.flatMap { presentation.tree.nodesByID[$0] }
@@ -250,6 +306,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         selectedNodeID = nil
         selectedNode = nil
         screenshotData = nil
+        layerBoxes = []
         detailPhase = .idle
         screenshotPhase = .none
     }

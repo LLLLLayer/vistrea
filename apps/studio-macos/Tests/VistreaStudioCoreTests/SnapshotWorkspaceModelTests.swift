@@ -174,6 +174,12 @@ private struct AlwaysFailingHostClient: HostClient {
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
         throw HostClientError.transport("offline")
     }
+    func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        throw HostClientError.transport("offline")
+    }
+    func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        throw HostClientError.transport("offline")
+    }
 }
 
 private actor OperationGateHostClient: HostClient {
@@ -224,6 +230,12 @@ private actor OperationGateHostClient: HostClient {
         EventTimeline(events: [], reportedGaps: [])
     }
 
+    func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        throw HostClientError.fixtureUnavailable("No Screen Graph in this test double.")
+    }
+    func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        WikiNodePage(items: [])
+    }
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
         ReviewIssuePage(items: [])
     }
@@ -272,6 +284,12 @@ private struct CaptureResultHostClient: HostClient {
         EventTimeline(events: [], reportedGaps: [])
     }
 
+    func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        throw HostClientError.fixtureUnavailable("No Screen Graph in this test double.")
+    }
+    func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        WikiNodePage(items: [])
+    }
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
         ReviewIssuePage(items: [])
     }

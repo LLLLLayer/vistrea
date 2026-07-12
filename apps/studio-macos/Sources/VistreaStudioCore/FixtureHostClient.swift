@@ -7,19 +7,52 @@ public actor FixtureHostClient: HostClient {
     private let objectsByHash: [String: Data]
     private let eventTimeline: EventTimeline
     private let reviewIssues: [ReviewIssueSummary]
+    private let canvasGraph: CanvasGraph?
+    private let wikiNodes: [WikiNodeSummary]
 
     public init(
         snapshots: [RuntimeSnapshot],
         objectsByHash: [String: Data] = [:],
         status: HostStatus = HostStatus(status: .ready, runtimeConnected: true, message: "Canonical fixture"),
         eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: []),
-        reviewIssues: [ReviewIssueSummary] = []
+        reviewIssues: [ReviewIssueSummary] = [],
+        canvasGraph: CanvasGraph? = nil,
+        wikiNodes: [WikiNodeSummary] = []
     ) {
         self.status = status
         snapshotsByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.snapshotID.rawValue, $0) })
         self.objectsByHash = objectsByHash
         self.eventTimeline = eventTimeline
         self.reviewIssues = reviewIssues
+        self.canvasGraph = canvasGraph
+        self.wikiNodes = wikiNodes
+    }
+
+    public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        guard let canvasGraph else {
+            throw HostClientError.server(
+                statusCode: 404,
+                requestID: nil,
+                code: "not_found",
+                message: "The fixture Host has no materialized Screen Graph.",
+                retryable: false
+            )
+        }
+        return canvasGraph
+    }
+
+    public func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        guard let text, !text.isEmpty else {
+            return WikiNodePage(items: wikiNodes)
+        }
+        let needle = text.lowercased()
+        return WikiNodePage(
+            items: wikiNodes.filter { node in
+                node.title.lowercased().contains(needle)
+                    || (node.summary?.lowercased().contains(needle) ?? false)
+                    || node.labels.contains(where: { $0.lowercased().contains(needle) })
+            }
+        )
     }
 
     public func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage {
@@ -109,6 +142,8 @@ public struct UnavailableHostClient: HostClient {
     public func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot { throw error }
     public func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline { throw error }
     public func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage { throw error }
+    public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph { throw error }
+    public func searchWikiNodes(text: String?) async throws -> WikiNodePage { throw error }
 }
 
 public enum CanonicalFixtureLoader {

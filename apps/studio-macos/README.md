@@ -13,6 +13,9 @@ The first native SwiftUI Snapshot workspace is implemented as a standalone Swift
 - node selection and canonical property details;
 - a persisted Runtime event timeline pane with newest-first ordering, transient payload summaries, and the Host event-pump status;
 - a Review Issues pane listing persisted issues with lifecycle state, severity, and category, most recently updated first;
+- a Screen State Canvas tab rendering the materialized Screen Graph with a deterministic layered layout: entry states in the first column, breadth-first depth columns, unreachable states last, and observed transitions drawn as edges;
+- a 3D Layer Inspector tab exploding the selected Snapshot's captured hierarchy into depth-ordered SceneKit layers with camera control, interactive nodes highlighted;
+- a Deep Wiki tab searching persisted knowledge nodes by text with kind, status, and label facets;
 - loading, empty, detail-error, connection-error, and capture-error states;
 - a capture action over the Host Local API;
 - a canonical fixture-backed development mode when no Host is configured.

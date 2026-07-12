@@ -364,3 +364,118 @@ public struct SnapshotPresentation: Equatable, Sendable {
         tree = try UiTreeProjector.preferredProjection(from: snapshot)
     }
 }
+
+/// One UI layer positioned for the 3D Inspector: logical frame plus depth.
+public struct LayerBox3D: Equatable, Sendable, Identifiable {
+    public let nodeID: String
+    public let title: String
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+    public let depth: Int
+    public let isInteractive: Bool
+
+    public var id: String { nodeID }
+
+    public init(
+        nodeID: String,
+        title: String,
+        x: Double,
+        y: Double,
+        width: Double,
+        height: Double,
+        depth: Int,
+        isInteractive: Bool
+    ) {
+        self.nodeID = nodeID
+        self.title = title
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.isInteractive = isInteractive
+    }
+}
+
+/// Projects the captured tree into depth-ordered 3D layers. The hierarchy
+/// depth is the z axis; geometry stays in logical points.
+public enum LayerProjection {
+    public static func boxes(from tree: UiTreeProjection) -> [LayerBox3D] {
+        var result: [LayerBox3D] = []
+        for root in tree.roots {
+            append(node: root, depth: 0, into: &result)
+        }
+        return result
+    }
+
+    private static func append(node: UiTreeNode, depth: Int, into result: inout [LayerBox3D]) {
+        if let frame = node.presentation.frame, frame.width > 0, frame.height > 0 {
+            result.append(
+                LayerBox3D(
+                    nodeID: node.presentation.id,
+                    title: node.presentation.outlineTitle,
+                    x: frame.x,
+                    y: frame.y,
+                    width: frame.width,
+                    height: frame.height,
+                    depth: depth,
+                    isInteractive: !node.presentation.actions.isEmpty
+                )
+            )
+        }
+        for child in node.children {
+            append(node: child, depth: depth + 1, into: &result)
+        }
+    }
+}
+
+/// Deterministic layered layout for the Screen State Canvas: entry states in
+/// the first column, then breadth-first depth columns, unreachable states last.
+public enum CanvasLayout {
+    public struct PositionedState: Equatable, Sendable, Identifiable {
+        public let state: CanvasStateSummary
+        public let column: Int
+        public let row: Int
+
+        public var id: String { state.id }
+
+        public init(state: CanvasStateSummary, column: Int, row: Int) {
+            self.state = state
+            self.column = column
+            self.row = row
+        }
+    }
+
+    public static func positions(for graph: CanvasGraph) -> [PositionedState] {
+        var columnByState: [String: Int] = [:]
+        var queue: [String] = []
+        for entry in graph.entryStateIDs where columnByState[entry] == nil {
+            columnByState[entry] = 0
+            queue.append(entry)
+        }
+        var outgoing: [String: [String]] = [:]
+        for transition in graph.transitions {
+            outgoing[transition.sourceStateID, default: []].append(transition.targetStateID)
+        }
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            let nextColumn = (columnByState[current] ?? 0) + 1
+            for target in (outgoing[current] ?? []).sorted() where columnByState[target] == nil {
+                columnByState[target] = nextColumn
+                queue.append(target)
+            }
+        }
+        let unreachableColumn = (columnByState.values.max() ?? 0) + 1
+        var rows: [Int: Int] = [:]
+        var result: [PositionedState] = []
+        for state in graph.states.sorted(by: { $0.id < $1.id }) {
+            let column = columnByState[state.id] ?? unreachableColumn
+            let row = rows[column, default: 0]
+            rows[column] = row + 1
+            result.append(PositionedState(state: state, column: column, row: row))
+        }
+        return result
+    }
+}

@@ -206,6 +206,49 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        guard projectID.range(of: "^project_[0-9a-f-]{36}$", options: .regularExpression) != nil,
+              applicationID.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$", options: .regularExpression) != nil
+        else {
+            throw HostClientError.invalidIdentifier("\(projectID)/\(applicationID)")
+        }
+        let response = try await request(
+            method: "GET",
+            path: ["v1", "screen-graph"],
+            query: [
+                URLQueryItem(name: "project_id", value: projectID),
+                URLQueryItem(name: "application_id", value: applicationID),
+            ]
+        )
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(CanvasGraph.self, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
+    public func searchWikiNodes(text: String?) async throws -> WikiNodePage {
+        if let text {
+            guard !text.isEmpty, text.utf8.count <= 512 else {
+                throw HostClientError.invalidIdentifier("wiki search text")
+            }
+        }
+        let response = try await request(
+            method: "GET",
+            path: ["v1", "wiki", "nodes"],
+            query: text.map { [URLQueryItem(name: "text", value: $0)] } ?? []
+        )
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(WikiNodePage.self, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {

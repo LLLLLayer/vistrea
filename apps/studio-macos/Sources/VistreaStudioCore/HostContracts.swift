@@ -315,6 +315,138 @@ public struct ReviewIssuePage: Decodable, Equatable, Sendable {
     }
 }
 
+/// A lenient Canvas projection of one persisted Screen State.
+public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let screenStateID: String
+    public let title: String
+    public let kind: String
+    public let status: String
+
+    public var id: String { screenStateID }
+
+    public init(screenStateID: String, title: String, kind: String, status: String) {
+        self.screenStateID = screenStateID
+        self.title = title
+        self.kind = kind
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case screenStateID = "screen_state_id"
+        case title
+        case kind
+        case status
+    }
+}
+
+/// A lenient Canvas projection of one observed Transition.
+public struct CanvasTransitionSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let transitionID: String
+    public let sourceStateID: String
+    public let targetStateID: String
+    public let occurrenceCount: UInt64
+
+    public var id: String { transitionID }
+
+    public init(
+        transitionID: String,
+        sourceStateID: String,
+        targetStateID: String,
+        occurrenceCount: UInt64
+    ) {
+        self.transitionID = transitionID
+        self.sourceStateID = sourceStateID
+        self.targetStateID = targetStateID
+        self.occurrenceCount = occurrenceCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case transitionID = "transition_id"
+        case sourceStateID = "source_state_id"
+        case targetStateID = "target_state_id"
+        case occurrenceCount = "occurrence_count"
+    }
+}
+
+/// The materialized Screen Graph reduced to what the Canvas renders.
+public struct CanvasGraph: Decodable, Equatable, Sendable {
+    public let screenGraphID: String
+    public let entryStateIDs: [String]
+    public let states: [CanvasStateSummary]
+    public let transitions: [CanvasTransitionSummary]
+
+    public init(
+        screenGraphID: String,
+        entryStateIDs: [String],
+        states: [CanvasStateSummary],
+        transitions: [CanvasTransitionSummary]
+    ) {
+        self.screenGraphID = screenGraphID
+        self.entryStateIDs = entryStateIDs
+        self.states = states
+        self.transitions = transitions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case screenGraphID = "screen_graph_id"
+        case entryStateIDs = "entry_state_ids"
+        case states
+        case transitions
+    }
+}
+
+/// A lenient projection of one Deep Wiki node.
+public struct WikiNodeSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let wikiNodeID: String
+    public let kind: String
+    public let title: String
+    public let summary: String?
+    public let status: String
+    public let labels: [String]
+
+    public var id: String { wikiNodeID }
+
+    public init(
+        wikiNodeID: String,
+        kind: String,
+        title: String,
+        summary: String?,
+        status: String,
+        labels: [String]
+    ) {
+        self.wikiNodeID = wikiNodeID
+        self.kind = kind
+        self.title = title
+        self.summary = summary
+        self.status = status
+        self.labels = labels
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case wikiNodeID = "wiki_node_id"
+        case kind
+        case title
+        case summary
+        case status
+        case labels
+    }
+}
+
+public struct WikiNodePage: Decodable, Equatable, Sendable {
+    public let items: [WikiNodeSummary]
+    public let nextCursor: String?
+
+    public init(items: [WikiNodeSummary], nextCursor: String? = nil) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+    }
+}
+
 public protocol HostClient: Sendable {
     func getStatus() async throws -> HostStatus
     func listSnapshots() async throws -> SnapshotPage
@@ -323,6 +455,8 @@ public protocol HostClient: Sendable {
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot
     func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage
+    func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph
+    func searchWikiNodes(text: String?) async throws -> WikiNodePage
 }
 
 public enum HostClientError: Error, Equatable, Sendable {
