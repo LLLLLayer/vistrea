@@ -34,7 +34,7 @@ import {
 } from "../../engine/design/index.js";
 import { ScreenGraphEngine } from "../../engine/exploration/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
-import { ValidationEngine } from "../../engine/validation/index.js";
+import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -156,6 +156,7 @@ export async function startHostLocalApi(
   const graph = new ScreenGraphEngine(options);
   const knowledge = new KnowledgeEngine(options);
   const validation = new ValidationEngine(options);
+  const buildDiffs = new BuildDiffEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -177,6 +178,7 @@ export async function startHostLocalApi(
         graph,
         knowledge,
         validation,
+        buildDiffs,
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -243,6 +245,7 @@ interface RequestHandlerContext {
   readonly graph: ScreenGraphEngine;
   readonly knowledge: KnowledgeEngine;
   readonly validation: ValidationEngine;
+  readonly buildDiffs: BuildDiffEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -852,6 +855,32 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       command as unknown as Parameters<ValidationEngine["validateScreenGraph"]>[0],
     );
     writeJson(response, 201, outcome as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/validation/build-diffs") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["project_id", "application_id", "left_build_id", "right_build_id"],
+      ["project_id", "application_id", "left_build_id", "right_build_id"],
+    );
+    const diff = context.buildDiffs.compareBuilds(
+      command as unknown as Parameters<BuildDiffEngine["compareBuilds"]>[0],
+    );
+    writeJson(response, 201, diff as unknown as JsonObject);
+    return;
+  }
+
+  const buildDiffMatch = /^\/v1\/validation\/build-diffs\/([^/]+)$/.exec(pathname);
+  if (buildDiffMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const diffId = decodeResourceSegment(buildDiffMatch[1] as string, "build diff ID");
+    writeJson(response, 200, context.buildDiffs.getBuildDiff(diffId) as unknown as JsonObject);
     return;
   }
 

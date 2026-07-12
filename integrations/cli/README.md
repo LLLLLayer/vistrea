@@ -46,6 +46,8 @@ vistrea validate get-run <validation_run_id>
 vistrea validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]
 vistrea validate get-finding <finding_id>
 vistrea validate suppress <finding_id> --json <command>
+vistrea validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id>
+vistrea validate get-build-diff <build_diff_id>
 ```
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.

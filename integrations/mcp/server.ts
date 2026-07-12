@@ -809,6 +809,36 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
+  {
+    name: "vistrea_compare_builds",
+    title: "Compare Builds",
+    description:
+      "Diff observed Screen State and Transition coverage between two builds of one application.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project_id", "application_id", "left_build_id", "right_build_id"],
+      properties: {
+        project_id: { type: "string", maxLength: 128 },
+        application_id: { type: "string", maxLength: 256 },
+        left_build_id: { type: "string", maxLength: 128 },
+        right_build_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_build_diff",
+    title: "Get Build Diff",
+    description: "Load one persisted Build Diff.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["build_diff_id"],
+      properties: { build_diff_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -852,6 +882,8 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_list_validation_findings", "ListValidationFindings"],
   ["vistrea_get_validation_finding", "GetValidationFinding"],
   ["vistrea_suppress_validation_finding", "SuppressValidationFinding"],
+  ["vistrea_compare_builds", "CompareBuilds"],
+  ["vistrea_get_build_diff", "GetBuildDiff"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

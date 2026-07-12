@@ -98,6 +98,8 @@ export async function runVistreaCli(
           "validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]",
           "validate get-finding <finding_id>",
           "validate suppress <finding_id> --json <command>",
+          "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id>",
+          "validate get-build-diff <build_diff_id>",
         ],
         format: "json",
       });
@@ -468,6 +470,31 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
     return invocation(
       "SuppressValidationFinding",
       { ...input, finding_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "build-diff") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--project", "--application", "--left", "--right"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    return invocation(
+      "CompareBuilds",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+        left_build_id: requireOption(values, "--left"),
+        right_build_id: requireOption(values, "--right"),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "get-build-diff" && command.length === 3) {
+    return invocation(
+      "GetBuildDiff",
+      { build_diff_id: command[2] as string },
       timeoutMilliseconds,
     );
   }

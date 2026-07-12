@@ -9,4 +9,8 @@ Executes the built-in `ruleset.vistrea.core` validators over persisted Snapshots
 - visual: `visual.offscreen-interactive` (interactive nodes entirely outside the display) and `visual.zero-size-visible`;
 - behavioral: `behavioral.unreachable-state` and `behavioral.dead-end-state` over observed Screen Graph transitions from the entry states.
 
-Every run persists with exact finding counts enforced by the repository, states move `running -> succeeded`, and open findings suppress with a justified reason, optimistic concurrency, and synchronized run counts. Rule configuration, resolution workflows, visual pixel comparison, and custom rule sets remain later slices.
+Every run persists with exact finding counts enforced by the repository, states move `running -> succeeded`, and open findings suppress with a justified reason, optimistic concurrency, and synchronized run counts.
+
+`BuildDiffEngine` compares observed Screen Graph coverage between two builds of one application, derived purely from persisted observation evidence: Screen States seen in only one build and Transitions whose observations belong to only one build become `added`/`removed` entries with exact summary counts. Structural changes surface as one removed and one added state because structural identity is the deduplication key — the honest observation. `changed`/`regressed`/`improved` classification against design baselines remains a later slice.
+
+Rule configuration, resolution workflows, visual pixel comparison, and custom rule sets remain later slices.

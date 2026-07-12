@@ -55,6 +55,10 @@ const VALIDATION_RUN_ID_PATTERN =
   /^validationrun_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const VALIDATION_FINDING_ID_PATTERN =
   /^finding_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const BUILD_DIFF_ID_PATTERN =
+  /^builddiff_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const BUILD_ID_PATTERN =
+  /^build_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -108,6 +112,8 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "ListValidationFindings",
   "GetValidationFinding",
   "SuppressValidationFinding",
+  "CompareBuilds",
+  "GetBuildDiff",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -1122,6 +1128,48 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "finding_id", VALIDATION_FINDING_ID_PATTERN);
+      }
+      case "CompareBuilds": {
+        const command = assertExactObject(
+          input,
+          ["project_id", "application_id", "left_build_id", "right_build_id"],
+          "Build diff input",
+        );
+        if (
+          typeof command["project_id"] !== "string" ||
+          !PROJECT_ID_PATTERN.test(command["project_id"]) ||
+          typeof command["application_id"] !== "string" ||
+          !APPLICATION_ID_PATTERN.test(command["application_id"]) ||
+          typeof command["left_build_id"] !== "string" ||
+          !BUILD_ID_PATTERN.test(command["left_build_id"]) ||
+          typeof command["right_build_id"] !== "string" ||
+          !BUILD_ID_PATTERN.test(command["right_build_id"])
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/validation/build-diffs",
+          command,
+          201,
+          options,
+        );
+        return validateIdentifiedResource(value, "build_diff_id", BUILD_DIFF_ID_PATTERN);
+      }
+      case "GetBuildDiff": {
+        const query = assertExactObject(input, ["build_diff_id"], "Build diff lookup");
+        const diffId = query["build_diff_id"];
+        if (typeof diffId !== "string" || !BUILD_DIFF_ID_PATTERN.test(diffId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/validation/build-diffs/${encodeURIComponent(diffId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "build_diff_id", BUILD_DIFF_ID_PATTERN);
       }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);

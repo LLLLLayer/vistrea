@@ -46,6 +46,8 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_list_validation_findings` | `ListValidationFindings` | Page Findings by run, status, and severity |
 | `vistrea_get_validation_finding` | `GetValidationFinding` | Load one Finding with evidence |
 | `vistrea_suppress_validation_finding` | `SuppressValidationFinding` | Suppress one open Finding with a justified reason |
+| `vistrea_compare_builds` | `CompareBuilds` | Diff observed coverage between two builds |
+| `vistrea_get_build_diff` | `GetBuildDiff` | Load one persisted Build Diff |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 

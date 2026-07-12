@@ -9,3 +9,8 @@ export {
   type ValidationEngineDependencies,
   type ValidationOutcome,
 } from "./validation-engine.js";
+export {
+  BuildDiffEngine,
+  type BuildDiffEngineDependencies,
+  type CompareBuildsCommand,
+} from "./build-diff-engine.js";
