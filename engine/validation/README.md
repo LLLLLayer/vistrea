@@ -14,3 +14,12 @@ Every run persists with exact finding counts enforced by the repository, states 
 `BuildDiffEngine` compares observed Screen Graph coverage between two builds of one application, derived purely from persisted observation evidence: Screen States seen in only one build and Transitions whose observations belong to only one build become `added`/`removed` entries with exact summary counts. Structural changes surface as one removed and one added state because structural identity is the deduplication key — the honest observation. `changed`/`regressed`/`improved` classification against design baselines remains a later slice.
 
 Rule configuration, resolution workflows, visual pixel comparison, and custom rule sets remain later slices.
+
+## Configuration
+
+Callers may disable named core rules (`disabled_rules`) and raise or lower the
+minimum touch-target threshold (`minimum_touch_target_points`, default 44).
+Unknown rule identifiers fail closed as `invalid_argument`, and every
+non-default configuration persists into the run's
+`extensions["vistrea.configuration"]` so a lenient run can never masquerade as
+a default one.

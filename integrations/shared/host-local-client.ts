@@ -401,9 +401,18 @@ export class HostLocalApiClient {
       case "RunDesignComparison": {
         const command = assertExactObject(
           input,
-          ["design_reference_id", "target_snapshot_id", "completed_by"],
+          ["design_reference_id", "target_snapshot_id", "completed_by", "include_pixel"],
           "Design comparison input",
+          true,
         );
+        if (
+          command["design_reference_id"] === undefined ||
+          command["target_snapshot_id"] === undefined ||
+          command["completed_by"] === undefined ||
+          (command["include_pixel"] !== undefined && typeof command["include_pixel"] !== "boolean")
+        ) {
+          throw invalidInput();
+        }
         const value = await this.#request("POST", "/v1/design-comparisons", command, 201, options);
         return validateIdentifiedResource(value, "comparison_id", COMPARISON_ID_PATTERN);
       }
@@ -1012,7 +1021,7 @@ export class HostLocalApiClient {
       case "ValidateSnapshot": {
         const command = assertExactObject(
           input,
-          ["snapshot_id", "categories"],
+          ["snapshot_id", "categories", "configuration"],
           "Snapshot validation input",
           true,
         );
@@ -1020,6 +1029,7 @@ export class HostLocalApiClient {
         if (typeof snapshotId !== "string" || !SNAPSHOT_ID_PATTERN.test(snapshotId)) {
           throw invalidInput();
         }
+        validateValidationConfigurationInput(command["configuration"]);
         const value = await this.#request(
           "POST",
           "/v1/validation/snapshot-runs",
@@ -1032,9 +1042,11 @@ export class HostLocalApiClient {
       case "ValidateScreenGraph": {
         const command = assertExactObject(
           input,
-          ["project_id", "application_id"],
+          ["project_id", "application_id", "configuration"],
           "Screen graph validation input",
+          true,
         );
+        validateValidationConfigurationInput(command["configuration"]);
         const projectId = command["project_id"];
         const applicationId = command["application_id"];
         if (
@@ -1823,6 +1835,35 @@ function normalizeListInput(value: unknown): JsonObject {
     ...(limit === undefined ? {} : { limit: limit as number }),
     ...(cursor === undefined ? {} : { cursor }),
   };
+}
+
+function validateValidationConfigurationInput(value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+  const configuration = assertExactObject(
+    value,
+    ["disabled_rules", "minimum_touch_target_points"],
+    "Validation configuration",
+    true,
+  );
+  const disabled = configuration["disabled_rules"];
+  const threshold = configuration["minimum_touch_target_points"];
+  if (
+    (disabled !== undefined &&
+      (!Array.isArray(disabled) ||
+        disabled.length > 16 ||
+        disabled.some(
+          (rule) => typeof rule !== "string" || rule.length === 0 || rule.length > 128,
+        ))) ||
+    (threshold !== undefined &&
+      (typeof threshold !== "number" ||
+        !Number.isFinite(threshold) ||
+        threshold < 1 ||
+        threshold > 200))
+  ) {
+    throw invalidInput();
+  }
 }
 
 function validateOperationRef(value: JsonValue): JsonObject {

@@ -68,7 +68,7 @@ export async function runVistreaCli(
           "design add-reference --json <command>",
           "design get-reference <design_reference_id>",
           "design map --json <command>",
-          "design compare --reference <id> --snapshot <id> [--actor <id>]",
+          "design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]",
           "design get-comparison <comparison_id>",
           "issue create --json <command>",
           "issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]",
@@ -94,8 +94,8 @@ export async function runVistreaCli(
           "wiki unlink <wiki_link_id> --revision <n>",
           "wiki backlinks <wiki_node_id> [--limit n] [--cursor c]",
           "wiki related --kind <resource_kind> --id <resource_id> [--limit n] [--cursor c]",
-          "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual]",
-          "validate graph --project <project_id> --application <application_id>",
+          "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual] [--disable-rules a,b] [--min-touch-target <points>]",
+          "validate graph --project <project_id> --application <application_id> [--disable-rules a,b] [--min-touch-target <points>]",
           "validate get-run <validation_run_id>",
           "validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]",
           "validate get-finding <finding_id>",
@@ -431,7 +431,7 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "validate" && command[1] === "snapshot") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--snapshot", "--categories"].includes(key)) {
+      if (!["--snapshot", "--categories", "--disable-rules", "--min-touch-target"].includes(key)) {
         throw invalidArguments();
       }
     }
@@ -441,6 +441,7 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       {
         snapshot_id: requireOption(values, "--snapshot"),
         ...(categories === undefined ? {} : { categories: categories.split(",") }),
+        ...parseValidationConfiguration(values),
       },
       timeoutMilliseconds,
     );
@@ -448,7 +449,9 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "validate" && command[1] === "graph") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--project", "--application"].includes(key)) {
+      if (
+        !["--project", "--application", "--disable-rules", "--min-touch-target"].includes(key)
+      ) {
         throw invalidArguments();
       }
     }
@@ -457,6 +460,7 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       {
         project_id: requireOption(values, "--project"),
         application_id: requireOption(values, "--application"),
+        ...parseValidationConfiguration(values),
       },
       timeoutMilliseconds,
     );
@@ -806,15 +810,33 @@ function uploadAssetInvocation(
 function parseCompareOptions(arguments_: readonly string[]): JsonObject {
   const values = parseOptionPairs(arguments_);
   for (const key of values.keys()) {
-    if (!["--reference", "--snapshot", "--actor"].includes(key)) {
+    if (!["--reference", "--snapshot", "--actor", "--pixel"].includes(key)) {
       throw invalidArguments();
     }
+  }
+  const pixel = values.get("--pixel");
+  if (pixel !== undefined && pixel !== "true" && pixel !== "false") {
+    throw invalidArguments();
   }
   return {
     design_reference_id: requireOption(values, "--reference"),
     target_snapshot_id: requireOption(values, "--snapshot"),
     completed_by: cliActor(values.get("--actor")),
+    ...(pixel === undefined ? {} : { include_pixel: pixel === "true" }),
   };
+}
+
+function parseValidationConfiguration(values: Map<string, string>): JsonObject {
+  const disable = values.get("--disable-rules");
+  const threshold = values.get("--min-touch-target");
+  if (threshold !== undefined && !/^[1-9][0-9]{0,2}$/.test(threshold)) {
+    throw invalidArguments();
+  }
+  const configuration = {
+    ...(disable === undefined ? {} : { disabled_rules: disable.split(",") }),
+    ...(threshold === undefined ? {} : { minimum_touch_target_points: Number(threshold) }),
+  };
+  return Object.keys(configuration).length === 0 ? {} : { configuration };
 }
 
 function parseIssueListOptions(arguments_: readonly string[]): JsonObject {

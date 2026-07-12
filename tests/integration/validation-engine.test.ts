@@ -178,6 +178,54 @@ test("core validators find structural, accessibility, and visual product issues"
     ),
     (error: unknown) => isDataError(error, "invalid_argument"),
   );
+
+  // Caller configuration disables named rules with exact count bookkeeping
+  // and persists into the run for auditability.
+  const configured = engine.validateSnapshot({
+    snapshot_id: problem["snapshot_id"] as string,
+    configuration: { disabled_rules: ["accessibility.minimum-touch-target"] },
+  });
+  assert.deepEqual(
+    configured.findings.map((finding) => finding["rule_id"]).sort(),
+    [
+      "accessibility.missing-label",
+      "structural.duplicate-stable-id",
+      "structural.interactive-without-stable-id",
+      "visual.offscreen-interactive",
+      "visual.zero-size-visible",
+    ],
+  );
+  assert.equal((configured.run["finding_counts"] as JsonObject)["total"], 5);
+  assert.deepEqual((configured.run["extensions"] as JsonObject)["vistrea.configuration"], {
+    disabled_rules: ["accessibility.minimum-touch-target"],
+  });
+  validator.assert(PROTOCOL_SCHEMA_IDS.validationRun, configured.run);
+
+  // A raised touch-target threshold judges the clean Snapshot's real controls.
+  const strict = engine.validateSnapshot({
+    snapshot_id: clean["snapshot_id"] as string,
+    configuration: { minimum_touch_target_points: 200 },
+  });
+  assert.equal(
+    strict.findings.every((finding) => finding["rule_id"] === "accessibility.minimum-touch-target"),
+    true,
+  );
+  assert.ok(strict.findings.length >= 1);
+  assert.deepEqual(
+    ((strict.findings[0] as JsonObject)["expected"] as JsonObject)["minimum_width"],
+    200,
+  );
+
+  // Unknown rule identifiers fail closed instead of silently validating less.
+  await assert.rejects(
+    Promise.resolve().then(() =>
+      engine.validateSnapshot({
+        snapshot_id: problem["snapshot_id"] as string,
+        configuration: { disabled_rules: ["accessibility.not-a-rule"] },
+      }),
+    ),
+    (error: unknown) => isDataError(error, "invalid_argument"),
+  );
 });
 
 test("suppressions move findings and run counts with optimistic concurrency", async () => {

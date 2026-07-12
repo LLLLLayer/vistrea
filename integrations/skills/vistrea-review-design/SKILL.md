@@ -23,7 +23,7 @@ Available operations:
 | Store the baseline image | `design upload-asset --file <path> --media-type image/png` | `vistrea_upload_design_asset` |
 | Register the baseline | `design add-reference --json <command>` | `vistrea_add_design_reference` |
 | Map a region to a node | `design map --json <command>` | `vistrea_map_design_region` |
-| Run the comparison | `design compare --reference <id> --snapshot <id>` | `vistrea_run_design_comparison` |
+| Run the comparison | `design compare --reference <id> --snapshot <id>` (add `--pixel true` for mean-color region comparison against the design asset) | `vistrea_run_design_comparison` |
 | Create an issue | `issue create --json <command>` | `vistrea_create_review_issue` |
 | Triage issues | `issue list` / `issue transition` | `vistrea_list_review_issues` / `vistrea_transition_review_issue` |
 | Verify a fix | `issue verify <id> --revision <n> --basis real_build --result passed --snapshot <id> --build <id>` | `vistrea_verify_review_issue` |

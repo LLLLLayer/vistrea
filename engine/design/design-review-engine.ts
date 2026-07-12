@@ -1,5 +1,6 @@
 import {
   DataError,
+  isDataError,
   PROTOCOL_SCHEMA_IDS,
   type DesignComparison,
   type DesignReference,
@@ -18,6 +19,7 @@ import {
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
 import { SecureUuidV7IdGenerator } from "./uuid-v7.js";
+import { decodePng, meanRegionColor, type DecodedImage } from "./png.js";
 
 export const REVIEW_ISSUE_STATES = [
   "open",
@@ -92,6 +94,13 @@ export interface RunDesignComparisonCommand {
   readonly design_reference_id: string;
   readonly target_snapshot_id: string;
   readonly completed_by: JsonObject;
+  /**
+   * Also compares the mean pixel color of every mapped design region against
+   * the captured screenshot region. Requires a decodable design asset and a
+   * Snapshot screenshot; when either is unavailable the comparison degrades
+   * to `partial` quality with the reason recorded instead of guessing.
+   */
+  readonly include_pixel?: boolean;
 }
 
 export interface CreateReviewIssueCommand {
@@ -139,6 +148,8 @@ export interface VerifyReviewIssueResult {
 
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const FRAME_TOLERANCE_LOGICAL_POINTS = 0.5;
+const COLOR_TOLERANCE_MEAN_CHANNEL = 0.05;
+const MAJOR_COLOR_DELTA_MEAN_CHANNEL = 0.15;
 const MAJOR_FRAME_DEVIATION_LOGICAL_POINTS = 8;
 
 /**
@@ -148,6 +159,18 @@ const MAJOR_FRAME_DEVIATION_LOGICAL_POINTS = 8;
  * against its schema, and Review Issue lifecycle changes always append one
  * continuous, legal state-history entry.
  */
+type PixelContext =
+  | {
+      readonly status: "compared";
+      readonly design: DecodedImage;
+      readonly screenshot: DecodedImage;
+      readonly designScaleX: number;
+      readonly designScaleY: number;
+      readonly screenScaleX: number;
+      readonly screenScaleY: number;
+    }
+  | { readonly status: "unavailable"; readonly reason: string };
+
 export class DesignReviewEngine {
   readonly #workspace: WorkspaceDataSource;
   readonly #objects: ObjectStore;
@@ -225,8 +248,12 @@ export class DesignReviewEngine {
    * captured Snapshot. Nodes are located by stable ID first so a mapping
    * recorded on an earlier Snapshot still resolves on a later build.
    */
-  runDesignComparison(command: RunDesignComparisonCommand): DesignComparison {
+  async runDesignComparison(command: RunDesignComparisonCommand): Promise<DesignComparison> {
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.completed_by);
+    const pixel =
+      command.include_pixel === true
+        ? await this.#loadPixelContext(command.design_reference_id, command.target_snapshot_id)
+        : undefined;
     return this.#write((unit) => {
       unit.designReviews.getReference(command.design_reference_id);
       const snapshot = unit.snapshots.get(command.target_snapshot_id);
@@ -263,29 +290,95 @@ export class DesignReviewEngine {
         }
         const expected = mapping["design_region"] as unknown as RectValue;
         const actual = located.frame;
-        const delta = frameDeviation(expected, actual);
-        if (delta <= FRAME_TOLERANCE_LOGICAL_POINTS) {
-          continue;
-        }
-        differences.push({
-          difference_id: this.#ids.next("difference"),
-          mapping_id: String(mapping["mapping_id"]),
-          runtime_target: {
-            snapshot_id: snapshot.snapshot_id,
-            tree_id: located.treeId,
-            node_id: located.nodeId,
-            ...(located.stableId === undefined ? {} : { stable_id: located.stableId }),
-            extensions: {},
-          },
-          category: "frame",
-          severity:
-            delta > MAJOR_FRAME_DEVIATION_LOGICAL_POINTS ? "major" : "minor",
-          expected: { kind: "rect", value: rectValue(expected), extensions: {} },
-          actual: { kind: "rect", value: rectValue(actual), extensions: {} },
-          delta,
-          evidence: [],
+        const runtimeTarget = {
+          snapshot_id: snapshot.snapshot_id,
+          tree_id: located.treeId,
+          node_id: located.nodeId,
+          ...(located.stableId === undefined ? {} : { stable_id: located.stableId }),
           extensions: {},
-        });
+        };
+        const delta = frameDeviation(expected, actual);
+        if (delta > FRAME_TOLERANCE_LOGICAL_POINTS) {
+          differences.push({
+            difference_id: this.#ids.next("difference"),
+            mapping_id: String(mapping["mapping_id"]),
+            runtime_target: runtimeTarget,
+            category: "frame",
+            severity:
+              delta > MAJOR_FRAME_DEVIATION_LOGICAL_POINTS ? "major" : "minor",
+            expected: { kind: "rect", value: rectValue(expected), extensions: {} },
+            actual: { kind: "rect", value: rectValue(actual), extensions: {} },
+            delta,
+            evidence: [],
+            extensions: {},
+          });
+        }
+        if (pixel !== undefined && pixel.status === "compared") {
+          const designColor = meanRegionColor(pixel.design, {
+            x: expected.x * pixel.designScaleX,
+            y: expected.y * pixel.designScaleY,
+            width: expected.width * pixel.designScaleX,
+            height: expected.height * pixel.designScaleY,
+          });
+          const screenColor = meanRegionColor(pixel.screenshot, {
+            x: actual.x * pixel.screenScaleX,
+            y: actual.y * pixel.screenScaleY,
+            width: actual.width * pixel.screenScaleX,
+            height: actual.height * pixel.screenScaleY,
+          });
+          if (designColor === undefined || screenColor === undefined) {
+            quality = "partial";
+          } else {
+            const colorDelta =
+              (Math.abs(designColor.red - screenColor.red) +
+                Math.abs(designColor.green - screenColor.green) +
+                Math.abs(designColor.blue - screenColor.blue)) /
+              3;
+            if (colorDelta > COLOR_TOLERANCE_MEAN_CHANNEL) {
+              differences.push({
+                difference_id: this.#ids.next("difference"),
+                mapping_id: String(mapping["mapping_id"]),
+                runtime_target: runtimeTarget,
+                category: "color",
+                severity:
+                  colorDelta > MAJOR_COLOR_DELTA_MEAN_CHANNEL ? "major" : "minor",
+                expected: {
+                  kind: "color_rgba",
+                  value: {
+                    red: designColor.red,
+                    green: designColor.green,
+                    blue: designColor.blue,
+                    alpha: designColor.alpha,
+                  },
+                  color_space: "srgb",
+                  extensions: {},
+                },
+                actual: {
+                  kind: "color_rgba",
+                  value: {
+                    red: screenColor.red,
+                    green: screenColor.green,
+                    blue: screenColor.blue,
+                    alpha: screenColor.alpha,
+                  },
+                  color_space: "srgb",
+                  extensions: {},
+                },
+                delta: colorDelta,
+                evidence: [],
+                extensions: {
+                  "vistrea.pixel": {
+                    design_sampled_pixels: designColor.sampled_pixels,
+                    screenshot_sampled_pixels: screenColor.sampled_pixels,
+                  },
+                },
+              });
+            }
+          }
+        }
+      }
+      if (pixel !== undefined && pixel.status === "unavailable") {
+        quality = "partial";
       }
 
       const comparison = {
@@ -300,12 +393,92 @@ export class DesignReviewEngine {
         evidence: [],
         completed_at: this.#workspace.clock.now(),
         completed_by: command.completed_by,
-        extensions: {},
+        extensions:
+          pixel === undefined
+            ? {}
+            : {
+                "vistrea.pixel":
+                  pixel.status === "compared"
+                    ? { status: "compared" }
+                    : { status: "unavailable", reason: pixel.reason },
+              },
       } as unknown as DesignComparison;
       this.#validator.assert(PROTOCOL_SCHEMA_IDS.designComparison, comparison);
       unit.designReviews.appendComparison(comparison);
       return comparison;
     });
+  }
+
+  /**
+   * Loads and decodes the design asset and the Snapshot screenshot for pixel
+   * comparison. Every failure is a reason, never a guess.
+   */
+  async #loadPixelContext(referenceId: string, snapshotId: string): Promise<PixelContext> {
+    let designHash: string | undefined;
+    let screenshotHash: string | undefined;
+    let designScaleX = 1;
+    let designScaleY = 1;
+    let screenScaleX = 1;
+    let screenScaleY = 1;
+    {
+      const unit = this.#workspace.beginUnitOfWork("read");
+      try {
+        const reference = unit.designReviews.getReference(referenceId) as unknown as JsonObject;
+        const snapshot = unit.snapshots.get(snapshotId) as unknown as JsonObject;
+        const artifact = reference["artifact"] as JsonObject | undefined;
+        const artifactObject = artifact?.["object"] as JsonObject | undefined;
+        designHash = artifactObject?.["hash"] as string | undefined;
+        const canvas = reference["canvas_size"] as JsonObject | undefined;
+        const pixels = reference["pixel_size"] as JsonObject | undefined;
+        if (canvas !== undefined && pixels !== undefined) {
+          designScaleX = (pixels["width"] as number) / (canvas["width"] as number);
+          designScaleY = (pixels["height"] as number) / (canvas["height"] as number);
+        }
+        const screenshot = snapshot["screenshot"] as JsonObject | undefined;
+        screenshotHash = (screenshot?.["object"] as JsonObject | undefined)?.["hash"] as
+          | string
+          | undefined;
+        const display = snapshot["display"] as JsonObject | undefined;
+        screenScaleX = (display?.["pixel_scale_x"] as number | undefined) ?? 1;
+        screenScaleY = (display?.["pixel_scale_y"] as number | undefined) ?? 1;
+      } finally {
+        unit.rollback();
+      }
+    }
+    if (designHash === undefined) {
+      return { status: "unavailable", reason: "The design reference has no decodable asset." };
+    }
+    if (screenshotHash === undefined) {
+      return { status: "unavailable", reason: "The Snapshot carries no screenshot evidence." };
+    }
+    try {
+      const [design, screenshot] = await Promise.all([
+        this.#readObjectBytes(designHash),
+        this.#readObjectBytes(screenshotHash),
+      ]);
+      return {
+        status: "compared",
+        design: decodePng(design),
+        screenshot: decodePng(screenshot),
+        designScaleX,
+        designScaleY,
+        screenScaleX,
+        screenScaleY,
+      };
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reason: isDataError(error) ? error.message : "The image bytes could not be decoded.",
+      };
+    }
+  }
+
+  async #readObjectBytes(hash: string): Promise<Uint8Array> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of await this.#objects.open(hash)) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   createReviewIssue(command: CreateReviewIssueCommand): ReviewIssue {

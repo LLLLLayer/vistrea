@@ -19,7 +19,7 @@ Available operations:
 
 | Intent | CLI | MCP |
 |---|---|---|
-| Validate one Snapshot | `validate snapshot --snapshot <id>` | `vistrea_validate_snapshot` |
+| Validate one Snapshot | `validate snapshot --snapshot <id>` (optionally `--disable-rules a,b` and `--min-touch-target <points>`; overrides persist into the run for audit) | `vistrea_validate_snapshot` |
 | Validate the Screen Graph | `validate graph --project <id> --application <id>` | `vistrea_validate_screen_graph` |
 | Read a run | `validate get-run <id>` | `vistrea_get_validation_run` |
 | Page findings | `validate findings [--statuses open]` | `vistrea_list_validation_findings` |

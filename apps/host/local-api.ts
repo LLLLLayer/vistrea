@@ -436,12 +436,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
-    const command = parseCommandObject(input, [
-      "design_reference_id",
-      "target_snapshot_id",
-      "completed_by",
-    ]);
-    const comparison = context.design.runDesignComparison(
+    const command = parseCommandObject(
+      input,
+      ["design_reference_id", "target_snapshot_id", "completed_by", "include_pixel"],
+      ["design_reference_id", "target_snapshot_id", "completed_by"],
+    );
+    const comparison = await context.design.runDesignComparison(
       command as unknown as Parameters<DesignReviewEngine["runDesignComparison"]>[0],
     );
     writeJson(response, 201, comparison as unknown as JsonObject);
@@ -948,7 +948,11 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
-    const command = parseCommandObject(input, ["snapshot_id", "categories"], ["snapshot_id"]);
+    const command = parseCommandObject(
+      input,
+      ["snapshot_id", "categories", "configuration"],
+      ["snapshot_id"],
+    );
     const outcome = context.validation.validateSnapshot(
       command as unknown as Parameters<ValidationEngine["validateSnapshot"]>[0],
     );
@@ -962,7 +966,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
     const command = parseCommandObject(
       input,
-      ["project_id", "application_id"],
+      ["project_id", "application_id", "configuration"],
       ["project_id", "application_id"],
     );
     const outcome = context.validation.validateScreenGraph(

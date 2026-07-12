@@ -120,7 +120,7 @@ test("design comparison locates nodes by stable ID and reports frame deviations"
     created_by: DESIGNER,
   });
 
-  const comparison = context.engine.runDesignComparison({
+  const comparison = await context.engine.runDesignComparison({
     design_reference_id: referenceId,
     target_snapshot_id: snapshotId,
     completed_by: COMPARATOR,
@@ -159,13 +159,11 @@ test("design comparison locates nodes by stable ID and reports frame deviations"
   );
 
   await assert.rejects(
-    Promise.resolve().then(() =>
-      context.engine.runDesignComparison({
-        design_reference_id: referenceId,
-        target_snapshot_id: "snapshot_019f0000-0000-7000-8000-000000000099",
-        completed_by: COMPARATOR,
-      }),
-    ),
+    context.engine.runDesignComparison({
+      design_reference_id: referenceId,
+      target_snapshot_id: "snapshot_019f0000-0000-7000-8000-000000000099",
+      completed_by: COMPARATOR,
+    }),
     (error: unknown) => isDataError(error, "not_found"),
   );
 });
@@ -322,4 +320,289 @@ test("secure identifier generation mints canonical typed UUIDv7 values", () => {
   assert.match(second, pattern);
   assert.notEqual(first, second);
   assert.throws(() => ids.next("Bad-Prefix"), (error: unknown) => isDataError(error, "invalid_argument"));
+});
+
+// --- Pixel comparison -------------------------------------------------------
+
+import { crc32, deflateSync } from "node:zlib";
+
+import { decodePng } from "../../engine/design/index.js";
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body) >>> 0);
+  return Buffer.concat([length, body, crc]);
+}
+
+/** Encodes eight-bit RGBA pixels as a filter-zero non-interlaced PNG. */
+function encodePng(width: number, height: number, rgba: Uint8Array): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const stride = width * 4;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let row = 0; row < height; row += 1) {
+    raw[row * (stride + 1)] = 0;
+    raw.set(rgba.subarray(row * stride, (row + 1) * stride), row * (stride + 1) + 1);
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function solidImage(
+  width: number,
+  height: number,
+  color: readonly [number, number, number, number],
+  patch?: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+    readonly color: readonly [number, number, number, number];
+  },
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    pixels.set(color, index * 4);
+  }
+  if (patch !== undefined) {
+    for (let row = patch.y; row < patch.y + patch.height; row += 1) {
+      for (let column = patch.x; column < patch.x + patch.width; column += 1) {
+        pixels.set(patch.color, (row * width + column) * 4);
+      }
+    }
+  }
+  return pixels;
+}
+
+test("pixel comparison reports mean-color deviations against the design asset", async (t) => {
+  const validator = await validatorPromise;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-design-pixel-"));
+  t.after(async () => fs.rm(directory, { recursive: true, force: true }));
+  const workspace = new MemoryDataStore({
+    validator,
+    clock: new SequenceClock("2026-07-12T11:00:00.000Z", 1_000),
+    ids: new SequenceIdGenerator(700),
+  });
+  const objects = await FileObjectStore.open({ workspaceRoot: directory });
+  const engine = new DesignReviewEngine({
+    workspace,
+    objects,
+    validator,
+    ids: new SecureUuidV7IdGenerator(),
+  });
+
+  const source = JSON.parse(
+    await fs.readFile(
+      path.join(repositoryRoot, "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"),
+      "utf8",
+    ),
+  ) as Record<string, unknown>;
+  // The real screenshot: red everywhere except the button region, which the
+  // application actually rendered green. Display scale is 3.
+  const red: readonly [number, number, number, number] = [255, 0, 0, 255];
+  const green: readonly [number, number, number, number] = [0, 255, 0, 255];
+  const screenshotBytes = encodePng(
+    1170,
+    2532,
+    solidImage(1170, 2532, red, { x: 72, y: 360, width: 1026, height: 156, color: green }),
+  );
+  const screenshotRef = await objects.put(
+    (async function* () {
+      yield screenshotBytes;
+    })(),
+    { media_type: "image/png", compression: "none", logical_name: "pixel-home.png" },
+  );
+  workspace.registerVerifiedObjects([screenshotRef]);
+  source["screenshot"] = {
+    ...(source["screenshot"] as JsonObject),
+    object: screenshotRef as unknown as JsonObject,
+  };
+  validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, source);
+  const snapshot = source as unknown as RuntimeSnapshot;
+  {
+    const unit = workspace.beginUnitOfWork("write");
+    unit.snapshots.put(snapshot, [screenshotRef]);
+    unit.commit();
+  }
+
+  // The design says the whole screen, including the button, is red.
+  const designBytes = encodePng(1170, 2532, solidImage(1170, 2532, red));
+  const designRef = await objects.put(
+    (async function* () {
+      yield designBytes;
+    })(),
+    { media_type: "image/png", compression: "none", logical_name: "pixel-baseline.png" },
+  );
+  const reference = await engine.addDesignReference({
+    name: "Pixel baseline",
+    kind: "design_artifact",
+    canvas_size: { width: 390, height: 844 },
+    pixel_size: { width: 1170, height: 2532 },
+    asset_hash: designRef.hash,
+    created_by: DESIGNER,
+  });
+  // The mapping matches the node's true frame, so only color can differ.
+  engine.mapDesignRegion({
+    design_reference_id: reference.design_reference_id,
+    design_region: { x: 24, y: 120, width: 342, height: 52 },
+    runtime_target: {
+      snapshot_id: snapshot.snapshot_id,
+      tree_id: "tree_019f0000-0000-7000-8000-000000000002",
+      node_id: "node_019f0000-0000-7000-8000-000000000011",
+      stable_id: "demo.home.open_catalog",
+    },
+    created_by: DESIGNER,
+  });
+
+  const comparison = await engine.runDesignComparison({
+    design_reference_id: reference.design_reference_id,
+    target_snapshot_id: snapshot.snapshot_id,
+    completed_by: COMPARATOR,
+    include_pixel: true,
+  });
+  assert.equal(comparison["quality"], "complete");
+  assert.deepEqual((comparison["extensions"] as JsonObject)["vistrea.pixel"], {
+    status: "compared",
+  });
+  const differences = comparison["differences"] as readonly JsonObject[];
+  assert.equal(differences.length, 1);
+  const difference = differences[0] as JsonObject;
+  assert.equal(difference["category"], "color");
+  assert.equal(difference["severity"], "major");
+  assert.ok((difference["delta"] as number) > 0.6 && (difference["delta"] as number) < 0.7);
+  const expectedColor = (difference["expected"] as JsonObject)["value"] as JsonObject;
+  const actualColor = (difference["actual"] as JsonObject)["value"] as JsonObject;
+  assert.equal(expectedColor["red"], 1);
+  assert.equal(expectedColor["green"], 0);
+  assert.equal(actualColor["red"], 0);
+  assert.equal(actualColor["green"], 1);
+  const comparisonValidator = await validatorPromise;
+  comparisonValidator.assert(PROTOCOL_SCHEMA_IDS.designComparison, comparison);
+
+  // Pixel comparison without screenshot evidence degrades honestly.
+  const context = await engineContext(t);
+  const bareReference = await addReference(context);
+  context.engine.mapDesignRegion({
+    design_reference_id: bareReference,
+    design_region: { x: 0, y: 0, width: 390, height: 844 },
+    runtime_target: {
+      snapshot_id: context.snapshot.snapshot_id,
+      tree_id: "tree_019f0000-0000-7000-8000-000000000002",
+      node_id: "node_019f0000-0000-7000-8000-000000000010",
+      stable_id: "demo.home.root",
+    },
+    created_by: DESIGNER,
+  });
+  const degraded = await context.engine.runDesignComparison({
+    design_reference_id: bareReference,
+    target_snapshot_id: context.snapshot.snapshot_id,
+    completed_by: COMPARATOR,
+    include_pixel: true,
+  });
+  assert.equal(degraded["quality"], "partial");
+  const pixelNote = (degraded["extensions"] as JsonObject)["vistrea.pixel"] as JsonObject;
+  assert.equal(pixelNote["status"], "unavailable");
+  assert.match(String(pixelNote["reason"]), /screenshot/);
+});
+
+test("the PNG decoder reconstructs every scanline filter and fails closed", () => {
+  // Round trip through the filter-zero encoder first.
+  const pixels = solidImage(3, 2, [10, 20, 30, 255], {
+    x: 1,
+    y: 1,
+    width: 2,
+    height: 1,
+    color: [200, 100, 50, 128],
+  });
+  const decoded = decodePng(encodePng(3, 2, pixels));
+  assert.equal(decoded.width, 3);
+  assert.equal(decoded.height, 2);
+  assert.deepEqual([...decoded.pixels], [...pixels]);
+
+  // Hand-filtered scanlines exercise sub, up, average, and Paeth exactly.
+  const width = 3;
+  const height = 4;
+  const raw = solidImage(width, height, [7, 40, 90, 255], {
+    x: 0,
+    y: 2,
+    width: 3,
+    height: 2,
+    color: [250, 3, 128, 64],
+  });
+  const stride = width * 4;
+  const filters = [1, 2, 3, 4];
+  const filtered = Buffer.alloc((stride + 1) * height);
+  for (let row = 0; row < height; row += 1) {
+    const filter = filters[row] as number;
+    filtered[row * (stride + 1)] = filter;
+    for (let index = 0; index < stride; index += 1) {
+      const value = raw[row * stride + index] as number;
+      const left = index >= 4 ? (raw[row * stride + index - 4] as number) : 0;
+      const above = row > 0 ? (raw[(row - 1) * stride + index] as number) : 0;
+      const aboveLeft =
+        row > 0 && index >= 4 ? (raw[(row - 1) * stride + index - 4] as number) : 0;
+      let predictor = 0;
+      if (filter === 1) {
+        predictor = left;
+      } else if (filter === 2) {
+        predictor = above;
+      } else if (filter === 3) {
+        predictor = Math.floor((left + above) / 2);
+      } else {
+        const estimate = left + above - aboveLeft;
+        const distanceLeft = Math.abs(estimate - left);
+        const distanceAbove = Math.abs(estimate - above);
+        const distanceAboveLeft = Math.abs(estimate - aboveLeft);
+        predictor =
+          distanceLeft <= distanceAbove && distanceLeft <= distanceAboveLeft
+            ? left
+            : distanceAbove <= distanceAboveLeft
+              ? above
+              : aboveLeft;
+      }
+      filtered[row * (stride + 1) + 1 + index] = (value - predictor) & 0xff;
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const handMade = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(filtered)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  const reconstructed = decodePng(handMade);
+  assert.deepEqual([...reconstructed.pixels], [...raw]);
+
+  // Unsupported color formats fail closed instead of guessing about pixels.
+  const paletteHeader = Buffer.alloc(13);
+  paletteHeader.writeUInt32BE(1, 0);
+  paletteHeader.writeUInt32BE(1, 4);
+  paletteHeader[8] = 8;
+  paletteHeader[9] = 3;
+  const palettePng = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", paletteHeader),
+    pngChunk("IDAT", deflateSync(Buffer.from([0, 0]))),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  assert.throws(() => decodePng(palettePng), (error: unknown) =>
+    isDataError(error, "unsupported"),
+  );
+  assert.throws(() => decodePng(Buffer.from("not a png")), (error: unknown) =>
+    isDataError(error, "invalid_argument"),
+  );
 });

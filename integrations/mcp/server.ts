@@ -194,6 +194,7 @@ export const VISTREA_MCP_TOOLS = [
         design_reference_id: { type: "string", maxLength: 128 },
         target_snapshot_id: { type: "string", maxLength: 128 },
         completed_by: { type: "object" },
+        include_pixel: { type: "boolean" },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
@@ -743,6 +744,18 @@ export const VISTREA_MCP_TOOLS = [
           maxItems: 3,
           items: { type: "string", enum: ["structural", "accessibility", "visual"] },
         },
+        configuration: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            disabled_rules: {
+              type: "array",
+              maxItems: 16,
+              items: { type: "string", minLength: 1, maxLength: 128 },
+            },
+            minimum_touch_target_points: { type: "number", minimum: 1, maximum: 200 },
+          },
+        },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
@@ -759,6 +772,18 @@ export const VISTREA_MCP_TOOLS = [
       properties: {
         project_id: { type: "string", maxLength: 128 },
         application_id: { type: "string", maxLength: 256 },
+        configuration: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            disabled_rules: {
+              type: "array",
+              maxItems: 16,
+              items: { type: "string", minLength: 1, maxLength: 128 },
+            },
+            minimum_touch_target_points: { type: "number", minimum: 1, maximum: 200 },
+          },
+        },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },

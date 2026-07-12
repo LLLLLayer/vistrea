@@ -20,6 +20,16 @@ import { deterministicGraphId } from "../exploration/index.js";
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const RULE_SET = { kind: "validation_rule_set", id: "ruleset.vistrea.core", version: "1.0.0" };
 const MINIMUM_TOUCH_TARGET_POINTS = 44;
+const CORE_RULE_IDS = new Set([
+  "structural.duplicate-stable-id",
+  "structural.interactive-without-stable-id",
+  "accessibility.minimum-touch-target",
+  "accessibility.missing-label",
+  "visual.offscreen-interactive",
+  "visual.zero-size-visible",
+  "behavioral.unreachable-state",
+  "behavioral.dead-end-state",
+]);
 
 export const VALIDATION_CATEGORIES = [
   "structural",
@@ -47,11 +57,23 @@ export interface ValidationEngineDependencies {
 export interface ValidateSnapshotCommand {
   readonly snapshot_id: string;
   readonly categories?: readonly ValidationCategory[];
+  readonly configuration?: ValidationConfiguration;
 }
 
 export interface ValidateScreenGraphCommand {
   readonly project_id: string;
   readonly application_id: string;
+  readonly configuration?: ValidationConfiguration;
+}
+
+/**
+ * Caller configuration over the core rule set. Unknown rule identifiers fail
+ * closed instead of silently validating nothing, and every non-default
+ * configuration persists into the run for auditability.
+ */
+export interface ValidationConfiguration {
+  readonly disabled_rules?: readonly string[];
+  readonly minimum_touch_target_points?: number;
 }
 
 export interface ValidationOutcome {
@@ -107,6 +129,7 @@ export class ValidationEngine {
 
   validateSnapshot(command: ValidateSnapshotCommand): ValidationOutcome {
     const categories = normalizeCategories(command.categories);
+    const configuration = normalizeConfiguration(command.configuration);
     return this.#write((unit) => {
       const snapshot = this.#getSnapshot(unit, command.snapshot_id);
       const ruleFindings: RuleFinding[] = [];
@@ -114,7 +137,7 @@ export class ValidationEngine {
         ruleFindings.push(...structuralRules(snapshot));
       }
       if (categories.has("accessibility")) {
-        ruleFindings.push(...accessibilityRules(snapshot));
+        ruleFindings.push(...accessibilityRules(snapshot, configuration.minimumTouchTarget));
       }
       if (categories.has("visual")) {
         ruleFindings.push(...visualRules(snapshot));
@@ -123,12 +146,14 @@ export class ValidationEngine {
         unit,
         { kind: "runtime_snapshot", id: command.snapshot_id },
         { kind: "runtime_snapshot", id: command.snapshot_id },
-        ruleFindings,
+        ruleFindings.filter((finding) => !configuration.disabledRules.has(finding.rule_id)),
+        configuration.audit,
       );
     });
   }
 
   validateScreenGraph(command: ValidateScreenGraphCommand): ValidationOutcome {
+    const configuration = normalizeConfiguration(command.configuration);
     return this.#write((unit) => {
       const graphId = deterministicGraphId(command.project_id, command.application_id);
       const graph = unit.screenGraph.getGraph(graphId);
@@ -137,7 +162,8 @@ export class ValidationEngine {
         unit,
         { kind: "screen_graph", id: graphId },
         { kind: "screen_graph", id: graphId },
-        ruleFindings,
+        ruleFindings.filter((finding) => !configuration.disabledRules.has(finding.rule_id)),
+        configuration.audit,
       );
     });
   }
@@ -226,6 +252,7 @@ export class ValidationEngine {
     target: JsonObject,
     evidenceSource: JsonObject | undefined,
     ruleFindings: readonly RuleFinding[],
+    configurationAudit?: JsonObject,
   ): ValidationOutcome {
     const now = this.#workspace.clock.now();
     const runId = this.#ids.next("validationrun");
@@ -241,7 +268,8 @@ export class ValidationEngine {
       updated_at: now,
       revision: 1,
       finding_counts: emptyCounts(),
-      extensions: {},
+      extensions:
+        configurationAudit === undefined ? {} : { "vistrea.configuration": configurationAudit },
     };
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.validationRun, initialRun);
     unit.validation.createRun(initialRun as unknown as ValidationRun);
@@ -442,7 +470,45 @@ function structuralRules(snapshot: RuntimeSnapshot): RuleFinding[] {
   return findings;
 }
 
-function accessibilityRules(snapshot: RuntimeSnapshot): RuleFinding[] {
+function normalizeConfiguration(configuration: ValidationConfiguration | undefined): {
+  disabledRules: ReadonlySet<string>;
+  minimumTouchTarget: number;
+  audit?: JsonObject;
+} {
+  if (configuration === undefined) {
+    return { disabledRules: new Set(), minimumTouchTarget: MINIMUM_TOUCH_TARGET_POINTS };
+  }
+  const disabled = configuration.disabled_rules ?? [];
+  if (!Array.isArray(disabled) || disabled.some((rule) => !CORE_RULE_IDS.has(rule as string))) {
+    throw new DataError("invalid_argument", "disabled_rules must name known core rules.", {
+      details: { known_rules: [...CORE_RULE_IDS] },
+    });
+  }
+  const threshold = configuration.minimum_touch_target_points;
+  if (
+    threshold !== undefined &&
+    (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 1 || threshold > 200)
+  ) {
+    throw new DataError(
+      "invalid_argument",
+      "minimum_touch_target_points must be a number from 1 through 200.",
+    );
+  }
+  const audit: JsonObject = {
+    ...(disabled.length === 0 ? {} : { disabled_rules: [...disabled] }),
+    ...(threshold === undefined ? {} : { minimum_touch_target_points: threshold }),
+  };
+  return {
+    disabledRules: new Set(disabled),
+    minimumTouchTarget: threshold ?? MINIMUM_TOUCH_TARGET_POINTS,
+    ...(Object.keys(audit).length === 0 ? {} : { audit }),
+  };
+}
+
+function accessibilityRules(
+  snapshot: RuntimeSnapshot,
+  minimumTouchTarget: number = MINIMUM_TOUCH_TARGET_POINTS,
+): RuleFinding[] {
   const findings: RuleFinding[] = [];
   for (const entry of flattenNodes(snapshot)) {
     const node = entry.node;
@@ -454,7 +520,7 @@ function accessibilityRules(snapshot: RuntimeSnapshot): RuleFinding[] {
       | undefined;
     if (
       frame !== undefined &&
-      (frame.width < MINIMUM_TOUCH_TARGET_POINTS || frame.height < MINIMUM_TOUCH_TARGET_POINTS)
+      (frame.width < minimumTouchTarget || frame.height < minimumTouchTarget)
     ) {
       findings.push({
         rule_id: "accessibility.minimum-touch-target",
@@ -463,8 +529,8 @@ function accessibilityRules(snapshot: RuntimeSnapshot): RuleFinding[] {
         message: "An interactive touch target is smaller than the platform minimum.",
         subject: nodeSubject(snapshot, node),
         expected: {
-          minimum_width: MINIMUM_TOUCH_TARGET_POINTS,
-          minimum_height: MINIMUM_TOUCH_TARGET_POINTS,
+          minimum_width: minimumTouchTarget,
+          minimum_height: minimumTouchTarget,
           unit: "pt",
         },
         actual: { width: frame.width, height: frame.height, unit: "pt" },
