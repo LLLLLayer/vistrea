@@ -138,6 +138,8 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_get_snapshot",
       "vistrea_get_tuning_application",
       "vistrea_get_tuning_patch",
+      "vistrea_get_validation_finding",
+      "vistrea_get_validation_run",
       "vistrea_get_wiki_backlinks",
       "vistrea_get_wiki_node",
       "vistrea_get_workspace_status",
@@ -145,6 +147,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_list_active_tuning",
       "vistrea_list_review_issues",
       "vistrea_list_snapshots",
+      "vistrea_list_validation_findings",
       "vistrea_map_design_region",
       "vistrea_observe_screen_state",
       "vistrea_observe_transition",
@@ -152,10 +155,13 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_revert_tuning_application",
       "vistrea_run_design_comparison",
       "vistrea_search_wiki",
+      "vistrea_suppress_validation_finding",
       "vistrea_transition_review_issue",
       "vistrea_unlink_wiki_node",
       "vistrea_update_wiki_node",
       "vistrea_upload_design_asset",
+      "vistrea_validate_screen_graph",
+      "vistrea_validate_snapshot",
       "vistrea_verify_review_issue",
     ],
   );
@@ -586,6 +592,31 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       (item) => item["wiki_node_id"],
     ),
     [wikiNode["wiki_node_id"]],
+  );
+
+  // Validation: the captured fixture Snapshot passes the core rule set.
+  const cliValidate = await runCli(
+    ["validate", "snapshot", "--snapshot", capturedSnapshot["snapshot_id"] as string],
+    environment,
+  );
+  assert.equal(cliValidate.exitCode, 0, cliValidate.stdout);
+  const validateEnvelope = parseCliEnvelope(cliValidate.stdout).data as JsonObject;
+  const validationRun = validateEnvelope["run"] as JsonObject;
+  assert.equal(validationRun["state"], "succeeded");
+  const mcpValidationRun = await mcp.callTool({
+    name: "vistrea_get_validation_run",
+    arguments: { validation_run_id: validationRun["validation_run_id"] },
+  });
+  assert.equal(mcpValidationRun.isError, undefined);
+  assert.deepEqual(mcpValidationRun.structuredContent, validationRun);
+  const mcpFindings = await mcp.callTool({
+    name: "vistrea_list_validation_findings",
+    arguments: { validation_run_id: validationRun["validation_run_id"] },
+  });
+  assert.equal(mcpFindings.isError, undefined);
+  assert.deepEqual(
+    (mcpFindings.structuredContent as JsonObject)["items"],
+    validateEnvelope["findings"],
   );
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";

@@ -51,6 +51,10 @@ const WIKI_NODE_ID_PATTERN =
 const WIKI_LINK_ID_PATTERN =
   /^wikilink_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const RESOURCE_KIND_PATTERN = /^[a-z][a-z0-9._-]*$/;
+const VALIDATION_RUN_ID_PATTERN =
+  /^validationrun_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const VALIDATION_FINDING_ID_PATTERN =
+  /^finding_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -98,6 +102,12 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "UnlinkWikiNode",
   "GetWikiBacklinks",
   "GetRelatedWikiNodes",
+  "ValidateSnapshot",
+  "ValidateScreenGraph",
+  "GetValidationRun",
+  "ListValidationFindings",
+  "GetValidationFinding",
+  "SuppressValidationFinding",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -965,6 +975,154 @@ export class HostLocalApiClient {
         );
         return validateWikiNodePage(value);
       }
+      case "ValidateSnapshot": {
+        const command = assertExactObject(
+          input,
+          ["snapshot_id", "categories"],
+          "Snapshot validation input",
+          true,
+        );
+        const snapshotId = command["snapshot_id"];
+        if (typeof snapshotId !== "string" || !SNAPSHOT_ID_PATTERN.test(snapshotId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/validation/snapshot-runs",
+          command,
+          201,
+          options,
+        );
+        return validateValidationOutcome(value);
+      }
+      case "ValidateScreenGraph": {
+        const command = assertExactObject(
+          input,
+          ["project_id", "application_id"],
+          "Screen graph validation input",
+        );
+        const projectId = command["project_id"];
+        const applicationId = command["application_id"];
+        if (
+          typeof projectId !== "string" ||
+          !PROJECT_ID_PATTERN.test(projectId) ||
+          typeof applicationId !== "string" ||
+          !APPLICATION_ID_PATTERN.test(applicationId)
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/validation/graph-runs",
+          command,
+          201,
+          options,
+        );
+        return validateValidationOutcome(value);
+      }
+      case "GetValidationRun": {
+        const query = assertExactObject(input, ["validation_run_id"], "Validation run lookup");
+        const runId = query["validation_run_id"];
+        if (typeof runId !== "string" || !VALIDATION_RUN_ID_PATTERN.test(runId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/validation/runs/${encodeURIComponent(runId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "validation_run_id", VALIDATION_RUN_ID_PATTERN);
+      }
+      case "ListValidationFindings": {
+        const query = assertExactObject(
+          input,
+          ["validation_run_id", "statuses", "severities", "limit", "cursor"],
+          "Validation finding query",
+          true,
+        );
+        const parameters = pageParameters(query);
+        const runId = query["validation_run_id"];
+        if (runId !== undefined) {
+          if (typeof runId !== "string" || !VALIDATION_RUN_ID_PATTERN.test(runId)) {
+            throw invalidInput();
+          }
+          parameters.set("validation_run_id", runId);
+        }
+        for (const key of ["statuses", "severities"] as const) {
+          const value = query[key];
+          if (value !== undefined) {
+            if (
+              !Array.isArray(value) ||
+              value.length === 0 ||
+              value.length > 8 ||
+              !value.every(
+                (entry) => typeof entry === "string" && /^[a-z][a-z_]{0,31}$/.test(entry),
+              )
+            ) {
+              throw invalidInput();
+            }
+            parameters.set(key, value.join(","));
+          }
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/validation/findings${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateFindingPage(value);
+      }
+      case "GetValidationFinding": {
+        const query = assertExactObject(input, ["finding_id"], "Validation finding lookup");
+        const findingId = query["finding_id"];
+        if (typeof findingId !== "string" || !VALIDATION_FINDING_ID_PATTERN.test(findingId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/validation/findings/${encodeURIComponent(findingId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "finding_id", VALIDATION_FINDING_ID_PATTERN);
+      }
+      case "SuppressValidationFinding": {
+        const command = assertExactObject(
+          input,
+          [
+            "finding_id",
+            "expected_finding_revision",
+            "reason_code",
+            "justification",
+            "created_by",
+            "expires_at",
+          ],
+          "Validation suppression input",
+          true,
+        );
+        const findingId = command["finding_id"];
+        if (
+          typeof findingId !== "string" ||
+          !VALIDATION_FINDING_ID_PATTERN.test(findingId) ||
+          !Number.isSafeInteger(command["expected_finding_revision"])
+        ) {
+          throw invalidInput();
+        }
+        const { finding_id: _findingId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/validation/findings/${encodeURIComponent(findingId)}/suppress`,
+          body,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "finding_id", VALIDATION_FINDING_ID_PATTERN);
+      }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
         const parameters = new URLSearchParams();
@@ -1493,6 +1651,41 @@ function pageParameters(query: JsonObject): URLSearchParams {
     parameters.set("cursor", cursor);
   }
   return parameters;
+}
+
+function validateValidationOutcome(value: JsonValue): JsonObject {
+  const outcome = requireObject(value);
+  assertKeys(outcome, ["run", "findings"]);
+  validateIdentifiedResource(
+    outcome["run"] as JsonValue,
+    "validation_run_id",
+    VALIDATION_RUN_ID_PATTERN,
+  );
+  const findings = outcome["findings"];
+  if (!Array.isArray(findings) || findings.length > 5_000) {
+    throw invalidHostResult();
+  }
+  for (const finding of findings) {
+    validateIdentifiedResource(
+      finding as JsonValue,
+      "finding_id",
+      VALIDATION_FINDING_ID_PATTERN,
+    );
+  }
+  return outcome;
+}
+
+function validateFindingPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor", "snapshot_version"], true);
+  const items = page["items"];
+  if (!Array.isArray(items) || items.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const item of items) {
+    validateIdentifiedResource(item as JsonValue, "finding_id", VALIDATION_FINDING_ID_PATTERN);
+  }
+  return page;
 }
 
 function validateWikiNodePage(value: JsonValue): JsonObject {

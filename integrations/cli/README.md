@@ -40,6 +40,12 @@ vistrea wiki link --json <command>
 vistrea wiki unlink <wiki_link_id> --revision <n>
 vistrea wiki backlinks <wiki_node_id>
 vistrea wiki related --kind <resource_kind> --id <resource_id>
+vistrea validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual]
+vistrea validate graph --project <project_id> --application <application_id>
+vistrea validate get-run <validation_run_id>
+vistrea validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]
+vistrea validate get-finding <finding_id>
+vistrea validate suppress <finding_id> --json <command>
 ```
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.

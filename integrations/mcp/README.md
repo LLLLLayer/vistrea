@@ -40,6 +40,12 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_unlink_wiki_node` | `UnlinkWikiNode` | Remove one Deep Wiki link |
 | `vistrea_get_wiki_backlinks` | `GetWikiBacklinks` | List links pointing at one node |
 | `vistrea_related_wiki_nodes` | `GetRelatedWikiNodes` | List nodes related to one workspace resource |
+| `vistrea_validate_snapshot` | `ValidateSnapshot` | Run the core structural/accessibility/visual validators over one Snapshot |
+| `vistrea_validate_screen_graph` | `ValidateScreenGraph` | Run behavioral reachability validators over the Screen Graph |
+| `vistrea_get_validation_run` | `GetValidationRun` | Load one Validation Run with finding counts |
+| `vistrea_list_validation_findings` | `ListValidationFindings` | Page Findings by run, status, and severity |
+| `vistrea_get_validation_finding` | `GetValidationFinding` | Load one Finding with evidence |
+| `vistrea_suppress_validation_finding` | `SuppressValidationFinding` | Suppress one open Finding with a justified reason |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 

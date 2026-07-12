@@ -34,6 +34,7 @@ import {
 } from "../../engine/design/index.js";
 import { ScreenGraphEngine } from "../../engine/exploration/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
+import { ValidationEngine } from "../../engine/validation/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -154,6 +155,7 @@ export async function startHostLocalApi(
   const tuning = new TuningEngine(options);
   const graph = new ScreenGraphEngine(options);
   const knowledge = new KnowledgeEngine(options);
+  const validation = new ValidationEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -174,6 +176,7 @@ export async function startHostLocalApi(
         tuning,
         graph,
         knowledge,
+        validation,
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -239,6 +242,7 @@ interface RequestHandlerContext {
   readonly tuning: TuningEngine;
   readonly graph: ScreenGraphEngine;
   readonly knowledge: KnowledgeEngine;
+  readonly validation: ValidationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -820,6 +824,106 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       200,
       context.knowledge.relatedTo({ kind, id }, readPageValues(url)) as unknown as JsonObject,
     );
+    return;
+  }
+
+  if (pathname === "/v1/validation/snapshot-runs") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, ["snapshot_id", "categories"], ["snapshot_id"]);
+    const outcome = context.validation.validateSnapshot(
+      command as unknown as Parameters<ValidationEngine["validateSnapshot"]>[0],
+    );
+    writeJson(response, 201, outcome as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/validation/graph-runs") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["project_id", "application_id"],
+      ["project_id", "application_id"],
+    );
+    const outcome = context.validation.validateScreenGraph(
+      command as unknown as Parameters<ValidationEngine["validateScreenGraph"]>[0],
+    );
+    writeJson(response, 201, outcome as unknown as JsonObject);
+    return;
+  }
+
+  const validationRunMatch = /^\/v1\/validation\/runs\/([^/]+)$/.exec(pathname);
+  if (validationRunMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const runId = decodeResourceSegment(validationRunMatch[1] as string, "validation run ID");
+    writeJson(response, 200, context.validation.getRun(runId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/validation/findings") {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const values = readSingleValueParameters(url, [
+      "validation_run_id",
+      "statuses",
+      "severities",
+      "limit",
+      "cursor",
+    ]);
+    const query = {
+      ...(values["validation_run_id"] === undefined
+        ? {}
+        : { validation_run_id: values["validation_run_id"] }),
+      ...(values["statuses"] === undefined ? {} : { statuses: values["statuses"].split(",") }),
+      ...(values["severities"] === undefined
+        ? {}
+        : { severities: values["severities"].split(",") }),
+    };
+    writeJson(
+      response,
+      200,
+      context.validation.listFindings(query, readPageValues(url)) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  const suppressMatch = /^\/v1\/validation\/findings\/([^/]+)\/suppress$/.exec(pathname);
+  if (suppressMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const findingId = decodeResourceSegment(suppressMatch[1] as string, "validation finding ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["expected_finding_revision", "reason_code", "justification", "created_by", "expires_at"],
+      ["expected_finding_revision", "reason_code", "justification", "created_by"],
+    );
+    const finding = context.validation.suppressFinding({
+      ...(command as unknown as Omit<
+        Parameters<ValidationEngine["suppressFinding"]>[0],
+        "finding_id"
+      >),
+      finding_id: findingId,
+    });
+    writeJson(response, 200, finding as unknown as JsonObject);
+    return;
+  }
+
+  const validationFindingMatch = /^\/v1\/validation\/findings\/([^/]+)$/.exec(pathname);
+  if (validationFindingMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const findingId = decodeResourceSegment(
+      validationFindingMatch[1] as string,
+      "validation finding ID",
+    );
+    writeJson(response, 200, context.validation.getFinding(findingId) as unknown as JsonObject);
     return;
   }
 

@@ -92,6 +92,12 @@ export async function runVistreaCli(
           "wiki unlink <wiki_link_id> --revision <n>",
           "wiki backlinks <wiki_node_id>",
           "wiki related --kind <resource_kind> --id <resource_id>",
+          "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual]",
+          "validate graph --project <project_id> --application <application_id>",
+          "validate get-run <validation_run_id>",
+          "validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]",
+          "validate get-finding <finding_id>",
+          "validate suppress <finding_id> --json <command>",
         ],
         format: "json",
       });
@@ -380,6 +386,88 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
     return invocation(
       "GetRelatedWikiNodes",
       { kind: requireOption(values, "--kind"), id: requireOption(values, "--id") },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "snapshot") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--snapshot", "--categories"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const categories = values.get("--categories");
+    return invocation(
+      "ValidateSnapshot",
+      {
+        snapshot_id: requireOption(values, "--snapshot"),
+        ...(categories === undefined ? {} : { categories: categories.split(",") }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "graph") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--project", "--application"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    return invocation(
+      "ValidateScreenGraph",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "get-run" && command.length === 3) {
+    return invocation(
+      "GetValidationRun",
+      { validation_run_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "findings") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--run", "--statuses", "--severities", "--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const run = values.get("--run");
+    const statuses = values.get("--statuses");
+    const severities = values.get("--severities");
+    const cursor = values.get("--cursor");
+    return invocation(
+      "ListValidationFindings",
+      {
+        ...(run === undefined ? {} : { validation_run_id: run }),
+        ...(statuses === undefined ? {} : { statuses: statuses.split(",") }),
+        ...(severities === undefined ? {} : { severities: severities.split(",") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "get-finding" && command.length === 3) {
+    return invocation(
+      "GetValidationFinding",
+      { finding_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "validate" && command[1] === "suppress" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "SuppressValidationFinding",
+      { ...input, finding_id: command[2] as string },
       timeoutMilliseconds,
     );
   }

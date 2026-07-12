@@ -708,6 +708,107 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "vistrea_validate_snapshot",
+    title: "Validate Snapshot",
+    description:
+      "Run the built-in structural, accessibility, and visual validators over one persisted Snapshot.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["snapshot_id"],
+      properties: {
+        snapshot_id: { type: "string", maxLength: 128 },
+        categories: {
+          type: "array",
+          minItems: 1,
+          maxItems: 3,
+          items: { type: "string", enum: ["structural", "accessibility", "visual"] },
+        },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_validate_screen_graph",
+    title: "Validate Screen Graph",
+    description:
+      "Run the behavioral reachability validators over the materialized Screen Graph.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project_id", "application_id"],
+      properties: {
+        project_id: { type: "string", maxLength: 128 },
+        application_id: { type: "string", maxLength: 256 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_validation_run",
+    title: "Get Validation Run",
+    description: "Load one Validation Run with its finding counts.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["validation_run_id"],
+      properties: { validation_run_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_list_validation_findings",
+    title: "List Validation Findings",
+    description: "Page Validation Findings by run, status, and severity.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        validation_run_id: { type: "string", maxLength: 128 },
+        statuses: { type: "array", maxItems: 8, items: { type: "string", maxLength: 32 } },
+        severities: { type: "array", maxItems: 8, items: { type: "string", maxLength: 32 } },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+        cursor: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_get_validation_finding",
+    title: "Get Validation Finding",
+    description: "Load one Validation Finding with its evidence.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["finding_id"],
+      properties: { finding_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_suppress_validation_finding",
+    title: "Suppress Validation Finding",
+    description:
+      "Suppress one open Finding with a justified reason and optimistic concurrency.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["finding_id", "expected_finding_revision", "reason_code", "justification", "created_by"],
+      properties: {
+        finding_id: { type: "string", maxLength: 128 },
+        expected_finding_revision: { type: "integer", minimum: 1 },
+        reason_code: {
+          type: "string",
+          enum: ["false_positive", "accepted_risk", "known_issue", "environment_variance", "other"],
+        },
+        justification: { type: "string", minLength: 1, maxLength: 2048 },
+        created_by: { type: "object" },
+        expires_at: { type: "string", maxLength: 64 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -745,6 +846,12 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_unlink_wiki_node", "UnlinkWikiNode"],
   ["vistrea_get_wiki_backlinks", "GetWikiBacklinks"],
   ["vistrea_related_wiki_nodes", "GetRelatedWikiNodes"],
+  ["vistrea_validate_snapshot", "ValidateSnapshot"],
+  ["vistrea_validate_screen_graph", "ValidateScreenGraph"],
+  ["vistrea_get_validation_run", "GetValidationRun"],
+  ["vistrea_list_validation_findings", "ListValidationFindings"],
+  ["vistrea_get_validation_finding", "GetValidationFinding"],
+  ["vistrea_suppress_validation_finding", "SuppressValidationFinding"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {
