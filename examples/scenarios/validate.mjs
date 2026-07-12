@@ -58,6 +58,16 @@ const requiredFirstLoopStages = Object.freeze([
   "data-reopen"
 ]);
 
+const requiredFirstLoopScenarioIds = Object.freeze(["demo.navigation.basic"]);
+const requiredFirstLoopCapabilities = Object.freeze([
+  "runtime.snapshot",
+  "runtime.connection"
+]);
+const requiredFirstLoopArtifactKeys = Object.freeze([
+  "demo.navigation.basic.snapshot.home",
+  "demo.navigation.basic.screenshot.home"
+]);
+
 const comparisonByArtifactKind = Object.freeze({
   "runtime-snapshot": "protocol-canonical",
   screenshot: "platform-visual",
@@ -739,6 +749,42 @@ export function validateSuiteSemantics({ manifest, scenarios, fixtureFiles }) {
     issues.push(issue("android_adapter_mismatch", "/manifest/platforms/android/initial_adapter", "The initial Android adapter must be View/ViewGroup"));
   }
 
+  addDuplicateIssues(
+    issues,
+    manifest.vertical_loops,
+    (loop) => loop.loop_id,
+    "/manifest/vertical_loops",
+    "duplicate_vertical_loop"
+  );
+  for (const loop of manifest.vertical_loops) {
+    const path = `/manifest/vertical_loops/${loop.loop_id}`;
+    const platformStatus = manifest.platforms[loop.platform];
+    if (platformStatus === undefined) {
+      issues.push(issue("vertical_loop_platform_unknown", `${path}/platform`, `Unknown platform: ${loop.platform}`));
+      continue;
+    }
+    for (const scenarioId of loop.scenario_ids) {
+      if (!scenarioById.has(scenarioId) || !requiredScenarioIds.includes(scenarioId)) {
+        issues.push(issue("vertical_loop_unknown_scenario", `${path}/scenario_ids`, `Vertical loop must reference a required shared scenario: ${scenarioId}`));
+      }
+    }
+    for (const capability of loop.required_capabilities) {
+      const status = platformStatus.capabilities[capability];
+      if (status === undefined || status === "unsupported") {
+        issues.push(issue("vertical_loop_capability_unavailable", `${path}/required_capabilities`, `${loop.platform} does not declare support for ${capability}`));
+      }
+      if (loop.status === "verified" && status !== "verified") {
+        issues.push(issue("verified_loop_capability_unverified", `${path}/required_capabilities`, `Verified loop requires verified ${loop.platform} capability: ${capability}`));
+      }
+    }
+    for (const artifactKey of loop.artifact_keys) {
+      const owner = allArtifactKeys.get(artifactKey);
+      if (owner === undefined || !loop.scenario_ids.includes(owner)) {
+        issues.push(issue("vertical_loop_artifact_mismatch", `${path}/artifact_keys`, `Vertical-loop artifact must belong to a referenced shared scenario: ${artifactKey}`));
+      }
+    }
+  }
+
   const firstLoop = manifest.vertical_loops.find((loop) => loop.loop_id === "ios.first-snapshot-loop");
   if (firstLoop === undefined) {
     issues.push(issue("missing_first_ios_loop", "/manifest/vertical_loops", "Missing ios.first-snapshot-loop acceptance contract"));
@@ -746,25 +792,46 @@ export function validateSuiteSemantics({ manifest, scenarios, fixtureFiles }) {
     if (firstLoop.platform !== "ios") {
       issues.push(issue("first_loop_platform_mismatch", "/manifest/vertical_loops/ios.first-snapshot-loop/platform", "First snapshot loop must target iOS"));
     }
+    if (firstLoop.status !== "verified") {
+      issues.push(issue("first_loop_status_mismatch", "/manifest/vertical_loops/ios.first-snapshot-loop/status", "The first iOS snapshot loop must remain verified"));
+    }
     if (!sameSet(firstLoop.stages, requiredFirstLoopStages)) {
       issues.push(issue("first_loop_stage_mismatch", "/manifest/vertical_loops/ios.first-snapshot-loop/stages", `First iOS loop must cover: ${requiredFirstLoopStages.join(", ")}`));
     }
-    for (const scenarioId of firstLoop.scenario_ids) {
-      if (!scenarioById.has(scenarioId) || !requiredScenarioIds.includes(scenarioId)) {
-        issues.push(issue("first_loop_unknown_scenario", "/manifest/vertical_loops/ios.first-snapshot-loop/scenario_ids", `First loop must reference a required shared scenario: ${scenarioId}`));
-      }
+    if (!sameSet(firstLoop.scenario_ids, requiredFirstLoopScenarioIds)) {
+      issues.push(issue("first_loop_unknown_scenario", "/manifest/vertical_loops/ios.first-snapshot-loop/scenario_ids", `First iOS loop must reference exactly: ${requiredFirstLoopScenarioIds.join(", ")}`));
     }
-    for (const capability of firstLoop.required_capabilities) {
-      const status = manifest.platforms.ios.capabilities[capability];
-      if (status === undefined || status === "unsupported") {
-        issues.push(issue("first_loop_capability_unavailable", "/manifest/vertical_loops/ios.first-snapshot-loop/required_capabilities", `iOS does not declare support for ${capability}`));
-      }
+    if (!sameSet(firstLoop.required_capabilities, requiredFirstLoopCapabilities)) {
+      issues.push(issue("first_loop_capability_unavailable", "/manifest/vertical_loops/ios.first-snapshot-loop/required_capabilities", `First iOS loop must require exactly: ${requiredFirstLoopCapabilities.join(", ")}`));
     }
-    for (const artifactKey of firstLoop.artifact_keys) {
-      const owner = allArtifactKeys.get(artifactKey);
-      if (owner === undefined || !firstLoop.scenario_ids.includes(owner)) {
-        issues.push(issue("first_loop_artifact_mismatch", "/manifest/vertical_loops/ios.first-snapshot-loop/artifact_keys", `First-loop artifact must belong to a referenced shared scenario: ${artifactKey}`));
-      }
+    if (!sameSet(firstLoop.artifact_keys, requiredFirstLoopArtifactKeys)) {
+      issues.push(issue("first_loop_artifact_mismatch", "/manifest/vertical_loops/ios.first-snapshot-loop/artifact_keys", `First iOS loop must retain exactly: ${requiredFirstLoopArtifactKeys.join(", ")}`));
+    }
+  }
+
+  const androidFirstLoop = manifest.vertical_loops.find(
+    (loop) => loop.loop_id === "android.first-snapshot-loop"
+  );
+  if (androidFirstLoop === undefined) {
+    issues.push(issue("missing_first_android_loop", "/manifest/vertical_loops", "Missing android.first-snapshot-loop acceptance contract"));
+  } else {
+    if (androidFirstLoop.platform !== "android") {
+      issues.push(issue("android_first_loop_platform_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/platform", "First Android snapshot loop must target Android"));
+    }
+    if (androidFirstLoop.status !== "verified") {
+      issues.push(issue("android_first_loop_status_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/status", "The first Android snapshot loop must remain verified"));
+    }
+    if (!sameSet(androidFirstLoop.stages, requiredFirstLoopStages)) {
+      issues.push(issue("android_first_loop_stage_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/stages", `First Android loop must cover: ${requiredFirstLoopStages.join(", ")}`));
+    }
+    if (!sameSet(androidFirstLoop.scenario_ids, requiredFirstLoopScenarioIds)) {
+      issues.push(issue("android_first_loop_scenario_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/scenario_ids", `First Android loop must reference exactly: ${requiredFirstLoopScenarioIds.join(", ")}`));
+    }
+    if (!sameSet(androidFirstLoop.required_capabilities, requiredFirstLoopCapabilities)) {
+      issues.push(issue("android_first_loop_capability_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/required_capabilities", `First Android loop must require exactly: ${requiredFirstLoopCapabilities.join(", ")}`));
+    }
+    if (!sameSet(androidFirstLoop.artifact_keys, requiredFirstLoopArtifactKeys)) {
+      issues.push(issue("android_first_loop_artifact_mismatch", "/manifest/vertical_loops/android.first-snapshot-loop/artifact_keys", `First Android loop must retain exactly: ${requiredFirstLoopArtifactKeys.join(", ")}`));
     }
   }
 

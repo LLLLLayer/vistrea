@@ -46,30 +46,71 @@ test("the manifest freezes required shared IDs, profiles, and platform parity", 
       [...scenario.platform_support.android.capabilities].sort()
     );
   }
+
+  for (const platform of ["ios", "android"]) {
+    assert.equal(suite.manifest.platforms[platform].implementation_status, "in-progress");
+    assert.equal(suite.manifest.platforms[platform].capabilities["runtime.snapshot"], "verified");
+    assert.equal(suite.manifest.platforms[platform].capabilities["runtime.connection"], "verified");
+  }
 });
 
-test("the first iOS loop covers SDK to Host to Studio to Data reopen with shared artifacts", async () => {
+test("both native first loops cover SDK to Host to Studio to Data reopen with shared artifacts", async () => {
   const suite = await loadScenarioSuite();
-  const loop = suite.manifest.vertical_loops.find(
-    (candidate) => candidate.loop_id === "ios.first-snapshot-loop"
+  const loops = new Map(
+    suite.manifest.vertical_loops.map((loop) => [loop.loop_id, loop])
   );
 
-  assert.equal(loop.platform, "ios");
-  assert.deepEqual(loop.scenario_ids, ["demo.navigation.basic"]);
-  assert.deepEqual(loop.required_capabilities.sort(), ["runtime.connection", "runtime.snapshot"]);
-  assert.deepEqual(loop.stages, [
-    "demo-app-launch",
-    "sdk-connect",
-    "snapshot-capture",
-    "host-receive",
-    "studio-render",
-    "data-persist",
-    "data-reopen"
+  assert.deepEqual([...loops.keys()].sort(), [
+    "android.first-snapshot-loop",
+    "ios.first-snapshot-loop"
   ]);
-  assert.deepEqual(loop.artifact_keys, [
-    "demo.navigation.basic.snapshot.home",
-    "demo.navigation.basic.screenshot.home"
-  ]);
+  for (const [platform, loopId] of [
+    ["ios", "ios.first-snapshot-loop"],
+    ["android", "android.first-snapshot-loop"]
+  ]) {
+    const loop = loops.get(loopId);
+    assert.equal(loop.platform, platform);
+    assert.equal(loop.status, "verified");
+    assert.deepEqual(loop.scenario_ids, ["demo.navigation.basic"]);
+    assert.deepEqual([...loop.required_capabilities].sort(), [
+      "runtime.connection",
+      "runtime.snapshot"
+    ]);
+    assert.deepEqual(loop.stages, [
+      "demo-app-launch",
+      "sdk-connect",
+      "snapshot-capture",
+      "host-receive",
+      "studio-render",
+      "data-persist",
+      "data-reopen"
+    ]);
+    assert.deepEqual(loop.artifact_keys, [
+      "demo.navigation.basic.snapshot.home",
+      "demo.navigation.basic.screenshot.home"
+    ]);
+  }
+});
+
+test("semantic validation requires verified capabilities for every verified loop", async () => {
+  const suite = structuredClone(await loadScenarioSuite());
+  suite.manifest.platforms.android.capabilities["runtime.connection"] = "implemented";
+
+  const issues = validateSuiteSemantics(suite);
+
+  assert.equal(codes(issues).has("verified_loop_capability_unverified"), true);
+});
+
+test("semantic validation preserves the exact Android first-loop contract", async () => {
+  const suite = structuredClone(await loadScenarioSuite());
+  const loop = suite.manifest.vertical_loops.find(
+    (candidate) => candidate.loop_id === "android.first-snapshot-loop"
+  );
+  loop.stages = loop.stages.filter((stage) => stage !== "studio-render");
+
+  const issues = validateSuiteSemantics(suite);
+
+  assert.equal(codes(issues).has("android_first_loop_stage_mismatch"), true);
 });
 
 test("semantic validation rejects dangling state references", async () => {

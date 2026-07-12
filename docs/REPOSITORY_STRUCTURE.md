@@ -31,7 +31,15 @@ vistrea/
 ├── pnpm-lock.yaml
 ├── apps/
 │   ├── README.md
-│   └── studio-macos/
+│   ├── host/                    # production Host composition and Local API
+│   │   ├── README.md
+│   │   ├── local-api.ts
+│   │   ├── local-host.ts
+│   │   └── serve.ts
+│   └── studio-macos/            # native SwiftUI Snapshot workspace
+│       ├── Package.swift
+│       ├── Sources/
+│       ├── Tests/
 │       └── README.md
 ├── protocol/
 │   ├── README.md
@@ -46,15 +54,26 @@ vistrea/
 ├── sdks/
 │   ├── README.md
 │   ├── ios/
+│   │   ├── Package.swift
+│   │   ├── Sources/             # models, UIKit capture, Runtime connection
+│   │   ├── Tests/
 │   │   └── README.md
 │   └── android/
+│       ├── runtime-android/      # Android View capture and Debug bridge
+│       ├── runtime-connection/   # protected Runtime transport
+│       ├── src/                  # canonical Kotlin protocol adapter
+│       ├── tools/
+│       ├── build.gradle.kts
+│       ├── settings.gradle.kts
 │       └── README.md
 ├── engine/
 │   ├── README.md
 │   ├── workspace/
 │   │   └── README.md
 │   ├── connection/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── snapshot-engine.ts
+│   │   └── loopback-runtime-transport.ts
 │   ├── automation/
 │   │   └── README.md
 │   ├── exploration/
@@ -74,13 +93,22 @@ vistrea/
 ├── data/
 │   ├── README.md
 │   ├── api/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── models.ts
+│   │   └── ports.ts
+│   ├── internal/                # shared implementation support, not public ports
+│   ├── memory/                  # deterministic reference Data adapter
 │   ├── workspace/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── local-data-workspace.ts
 │   ├── metadata/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── MIGRATIONS.md
+│   │   ├── migrations/
+│   │   └── sqlite-data.ts
 │   ├── objects/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── file-object-store.ts
 │   ├── versioning/
 │   │   └── README.md
 │   ├── search/
@@ -95,12 +123,17 @@ vistrea/
 │       └── README.md
 ├── integrations/
 │   ├── README.md
+│   ├── shared/                  # strict authenticated Host client
 │   ├── cli/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── main.ts
 │   ├── mcp/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── main.ts
+│   │   └── server.ts
 │   ├── skills/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── vistrea-inspect-runtime/
 │   └── ci/
 │       └── README.md
 ├── examples/
@@ -110,10 +143,14 @@ vistrea/
 │   ├── ios/
 │   │   ├── README.md
 │   │   └── VistreaDemoApp/
+│   │       ├── Sources/
+│   │       ├── UITests/
 │   │       └── README.md
 │   └── android/
 │       ├── README.md
 │       └── VistreaDemoApp/
+│           ├── app/
+│           ├── tools/
 │           └── README.md
 ├── tests/
 │   ├── README.md
@@ -122,9 +159,14 @@ vistrea/
 │   │   ├── protocol-fixtures.test.mjs
 │   │   └── strict-json.test.mjs
 │   ├── integration/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── agent-adapters.test.ts
+│   │   ├── ios-runtime-client-interop.test.ts
+│   │   └── android-runtime-client-interop.test.ts
 │   └── e2e/
-│       └── README.md
+│       ├── README.md
+│       ├── ios-real-vertical-loop.test.ts
+│       └── android-real-vertical-loop.test.ts
 ├── tools/
 │   ├── README.md
 │   └── protocol/
@@ -186,6 +228,8 @@ vistrea/
 | `engine/versioning/` | Commit, ref, tag, baseline, diff, and history use cases | Physical version tables or object persistence |
 | `engine/sync/` | Fetch, pull, push, publish, subscribe, and conflict-resolution use cases | Low-level Hub HTTP or object-transfer implementation |
 | `data/api/` | Repository, query, transaction, object, version, search, and sync ports | Concrete SQL, file layout, or remote provider logic |
+| `data/internal/` | Reusable implementation support hidden behind Data ports | Public contracts or product behavior |
+| `data/memory/` | Deterministic reference adapter and fixture-backed Data composition | Production persistence or private protocol variants |
 | `data/workspace/` | Local Workspace lifecycle and composition | Product use cases |
 | `data/metadata/` | SQLite schema, migrations, transactions, metadata queries | Large binary artifacts or domain decisions |
 | `data/objects/` | Content-addressed artifact persistence and lifecycle | Screen State identity or review rules |
@@ -193,6 +237,7 @@ vistrea/
 | `data/search/` | Rebuildable search indexes | Authoritative product data |
 | `data/sync/` | Client push/pull and object negotiation | Hub authorization implementation |
 | `data/exchange/` | `.vistrea-pack` and generated exports | Independent sharing protocol |
+| `apps/host/` | Production Host composition, Runtime session routing, and authenticated loopback Local API | Product UI, private protocol models, direct UI behavior |
 | `apps/studio-macos/` | Presentation, interaction, navigation, and composition root | SQL, artifact paths, duplicated Engine behavior |
 | `services/hub/` | Shared commits, objects, namespaces, RBAC, audit, discovery | Required local product behavior |
 | `integrations/` | CLI, MCP, Skills, and CI adapters | Reimplemented Engine or Data logic |
@@ -257,6 +302,7 @@ Runtime data is not source code:
 ```text
 .vistrea/
 ├── workspace.json
+├── .host.lock
 ├── metadata.sqlite
 ├── objects/
 ├── refs/
@@ -264,21 +310,22 @@ Runtime data is not source code:
 └── cache/
 ```
 
-The entire `.vistrea/` directory is ignored. Portable exchange uses a defined `.vistrea-pack`, not a raw copy of a live SQLite database.
+The entire `.vistrea/` directory is ignored. SQLite metadata and content-addressed object storage are implemented and verified. Portable exchange will use a defined `.vistrea-pack`, not a raw copy of a live SQLite database; that exchange implementation is still pending.
 
-## 7. When module-internal projects are created
+## 7. Implemented toolchains and future projects
 
-The repository currently records stable responsibility boundaries without choosing every toolchain. Generate Xcode projects, Swift packages, Gradle modules, Host packages, and Hub deployment files only after the relevant ADRs decide:
+The first implementation keeps the language-neutral contracts while using toolchains suited to each boundary:
 
-- schema format and code generation;
-- first vertical platform;
-- SDK-to-Host transport;
-- Host implementation language;
-- macOS UI stack;
-- local storage and migration tooling;
-- Hub service stack and deployment.
+- JSON Schema Draft 2020-12 plus canonical fixtures for protocol v1;
+- Node.js and strict TypeScript for the Host, Engine slice, Data implementations, CLI, and MCP;
+- `better-sqlite3` with exact-byte forward-only migrations for metadata;
+- file-backed SHA-256 content-addressed objects;
+- Swift Package Manager for iOS Runtime modules and native SwiftUI Studio;
+- Gradle/Kotlin Android libraries with Debug/Internal Runtime transport excluded from Release artifacts;
+- UIKit and Android View as the verified initial native adapters;
+- authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API.
 
-After project generation, preserve the documented public boundaries even if physical source layout follows toolchain conventions.
+Future SwiftUI/Compose capture adapters, automation providers, portable exchange, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

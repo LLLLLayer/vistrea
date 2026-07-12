@@ -31,9 +31,15 @@ The canonical model target does not import UIKit or Core Graphics.
 - uses bounded strict UTF-8 JSON-lines, rejects duplicate keys after escape decoding, and applies the Host-advertised line, Object, and chunk limits;
 - accepts `capture_request`, returns the canonical `RuntimeSnapshot`, then transfers canonical `ObjectReference` payloads in declared order with Base64 chunks;
 - verifies every Object byte count, SHA-256 identity, and Snapshot association before transfer;
-- handles Host cancellation, disconnect, transport failure, and concurrent request bounds without logging credentials.
+- arbitrates cancellation against completion or failure so each capture emits exactly one terminal frame and a crossing late cancel remains a best-effort no-op;
+- handles disconnect, transport failure, and concurrent request bounds without logging credentials.
 
 `RuntimeSnapshotCaptureProvider` is the injectable observation boundary. The package tests and Swift/Node interoperability executable use fixture providers. The separate `VistreaRuntimeUIKitConnection` bridge target adapts that port to `UIKitRuntimeCaptureAdapter` on the main actor without making the observation-only UIKit target depend on transport.
+
+The initial UIKit bridge accepts only `trees` with screenshot mode `none`, or
+`trees` plus `screenshot` with mode `reference`. It rejects unsupported or
+contradictory field masks as a capture failure instead of silently ignoring
+them; the authenticated connection remains available for a corrected request.
 
 Build eligibility is compile-time protected. Debug builds accept Debug/Internal declarations. An explicit `VISTREA_INTERNAL_RUNTIME` Swift compilation condition accepts only Internal declarations. Other builds, including Release, reject configuration before opening a socket even if runtime input claims to be Debug.
 

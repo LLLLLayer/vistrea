@@ -14,9 +14,9 @@
       "implementation_status": "in-progress",
       "initial_adapter": "uikit",
       "capabilities": {
-        "runtime.snapshot": "implemented",
+        "runtime.snapshot": "verified",
         "runtime.events": "planned",
-        "runtime.connection": "planned",
+        "runtime.connection": "verified",
         "automation.actions": "planned",
         "automation.safety": "planned",
         "exploration.graph": "planned",
@@ -32,9 +32,9 @@
       "implementation_status": "in-progress",
       "initial_adapter": "view-viewgroup",
       "capabilities": {
-        "runtime.snapshot": "implemented",
+        "runtime.snapshot": "verified",
         "runtime.events": "planned",
-        "runtime.connection": "planned",
+        "runtime.connection": "verified",
         "automation.actions": "planned",
         "automation.safety": "planned",
         "exploration.graph": "planned",
@@ -44,9 +44,7 @@
         "validation.rules": "planned",
         "validation.build-diff": "planned"
       },
-      "limitations": [
-        "The canonical View capture adapter is implemented and instrumented; the Demo Inspector and Host Runtime connection are not yet composed."
-      ]
+      "limitations": []
     }
   },
   "profiles": [
@@ -232,7 +230,32 @@
     {
       "loop_id": "ios.first-snapshot-loop",
       "platform": "ios",
-      "status": "planned",
+      "status": "verified",
+      "scenario_ids": [
+        "demo.navigation.basic"
+      ],
+      "required_capabilities": [
+        "runtime.snapshot",
+        "runtime.connection"
+      ],
+      "artifact_keys": [
+        "demo.navigation.basic.snapshot.home",
+        "demo.navigation.basic.screenshot.home"
+      ],
+      "stages": [
+        "demo-app-launch",
+        "sdk-connect",
+        "snapshot-capture",
+        "host-receive",
+        "studio-render",
+        "data-persist",
+        "data-reopen"
+      ]
+    },
+    {
+      "loop_id": "android.first-snapshot-loop",
+      "platform": "android",
+      "status": "verified",
       "scenario_ids": [
         "demo.navigation.basic"
       ],

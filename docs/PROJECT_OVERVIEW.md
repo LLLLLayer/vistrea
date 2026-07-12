@@ -98,13 +98,15 @@ Initial platform sources:
 | Android View | Activity, Fragment, Window, ViewGroup | Resource ID and accessibility |
 | Android Compose | Semantics Tree and TestTag | Host View and explicit semantics |
 
+The current verified native slice covers UIKit and Android View hierarchy capture, synchronized PNG screenshots, protected Debug/Internal Runtime connection, and canonical Snapshot delivery to the local Host. SwiftUI, Compose, Runtime Event Batch capture, and reversible tuning remain follow-up adapters or capabilities.
+
 The SDK observes. It must not bypass real UI paths by calling arbitrary business methods.
 
 ### 2.3 In-app Inspector
 
 The Inspector is available only in protected internal builds and shares protocol models with Studio.
 
-Planned capabilities:
+The current Debug Demo Inspectors expose a native tree and basic runtime evidence. The broader Inspector capabilities remain planned:
 
 - select a node directly on screen;
 - inspect hierarchy and properties;
@@ -133,6 +135,8 @@ It manages:
 
 Device automation performs real tap, type, swipe, back, launch, and system UI interaction. SDK-reported nodes may guide targeting, but the action still occurs through the real automation layer.
 
+The implemented Host slice currently owns authenticated loopback Runtime sessions, canonical Snapshot capture/get/list use cases, ordered Object-before-metadata persistence, the loopback Local API, and production local Workspace composition. Automation, exploration, design, knowledge, validation, versioning workflows above the Data ports, and Hub sync remain future Engine slices.
+
 ### 2.5 Vistrea Studio for macOS
 
 Studio is the primary user workspace.
@@ -150,6 +154,8 @@ It includes:
 - Coding Agent integration and deep links.
 
 Studio composes Engine use cases. Views and ViewModels must not access SQLite, object paths, automation implementations, or Hub transport directly.
+
+The current native SwiftUI Studio implements the first Snapshot workspace: Host status, capture and list, screenshot evidence, 2D UI tree, node properties, scenario/build/source context, and explicit loading/error states. Canvas, Deep Wiki, event timeline, design review, tuning, validation, build diff, and sync screens remain planned.
 
 ### 2.6 Design review and UI tuning
 
@@ -205,7 +211,7 @@ The Deep Wiki is not just a canvas. It must be persistent, searchable, linked, v
 
 ### 2.8 Native Demo Apps
 
-Vistrea will include canonical native Demo Apps for iOS and Android. Their shared scenarios are specified now, but neither application has been implemented yet. The completed applications will be executable contract fixtures, not marketing samples.
+Vistrea includes canonical native Demo Apps for iOS and Android. Both applications implement all 12 required shared Scenario IDs and act as executable contract fixtures, not marketing samples. The `demo.navigation.basic` Runtime Snapshot path is verified end to end on iOS UIKit and Android View; the remaining scenarios currently define deterministic acceptance contracts for later capabilities.
 
 Both applications must implement the same required Scenario IDs for:
 
@@ -221,7 +227,7 @@ Both applications must implement the same required Scenario IDs for:
 - dangerous-action blocking;
 - new-feature and regression build diff.
 
-UIKit and View/ViewGroup are the first planned adapters. SwiftUI and Compose scenarios are explicit later adapters. Platform-specific scenarios use namespaced IDs and never replace the shared core set.
+UIKit and View/ViewGroup are the implemented initial adapters. SwiftUI and Compose scenarios are explicit later adapters. Platform-specific scenarios use namespaced IDs and never replace the shared core set.
 
 ## 3. Core model
 
@@ -389,7 +395,9 @@ Vistrea exposes the same Engine use cases through:
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-Initial Skill concepts:
+The implemented Agent slice provides strict JSON CLI commands and MCP tools for Workspace status plus Snapshot capture, list, and get. Both use the same authenticated Host Local API client, and the `vistrea-inspect-runtime` Skill composes status, capture, and persisted inspection without accessing SQLite or artifact paths. Exploration, design review, tuning, validation, versioning, and Hub operations remain future adapter work.
+
+Additional Skill concepts:
 
 - explore a bounded UI area and update the Deep Wiki;
 - review a Screen State against a design baseline;
@@ -446,23 +454,21 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 
 ## 11. Delivery roadmap
 
-### Phase 0: contracts and local data foundation
+### Phase 0: contracts and local data foundation — in progress
 
-- define core runtime, design, version, and object models;
-- define common, Runtime connection, automation, Engine, Data, Agent, and Hub interfaces;
-- select schema format and compatibility rules;
-- define Data API;
-- implement SQLite metadata and content-addressed local objects;
-- implement minimal Commit/Ref and `.vistrea-pack`.
+- Core runtime, design, version, and object models are verified as protocol v1 schemas and fixtures.
+- Common, Runtime connection, automation, Engine, Data, Agent, and Hub interfaces are documented.
+- The language-owned Data API, in-memory reference adapter, SQLite metadata, content-addressed local Object Store, and Commit/Ref persistence are verified.
+- Portable `.vistrea-pack` exchange remains incomplete, so Phase 0 is not complete.
 
-### Phase 1: first vertical loop
+### Phase 1: native Snapshot loops — verified for UIKit and Android View
 
-- choose iOS UIKit or Android View;
-- implement the first shared Demo App scenarios on the selected platform;
-- capture one Runtime Snapshot;
-- connect SDK to macOS Host;
-- display screenshot and node tree;
-- persist and reopen the Snapshot through the Data Layer.
+- Both native Demo Apps implement the required shared Scenario IDs.
+- Real UIKit and Android View adapters capture canonical Runtime Snapshots and PNG evidence.
+- Protected Runtime clients connect to the production macOS Host.
+- Snapshot Studio renders screenshot, tree, node, and source context.
+- SQLite metadata and content-addressed objects persist and reopen the identical Snapshot.
+- CLI reads the same persisted result; platform implementation remains in progress beyond Snapshot and connection capabilities.
 
 ### Phase 2: SDKs, Inspector, and design workflow
 
@@ -486,10 +492,9 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 - 3D View/Layer Inspector;
 - failure evidence replay.
 
-### Phase 5: Agents and Vistrea Hub
+### Phase 5: expanded Agents and Vistrea Hub
 
-- stable CLI and machine-readable output;
-- MCP tools and real Skills;
+- extend the initial Snapshot CLI, MCP, and Skill adapters to all stable Engine use cases;
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
 
@@ -512,18 +517,15 @@ A meaningful first complete demonstration should:
 
 ## 13. Open decisions
 
-- first vertical platform: iOS UIKit or Android View;
-- SDK-to-Host local transport;
-- primary Host Engine implementation language;
-- macOS UI stack and packaging;
-- exact SQLite schema and migration tooling;
 - Screen State fingerprint and dynamic-field normalization;
 - initial design source: image, local file, Figma, or approved build;
 - design-to-runtime node mapping strategy;
 - initial tuning-property allowlist;
-- automation lifecycle ownership;
+- initial WDA/UIAutomator provider packaging and device lifecycle;
 - View-only versus View-and-Layer first 3D scope;
-- first implemented CLI/MCP operation set and first real Skills;
+- portable `.vistrea-pack` thin-pack and redaction policy;
+- packaging and distribution for the macOS Studio and native SDK artifacts;
+- expanded CLI/MCP/Skill operation rollout after Snapshot inspection;
 - Hub deployment, identity, permissions, and storage providers.
 
 These choices may evolve without changing the central definition: Vistrea connects runtime structure, design review and tuning, real exploration, versioned knowledge, validation, and Agent workflows around one shared application UI fact base.

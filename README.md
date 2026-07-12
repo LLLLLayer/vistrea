@@ -52,11 +52,11 @@ Studio / CLI / MCP / Skills <-> Engine Use Cases
 Engine <-> Data API <-> Local Workspace / Hub Sync
 ```
 
-The initial interface specifications define shared IDs, errors, operation behavior, SDK transport semantics, device actions, Engine commands and queries, Data ports, Agent surfaces, and Hub synchronization before a concrete IDL or implementation language is selected.
+The interface specifications define shared IDs, errors, operation behavior, SDK transport semantics, device actions, Engine commands and queries, Data ports, Agent surfaces, and Hub synchronization. Protocol v1 is executable as JSON Schema and canonical fixtures. The current implementation uses a Node.js/TypeScript Host and Data stack, Swift packages for iOS and Studio, and Gradle/Kotlin modules for Android without changing those language-neutral boundaries.
 
-## Executable Demo Apps
+## Native Demo Apps
 
-Planned native iOS and Android Demo Apps will implement the same cross-platform Scenario IDs. They will become executable contract fixtures for SDK capture, connection, automation, transient events, exploration, design review, tuning, validation, and build diff.
+The native iOS UIKit and Android View Demo Apps implement the same 12 required cross-platform Scenario IDs. Both now provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage. The remaining scenario contracts continue to stage later event, automation, exploration, design, tuning, validation, and build-diff work.
 
 - `examples/ios/VistreaDemoApp/`
 - `examples/android/VistreaDemoApp/`
@@ -76,18 +76,20 @@ Planned native iOS and Android Demo Apps will implement the same cross-platform 
 
 ## Recommended implementation sequence
 
-1. Stabilize protocol models, common contracts, and shared Demo scenarios.
-2. Implement Data API, SQLite metadata, and the local content-addressed Object Store.
-3. Complete one native Demo App vertical loop through SDK, Host connection, Studio, and persistence.
-4. Add Inspector, design review, and reversible tuning.
-5. Add automation, exploration, Canvas, Deep Wiki, validation, and build diff.
-6. Expose stable CLI/MCP operations, create real Skills, and implement Hub synchronization.
+1. Complete portable `.vistrea-pack` exchange over the verified protocol and local Data foundation.
+2. Add Runtime events plus protected design review and reversible tuning.
+3. Add WDA/UIAutomator actions, exploration, and Screen State identity.
+4. Persist Canvas and Deep Wiki knowledge, then add validation and build diff.
+5. Expand CLI, MCP, Skills, and CI with those Engine use cases.
+6. Implement optional Vistrea Hub synchronization after local semantics are stable.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
 ## Current status
 
-The repository is in Phase 0. Phase 0A1 and Phase 0A2 are complete: the shared `DataUnitOfWork` model surface now has machine-readable JSON Schemas, 78 canonical fixtures, aggregate semantic validation, a model coverage manifest, and contract tests. Phase 0B will turn the documented Data ports into language-owned contracts and a deterministic in-memory reference adapter. No platform project, storage engine, Runtime SDK, Studio application, automation provider, or Hub service has been implemented yet.
+Phase 0A1, Phase 0A2, and the Phase 0B local Data foundation are verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 78 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, and a file-backed content-addressed Object Store. Phase 0 remains open because portable `.vistrea-pack` exchange is not implemented.
+
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View. A production local Host, macOS Snapshot Studio, strict CLI, stdio MCP server, and `vistrea-inspect-runtime` Skill consume the same persisted Snapshot path. This does not yet implement Runtime events, device automation, exploration, design tuning, full Canvas or Deep Wiki workflows, `.vistrea-pack`, CI validation, or Vistrea Hub.
 
 Run the current executable checks with:
 

@@ -17,7 +17,7 @@ All JSON uses `application/json; charset=utf-8`. Successful Snapshot responses a
 
 | Method | Route | Success body |
 |---|---|---|
-| `GET` | `/v1/status` | `{ "status": "ready" | "degraded", "runtime_connected": true, "message"?: string }` |
+| `GET` | `/v1/status` | `{ "status": "ready" | "degraded", "runtime_connected": boolean, "message"?: string }` |
 | `GET` | `/v1/snapshots?limit=<1..500>&cursor=<opaque>` | `{ "items": SnapshotSummary[], "next_cursor"?: string, "snapshot_version"?: string }` |
 | `GET` | `/v1/snapshots/<snapshot_id>` | canonical `RuntimeSnapshot` |
 | `POST` | `/v1/captures` | canonical `RuntimeSnapshot` with HTTP `201` |
@@ -34,6 +34,12 @@ All JSON uses `application/json; charset=utf-8`. Successful Snapshot responses a
 ```
 
 The same three fields may be provided explicitly. `screenshot` accepts `none` or `reference`; `reason` accepts `manual`, `before_action`, `after_action`, `review`, or `validation`. Unknown fields fail with `invalid_argument`.
+
+The initial UIKit and Android View providers currently accept exactly the
+`trees` field set with `screenshot: "none"`, or the `trees` plus `screenshot`
+field set with `screenshot: "reference"`. Field order is irrelevant. An
+unsupported field mask produces a sanitized capture failure while the
+authenticated Runtime session remains usable.
 
 Object reads support one RFC 9110-style `bytes` range, including bounded, open-ended, and suffix forms. Multiple or unsatisfiable ranges return HTTP `416` and `Content-Range: bytes */<size>`. Payload bytes remain the exact encoded bytes identified by the canonical `ObjectRef`; the HTTP adapter does not transparently decompress them.
 

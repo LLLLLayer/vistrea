@@ -96,9 +96,9 @@ Profiles use local fixture data and fixed or profile-seeded clocks. Native imple
 
 Per-scenario `platform_support` describes required capabilities, not current implementation completion. The validator checks that both platforms are required and that every requested capability is declared by the platform status matrix.
 
-## First iOS vertical loop
+## Verified native Snapshot loops
 
-The manifest defines a planned `ios.first-snapshot-loop` acceptance slice using the shared `demo.navigation.basic` scenario. It requires the same logical Home Snapshot and screenshot to pass through:
+The manifest defines symmetric `ios.first-snapshot-loop` and `android.first-snapshot-loop` acceptance slices using the shared `demo.navigation.basic` scenario. Each verified loop requires the same logical Home Snapshot and screenshot to pass through:
 
 ```text
 Demo App launch
@@ -110,7 +110,7 @@ Demo App launch
 -> Data reopen
 ```
 
-This records coverage for the first iOS SDK-to-Data loop without making UIKit fields canonical. Its status remains `planned` until real native, Host, Studio, and persistence evidence verifies every stage.
+Both loop statuses are `verified`. Their real-device acceptance tests validate canonical protocol structure, the required `demo.home.open_catalog` stable node, PNG object integrity, Studio presentation, CLI equality, production SQLite/Object Store reopen, credential rotation, and secret-free artifacts. This evidence verifies the native Snapshot and Runtime connection capabilities; each platform remains `in-progress` because events, automation, exploration, design tuning, and validation are not implemented.
 
 ## Validation
 
@@ -122,7 +122,7 @@ node examples/scenarios/validate.mjs
 node --test examples/scenarios/tests/*.test.mjs
 ```
 
-The validator compiles both schemas with strict Ajv settings, validates every manifest-owned fixture, rejects fixture drift, checks all local references, recomputes build-diff summaries, verifies deterministic artifact coverage, and enforces the first iOS vertical-loop contract.
+The validator compiles both schemas with strict Ajv settings, validates every manifest-owned fixture, rejects fixture drift, checks all local references, recomputes build-diff summaries, verifies deterministic artifact coverage, and enforces both native first-loop contracts. A loop cannot be marked `verified` unless every capability it requires is also `verified` for that platform.
 
 ## Native implementation handoff
 

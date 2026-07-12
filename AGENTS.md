@@ -13,6 +13,64 @@ Before designing, implementing, or splitting work, read:
 7. `docs/product/STUDIO_INTERACTIONS.md` before Studio UI or workflow work
 8. `docs/DEVELOPMENT_PROGRESS.md` to understand current implementation truth
 
+## Toolchains and build layout
+
+- Host stack (`data/`, `engine/`, `apps/host/`, `integrations/`, `tests/`, `tools/`): Node.js >= 22.14 with pnpm 10.33.0 and strict TypeScript. `pnpm build:host` compiles every TypeScript module into `.build/typescript/` and copies the exact-byte SQLite migrations. Host contract, integration, and e2e tests execute the emitted JavaScript, not the sources, so they require that build (the `pnpm test:host-*` scripts run it first).
+- `sdks/ios/` and `apps/studio-macos/` are Swift 6 SwiftPM packages. Studio depends on the iOS SDK package for canonical Runtime models and must stay behind its `HostClient` abstraction.
+- `sdks/android/` and `examples/android/VistreaDemoApp/` are separate Gradle builds with pinned, checksum-verified wrappers. They need JDK 17 and `ANDROID_HOME` (typically `$HOME/Library/Android/sdk`).
+- `examples/ios/VistreaDemoApp/` is an Xcode project generated from `project.yml` with `xcodegen generate`; never hand-edit the generated `.xcodeproj`.
+- There is no ESLint; `pnpm typecheck` is the TypeScript lint gate. Android uses Android Lint (`lintDebug`).
+
+## Common commands
+
+Repository root (host stack):
+
+```bash
+pnpm install --frozen-lockfile   # reproducible install
+pnpm check                # full CI gate: protocol + scenarios + typecheck + contract + host + scenario tests
+pnpm typecheck            # strict tsc, no emit
+pnpm protocol:validate    # schemas, fixtures, and model coverage
+pnpm scenarios:validate   # shared Demo scenario manifest and fixtures
+pnpm test:contract        # protocol contract tests (tests/contract/*.test.mjs, no build step)
+pnpm test:host-contract   # Data API, SQLite, and Object Store contracts (builds first)
+pnpm test:host-integration # Engine, Runtime transport, and Workspace integration (builds first)
+pnpm test:scenarios       # scenario suite tests
+```
+
+Single test file: `node --test tests/contract/<file>.test.mjs` for protocol tests; for TypeScript-backed tests, `pnpm build:host && node --test .build/typescript/tests/integration/<file>.test.js`. Filter cases inside a file with `node --test --test-name-pattern "<pattern>" <file>`.
+
+Real-device end-to-end loops are opt-in and create dedicated temporary devices: `pnpm test:e2e:ios-real-vertical` needs an installed iOS Simulator runtime, while `pnpm test:e2e:android-real-vertical` needs an installed API 36+ AVD. The scripts set the required `VISTREA_RUN_*` gate variables.
+
+Swift packages, from the repository root:
+
+```bash
+swift test --package-path sdks/ios
+swift test --package-path apps/studio-macos
+swift run --package-path apps/studio-macos VistreaStudio   # fixture-backed when no Host is configured
+```
+
+Android SDK, from `sdks/android/` with `ANDROID_HOME` exported:
+
+```bash
+./gradlew test :runtime-connection:testDebugUnitTest \
+  :runtime-android:assembleDebug :runtime-android:assembleRelease \
+  :runtime-android:lintDebug
+./gradlew :runtime-android:connectedDebugAndroidTest   # instrumented; needs a device or emulator
+./tools/verify-runtime-release-boundary.sh             # proves the Release AAR/APK ships no Runtime client
+```
+
+Android Demo App, from `examples/android/VistreaDemoApp/`: `./gradlew assembleDebug assembleRelease test lintDebug`. In either Gradle build, a single test class runs with `./gradlew <module>:testDebugUnitTest --tests "<ClassName>"`.
+
+iOS Demo App, from `examples/ios/VistreaDemoApp/`:
+
+```bash
+xcodegen generate
+xcodebuild -project VistreaDemoApp.xcodeproj -scheme VistreaDemoApp \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' test
+```
+
+Local product loop: `node .build/typescript/apps/host/serve.js --workspace <abs-path> --connection-file <abs-path>` starts the authenticated loopback Host and writes rotating credentials to a mode-0600 descriptor. The CLI (`node .build/typescript/integrations/cli/main.js`) and MCP server (`node .build/typescript/integrations/mcp/main.js`) consume it through `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` environment variables only — tokens never go in argv, logs, or commits. Exact flows live in `apps/host/README.md`, `integrations/cli/README.md`, and `integrations/mcp/README.md`.
+
 ## Language
 
 - Use English for source code, comments, identifiers, README files, architecture documents, ADRs, schemas, tests, generated project content, commit messages, and pull-request content.
