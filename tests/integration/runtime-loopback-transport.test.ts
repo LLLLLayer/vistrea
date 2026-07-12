@@ -585,9 +585,10 @@ test("advertised maximum chunk fits inside the bounded JSON-line envelope", asyn
   await host.close();
 });
 
-test("abort sends capture_cancel and disconnect rejects pending capture", async () => {
+test("abort drains a crossing completion and disconnect rejects pending capture", async () => {
   const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
   const ready = await authenticateRuntime(host);
+  const fixture = await loadWireFixture();
 
   const controller = new AbortController();
   const cancelledCapture = ready.session.captureSnapshot(captureCommand, {
@@ -600,10 +601,30 @@ test("abort sends capture_cancel and disconnect rejects pending capture", async 
   const cancelMessage = await withTimeout(ready.peer.next());
   assert.equal(cancelMessage["type"], "capture_cancel");
   assert.equal(cancelMessage["request_id"], firstRequest["request_id"]);
+  // Completion won at the Runtime just before it observed the Host cancel. The
+  // cancelled caller stays cancelled, while the crossing bounded frames are
+  // drained instead of poisoning the authenticated session.
   ready.peer.send({
-    type: "capture_cancelled",
+    type: "capture_result",
+    request_id: firstRequest["request_id"],
+    snapshot: fixture.snapshot,
+    objects: [],
+  });
+  ready.peer.send({
+    type: "capture_complete",
     request_id: firstRequest["request_id"],
   });
+
+  const followingCapture = ready.session.captureSnapshot(captureCommand);
+  const followingRequest = await withTimeout(ready.peer.next());
+  ready.peer.send({
+    type: "capture_error",
+    request_id: followingRequest["request_id"],
+    code: "capture_failed",
+    message: "Runtime capture failed.",
+  });
+  await assert.rejects(followingCapture, transportError("remote_error"));
+  assert.equal(ready.session.state, "ready");
 
   const pendingCapture = ready.session.captureSnapshot(captureCommand);
   await withTimeout(ready.peer.next());

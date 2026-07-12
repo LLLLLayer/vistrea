@@ -677,6 +677,9 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
         this.#captureError(message);
         return;
       }
+      if (this.#drainCancelledCapture(message, type)) {
+        return;
+      }
       const pending = this.#pendingFor(message, type);
       switch (type) {
         case "capture_result":
@@ -763,6 +766,34 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
       );
     }
     return pending;
+  }
+
+  #drainCancelledCapture(
+    message: Readonly<Record<string, unknown>>,
+    type: string,
+  ): boolean {
+    if (
+      type !== "capture_result" &&
+      type !== "object_start" &&
+      type !== "object_chunk" &&
+      type !== "object_end" &&
+      type !== "capture_complete"
+    ) {
+      return false;
+    }
+    const requestId = requireString(message, "request_id", 128);
+    if (!this.#cancelled.has(requestId)) {
+      return false;
+    }
+
+    // Cancellation is best-effort. Frames already committed by the Runtime may
+    // cross the Host's cancel request on the full-duplex channel. Drain only
+    // this cancelled request until one terminal frame arrives; framing remains
+    // bounded and any unrelated or post-tombstone message still fails closed.
+    if (type === "capture_complete") {
+      this.#cancelled.delete(requestId);
+    }
+    return true;
   }
 
   #captureResult(

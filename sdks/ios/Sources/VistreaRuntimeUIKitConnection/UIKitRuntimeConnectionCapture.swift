@@ -30,6 +30,18 @@ public final class UIKitRuntimeSnapshotCaptureProvider: RuntimeSnapshotCapturePr
         _ request: RuntimeCaptureRequest
     ) async throws -> RuntimeSnapshotCapturePayload {
         try Task.checkCancellation()
+        let requestedFields = Set(request.includePaths)
+        let supportedFields: Set<String> = request.screenshot == .reference
+            ? ["trees", "screenshot"]
+            : ["trees"]
+        guard request.includePaths.count == supportedFields.count,
+              requestedFields == supportedFields
+        else {
+            // This first adapter always emits the required canonical tree and
+            // can optionally attach one screenshot. Never silently broaden or
+            // ignore a field mask that the current slice cannot satisfy.
+            throw RuntimeConnectionError.protocolViolation
+        }
         let result = try adapter.capture(
             windows: windowProvider(),
             scenarioID: scenarioIDProvider(),

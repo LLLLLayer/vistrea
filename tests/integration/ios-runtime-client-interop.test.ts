@@ -92,6 +92,36 @@ test(
     ]);
     assert.equal(Buffer.concat(chunks).toString("utf8"), "Vistrea");
 
+    // A cancel can cross the Runtime's already-committed completion on the
+    // full-duplex channel. It is a best-effort no-op and must not create a
+    // second terminal frame or poison the next capture.
+    const followingRequestID = "00000000-0000-4000-8000-000000000002";
+    peer.sendRaw(
+      JSON.stringify({ type: "capture_cancel", request_id: requestID }) +
+        "\n" +
+        JSON.stringify({
+          type: "capture_request",
+          request_id: followingRequestID,
+          command: {
+            include: { paths: ["trees", "screenshot"] },
+            screenshot: "reference",
+            reason: "manual",
+          },
+        }) +
+        "\n",
+    );
+    const followingTypes: string[] = [];
+    while (followingTypes.at(-1) !== "capture_complete") {
+      const message: Readonly<Record<string, unknown>> = await withTimeout(
+        peer.next(),
+        10_000,
+        "post-race capture response",
+      );
+      assert.equal(message["request_id"], followingRequestID);
+      followingTypes.push(stringField(message, "type"));
+    }
+    assert.equal(followingTypes[0], "capture_result");
+
     peer.sendRaw(JSON.stringify({ type: "disconnect" }) + "\nnot-json\n");
     const exit = await withTimeout(childOutput, 10_000, "coalesced disconnect exit");
     assert.equal(exit.code, 0, exit.stderr);
@@ -175,6 +205,17 @@ test(
         include: { paths: ["trees", "screenshot"] },
         screenshot: "reference",
         reason: "review",
+      }),
+      (error: unknown) =>
+        error instanceof LoopbackTransportError && error.code === "remote_error",
+    );
+    assert.equal(session.state, "ready");
+
+    await assert.rejects(
+      session.captureSnapshot({
+        include: { paths: ["trees", "unsupported"] },
+        screenshot: "none",
+        reason: "manual",
       }),
       (error: unknown) =>
         error instanceof LoopbackTransportError && error.code === "remote_error",

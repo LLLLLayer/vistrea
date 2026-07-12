@@ -11,6 +11,15 @@ private actor FixtureCaptureProvider: RuntimeSnapshotCaptureProvider {
     }
 
     func capture(_ request: RuntimeCaptureRequest) async throws -> RuntimeSnapshotCapturePayload {
+        let requestedFields = Set(request.includePaths)
+        let supportedFields: Set<String> = request.screenshot == .reference
+            ? ["trees", "screenshot"]
+            : ["trees"]
+        guard request.includePaths.count == supportedFields.count,
+              requestedFields == supportedFields
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
         if request.reason == .validation {
             try await Task.sleep(nanoseconds: 30_000_000_000)
         }

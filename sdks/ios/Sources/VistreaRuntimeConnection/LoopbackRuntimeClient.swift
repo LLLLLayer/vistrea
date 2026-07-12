@@ -24,6 +24,11 @@ private struct ReceivedNetworkChunk: Sendable {
     let isComplete: Bool
 }
 
+private struct CaptureTaskEntry: Sendable {
+    let token: UUID
+    let task: Task<Void, Never>
+}
+
 /// Authenticated Snapshot-only Runtime client for the Node loopback Host.
 ///
 /// The client is intentionally limited to explicit loopback TCP endpoints and
@@ -46,7 +51,7 @@ public actor LoopbackRuntimeClient {
     private var sessionLimits: RuntimeSessionLimits?
     private var receiveTask: Task<Void, Never>?
     private var handshakeTimeoutTask: Task<Void, Never>?
-    private var captureTasks: [String: Task<Void, Never>] = [:]
+    private var captureTasks: [String: CaptureTaskEntry] = [:]
     private var closeWaiters: [CheckedContinuation<Void, any Error>] = []
     private var terminalError: RuntimeConnectionError?
 
@@ -413,35 +418,39 @@ public actor LoopbackRuntimeClient {
             reason: message.command.reason
         )
         let requestID = message.requestID
+        let token = UUID()
         let task = Task { [weak self] in
             guard let self else {
                 return
             }
-            await self.performCapture(requestID: requestID, request: request)
+            await self.performCapture(requestID: requestID, token: token, request: request)
         }
-        captureTasks[requestID] = task
+        captureTasks[requestID] = CaptureTaskEntry(token: token, task: task)
     }
 
-    private func performCapture(requestID: String, request: RuntimeCaptureRequest) async {
+    private func performCapture(
+        requestID: String,
+        token: UUID,
+        request: RuntimeCaptureRequest
+    ) async {
         do {
             let payload = try await captureProvider.capture(request)
             try Task.checkCancellation()
             let validated = try validate(payload)
-            try await sendCapture(requestID: requestID, payload: validated)
-            captureTasks.removeValue(forKey: requestID)
+            try await sendCapture(requestID: requestID, token: token, payload: validated)
         } catch is CancellationError {
             if Task.isCancelled {
-                captureTasks.removeValue(forKey: requestID)
+                _ = claimCaptureTerminal(requestID: requestID, token: token)
             } else {
-                await reportCaptureFailure(requestID: requestID)
+                await reportCaptureFailure(requestID: requestID, token: token)
             }
         } catch {
-            await reportCaptureFailure(requestID: requestID)
+            await reportCaptureFailure(requestID: requestID, token: token)
         }
     }
 
-    private func reportCaptureFailure(requestID: String) async {
-        guard captureTasks.removeValue(forKey: requestID) != nil,
+    private func reportCaptureFailure(requestID: String, token: UUID) async {
+        guard claimCaptureTerminal(requestID: requestID, token: token),
               state == .ready
         else {
             return
@@ -457,13 +466,25 @@ public actor LoopbackRuntimeClient {
 
     private func cancelCapture(_ message: WireCaptureCancel) async throws {
         guard message.type == "capture_cancel",
-              isRequestID(message.requestID),
-              let task = captureTasks.removeValue(forKey: message.requestID)
+              isRequestID(message.requestID)
         else {
             throw RuntimeConnectionError.protocolViolation
         }
-        task.cancel()
+        guard let entry = captureTasks.removeValue(forKey: message.requestID) else {
+            // Cancellation is best-effort. A completion or failure that already
+            // claimed its terminal frame wins and a crossing late cancel is a no-op.
+            return
+        }
+        entry.task.cancel()
         try await send(WireCaptureCancelled(requestID: message.requestID))
+    }
+
+    private func claimCaptureTerminal(requestID: String, token: UUID) -> Bool {
+        guard captureTasks[requestID]?.token == token else {
+            return false
+        }
+        captureTasks.removeValue(forKey: requestID)
+        return true
     }
 
     private func validate(
@@ -513,6 +534,7 @@ public actor LoopbackRuntimeClient {
 
     private func sendCapture(
         requestID: String,
+        token: UUID,
         payload: RuntimeSnapshotCapturePayload
     ) async throws {
         guard let limits = sessionLimits else {
@@ -564,7 +586,18 @@ public actor LoopbackRuntimeClient {
             )
         }
         try Task.checkCancellation()
-        try await send(WireCaptureComplete(requestID: requestID))
+        guard claimCaptureTerminal(requestID: requestID, token: token) else {
+            throw CancellationError()
+        }
+        do {
+            try await send(WireCaptureComplete(requestID: requestID))
+        } catch let connectionError as RuntimeConnectionError {
+            shutdown(state: .failed, error: connectionError)
+            throw connectionError
+        } catch {
+            shutdown(state: .failed, error: .unavailable)
+            throw RuntimeConnectionError.unavailable
+        }
     }
 
     private func send<Message: Encodable>(_ message: Message) async throws {
@@ -662,8 +695,8 @@ public actor LoopbackRuntimeClient {
         handshakeTimeoutTask = nil
         receiveTask?.cancel()
         receiveTask = nil
-        for task in captureTasks.values {
-            task.cancel()
+        for entry in captureTasks.values {
+            entry.task.cancel()
         }
         captureTasks.removeAll()
         connection?.stateUpdateHandler = nil
