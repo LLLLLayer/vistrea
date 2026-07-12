@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
-import { startLocalHost, type HostLocalApiBindAddress } from "./index.js";
+import {
+  startLocalHost,
+  type HostAutomationConfig,
+  type HostLocalApiBindAddress,
+} from "./index.js";
 
 /** A caller mistake whose message is static and safe to print. */
 class UsageError extends Error {}
@@ -14,6 +18,7 @@ interface ServeArguments {
   readonly host: HostLocalApiBindAddress;
   readonly runtimePort?: number;
   readonly apiPort?: number;
+  readonly automation?: HostAutomationConfig;
 }
 
 interface ConnectionDescriptor {
@@ -42,6 +47,7 @@ async function main(): Promise<void> {
       ? {}
       : { runtimePort: argumentsValue.runtimePort }),
     ...(argumentsValue.apiPort === undefined ? {} : { apiPort: argumentsValue.apiPort }),
+    ...(argumentsValue.automation === undefined ? {} : { automation: argumentsValue.automation }),
     applicationVersion: "0.0.0",
   });
 
@@ -107,7 +113,9 @@ async function main(): Promise<void> {
 function parseArguments(source: readonly string[]): ServeArguments {
   if (source.includes("--help")) {
     process.stdout.write(
-      "Usage: vistrea-host --workspace <path> [--connection-file <path>] [--host 127.0.0.1|::1] [--runtime-port <port>] [--api-port <port>]\n",
+      "Usage: vistrea-host --workspace <path> [--connection-file <path>] [--host 127.0.0.1|::1] " +
+        "[--runtime-port <port>] [--api-port <port>] " +
+        "[--automation adb --automation-serial <serial> [--adb-path <path>] | --automation wda --wda-url <loopback-url>]\n",
     );
     process.exit(0);
   }
@@ -119,6 +127,10 @@ function parseArguments(source: readonly string[]): ServeArguments {
     "--host",
     "--runtime-port",
     "--api-port",
+    "--automation",
+    "--automation-serial",
+    "--adb-path",
+    "--wda-url",
   ]);
   for (let index = 0; index < source.length; index += 2) {
     const name = source[index];
@@ -146,13 +158,46 @@ function parseArguments(source: readonly string[]): ServeArguments {
   const connectionFile = path.resolve(
     values.get("--connection-file") ?? path.join(os.tmpdir(), `vistrea-host-${process.pid}.json`),
   );
+  const automation = automationConfig(values);
   return {
     workspaceRoot: path.resolve(workspace),
     connectionFile,
     host,
     ...optionalPort(values.get("--runtime-port"), "runtimePort"),
     ...optionalPort(values.get("--api-port"), "apiPort"),
+    ...(automation === undefined ? {} : { automation }),
   };
+}
+
+function automationConfig(values: Map<string, string>): HostAutomationConfig | undefined {
+  const kind = values.get("--automation");
+  if (kind === undefined) {
+    if (values.has("--automation-serial") || values.has("--adb-path") || values.has("--wda-url")) {
+      throw new UsageError("Automation flags require --automation adb|wda.");
+    }
+    return undefined;
+  }
+  if (kind === "adb") {
+    const serial = values.get("--automation-serial");
+    if (serial === undefined || serial.length === 0 || values.has("--wda-url")) {
+      throw new UsageError("--automation adb requires --automation-serial and forbids --wda-url.");
+    }
+    const adbPath =
+      values.get("--adb-path") ??
+      path.join(
+        process.env["ANDROID_HOME"] ?? path.join(os.homedir(), "Library/Android/sdk"),
+        "platform-tools/adb",
+      );
+    return { kind: "adb", adbPath, serial };
+  }
+  if (kind === "wda") {
+    const baseUrl = values.get("--wda-url");
+    if (baseUrl === undefined || values.has("--automation-serial") || values.has("--adb-path")) {
+      throw new UsageError("--automation wda requires --wda-url and forbids the adb flags.");
+    }
+    return { kind: "wda", baseUrl };
+  }
+  throw new UsageError("--automation must be adb or wda.");
 }
 
 function optionalPort(

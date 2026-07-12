@@ -105,6 +105,9 @@ export async function runVistreaCli(
           "pack export --json <command>",
           "pack import --file <path>",
           "object get --hash <sha256:...> --output <path>",
+          "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
+          "explore get <operation_id>",
+          "explore cancel <operation_id>",
         ],
         format: "json",
       });
@@ -578,6 +581,51 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
         ...(depth === undefined ? {} : { maximum_depth: Number(depth) }),
         ...(maxPaths === undefined ? {} : { maximum_paths: Number(maxPaths) }),
       },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "explore" && command[1] === "run") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--max-actions", "--max-depth", "--settle", "--exclude", "--actor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const maxActions = requireOption(values, "--max-actions");
+    const maxDepth = values.get("--max-depth");
+    const settle = values.get("--settle");
+    if (
+      !/^[1-9][0-9]{0,2}$/.test(maxActions) ||
+      (maxDepth !== undefined && !/^[1-9][0-9]?$/.test(maxDepth)) ||
+      (settle !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(settle))
+    ) {
+      throw invalidArguments();
+    }
+    const exclude = values.get("--exclude");
+    const actor = values.get("--actor");
+    return invocation(
+      "RunExploration",
+      {
+        maximum_actions: Number(maxActions),
+        ...(maxDepth === undefined ? {} : { maximum_depth: Number(maxDepth) }),
+        ...(settle === undefined ? {} : { settle_milliseconds: Number(settle) }),
+        ...(exclude === undefined ? {} : { excluded_stable_ids: exclude.split(",") }),
+        ...(actor === undefined ? {} : { actor_id: actor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "explore" && command[1] === "get" && command.length === 3) {
+    return invocation(
+      "GetExplorationOperation",
+      { operation_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "explore" && command[1] === "cancel" && command.length === 3) {
+    return invocation(
+      "CancelExploration",
+      { operation_id: command[2] as string },
       timeoutMilliseconds,
     );
   }

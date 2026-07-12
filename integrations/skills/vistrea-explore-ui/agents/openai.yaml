@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explore an app with Vistrea"
+  short_description: "Walk the connected app deterministically and grow the Screen Graph"
+  default_prompt: "Use $vistrea-explore-ui to explore the connected application and summarize the discovered Screen Graph."

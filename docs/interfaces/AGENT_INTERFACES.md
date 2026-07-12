@@ -70,7 +70,7 @@ Long-running commands print or return an `operation_id`. `--wait` may stream NDJ
 
 ## 3. MCP tools
 
-Tool names use the `vistrea_` prefix and map one-to-one to implemented Host operations. The stdio server in `integrations/mcp/server.ts` exposes 46 tools covering Workspace status, Snapshot capture and inspection, the Runtime event timeline, design review, reversible tuning, Screen Graph observations, states, and paths, Deep Wiki nodes and links, validation runs and findings, build diffs, portable pack exchange, and object downloads. The authoritative name-for-name tool table lives in `integrations/mcp/README.md` and matches the server code exactly.
+Tool names use the `vistrea_` prefix and map one-to-one to implemented Host operations. The stdio server in `integrations/mcp/server.ts` exposes 49 tools covering Workspace status, Snapshot capture and inspection, the Runtime event timeline, design review, reversible tuning, Screen Graph observations, states, and paths, Deep Wiki nodes and links, validation runs and findings, build diffs, portable pack exchange, object downloads, and exploration Operations. The authoritative name-for-name tool table lives in `integrations/mcp/README.md` and matches the server code exactly.
 
 Future tools for reserved operations (device connection, exploration sessions, generic operations, and sync) keep the same `vistrea_` naming convention and are reserved in `docs/interfaces/OPERATION_CATALOG.md`.
 
@@ -80,14 +80,15 @@ Synchronous tool responses return structured domain objects and common errors ra
 
 ## 4. Skills
 
-Four Skills ship as real packages under `integrations/skills/`, each composing only implemented CLI and MCP operations:
+Five Skills ship as real packages under `integrations/skills/`, each composing only implemented CLI and MCP operations:
 
 - `vistrea-inspect-runtime`: check Runtime readiness, capture canonical UI evidence, and inspect or retrieve the same persisted Snapshot;
 - `vistrea-review-design`: register a design baseline, map regions, run comparisons, and manage the Review Issue lifecycle;
 - `vistrea-tune-ui`: apply and revert allowlisted visual previews on the live Runtime;
-- `vistrea-verify-change`: run the core validators and CI gate, triage findings, and diff observed coverage between builds.
+- `vistrea-verify-change`: run the core validators and CI gate, triage findings, and diff observed coverage between builds;
+- `vistrea-explore-ui`: drive bounded deterministic exploration through the Host's exploration Operations and read the resulting Screen Graph.
 
-### `vistrea-explore-ui` (planned)
+### Exploration workflow (reference)
 
 1. inspect Workspace, device, runtime, and safety status;
 2. establish SDK and automation sessions;

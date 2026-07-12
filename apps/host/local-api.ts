@@ -32,7 +32,13 @@ import {
   TuningEngine,
   type RuntimeTuningPort,
 } from "../../engine/design/index.js";
-import { ScreenGraphEngine } from "../../engine/exploration/index.js";
+import { AutomationEngine, type AutomationProviderPort } from "../../engine/automation/index.js";
+import {
+  ExplorationEngine,
+  ExplorationOperationEngine,
+  ScreenGraphEngine,
+  type RunExplorationCommand,
+} from "../../engine/exploration/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
 import { PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
@@ -66,6 +72,12 @@ export interface HostLocalApiDependencies {
   readonly runtimeEventsStatus?: () => RuntimeEventPumpStatus | undefined;
   /** Reports Runtime self-reversion audit counts when the composition tracks them. */
   readonly tuningReversionsStatus?: () => { recorded: number; failed: number } | undefined;
+  /**
+   * The device automation provider exploration runs on; absent when the
+   * composition has no configured device, in which case the exploration
+   * routes fail closed as unsupported.
+   */
+  readonly automationProvider?: AutomationProviderPort;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
   readonly validator: ProtocolValidator;
@@ -168,6 +180,33 @@ export async function startHostLocalApi(
     objects: options.objects,
     validator: options.validator,
   });
+  let explorationOperations: ExplorationOperationEngine | undefined;
+  if (options.automationProvider !== undefined) {
+    const automation = new AutomationEngine({
+      workspace: options.workspace,
+      validator: options.validator,
+      providers: [options.automationProvider],
+    });
+    const exploration = new ExplorationEngine({
+      workspace: options.workspace,
+      capture: {
+        captureSnapshot: (reason) =>
+          capture.execute({
+            include: { paths: ["trees", "screenshot"] },
+            screenshot: "reference",
+            reason,
+          }),
+      },
+      automation,
+      graph,
+    });
+    explorationOperations = new ExplorationOperationEngine({
+      workspace: options.workspace,
+      automation,
+      exploration,
+      providerId: options.automationProvider.descriptor.provider_id,
+    });
+  }
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -191,6 +230,7 @@ export async function startHostLocalApi(
         validation,
         buildDiffs,
         exchange,
+        ...(explorationOperations === undefined ? {} : { explorationOperations }),
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -260,6 +300,7 @@ interface RequestHandlerContext {
   readonly validation: ValidationEngine;
   readonly buildDiffs: BuildDiffEngine;
   readonly exchange: PackExchangeService;
+  readonly explorationOperations?: ExplorationOperationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -701,6 +742,49 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     return;
   }
 
+  if (pathname === "/v1/exploration/operations") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const engine = requireExplorationOperations(context);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["maximum_actions", "maximum_depth", "settle_milliseconds", "excluded_stable_ids", "actor_id"],
+      ["maximum_actions"],
+    );
+    const ref = engine.run(command as unknown as RunExplorationCommand);
+    writeJson(response, 201, ref as unknown as JsonObject);
+    return;
+  }
+
+  const explorationCancelMatch = /^\/v1\/exploration\/operations\/([^/]+)\/cancel$/.exec(pathname);
+  if (explorationCancelMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const engine = requireExplorationOperations(context);
+    const operationId = decodeResourceSegment(
+      explorationCancelMatch[1] as string,
+      "exploration operation ID",
+    );
+    writeJson(response, 200, engine.cancel(operationId) as unknown as JsonObject);
+    return;
+  }
+
+  const explorationOperationMatch = /^\/v1\/exploration\/operations\/([^/]+)$/.exec(pathname);
+  if (explorationOperationMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const engine = requireExplorationOperations(context);
+    const operationId = decodeResourceSegment(
+      explorationOperationMatch[1] as string,
+      "exploration operation ID",
+    );
+    writeJson(response, 200, engine.get(operationId) as unknown as JsonObject);
+    return;
+  }
+
   const screenStateMatch = /^\/v1\/screen-states\/([^/]+)$/.exec(pathname);
   if (screenStateMatch !== null) {
     assertMethod(request, "GET");
@@ -1117,6 +1201,20 @@ const EVENT_EPOCH_ID_PATTERN =
 const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAXIMUM_DESIGN_ASSET_BYTES = 64 * 1024 * 1024;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+
+function requireExplorationOperations(
+  context: RequestHandlerContext,
+): ExplorationOperationEngine {
+  if (context.explorationOperations === undefined) {
+    throw new RequestError({
+      status: 501,
+      code: "unsupported",
+      message: "No device automation provider is configured on this Host.",
+      retryable: false,
+    });
+  }
+  return context.explorationOperations;
+}
 
 function requireRuntimeTuning(context: RequestHandlerContext): RuntimeTuningPort {
   if (context.runtimeTuning === undefined) {

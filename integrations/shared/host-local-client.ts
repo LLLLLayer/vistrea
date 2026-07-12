@@ -40,6 +40,9 @@ const TUNING_PATCH_ID_PATTERN =
   /^patch_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TUNING_APPLICATION_ID_PATTERN =
   /^tuningapp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OPERATION_ID_PATTERN =
+  /^operation_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OPERATION_STATES = new Set(["queued", "running", "succeeded", "failed", "cancelled"]);
 const SCREEN_GRAPH_ID_PATTERN =
   /^graph_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SCREEN_STATE_ID_PATTERN =
@@ -124,6 +127,9 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "ExportPack",
   "ImportPack",
   "GetObject",
+  "RunExploration",
+  "GetExplorationOperation",
+  "CancelExploration",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -1291,6 +1297,86 @@ export class HostLocalApiClient {
         }
         return await this.#requestObject(hash, options);
       }
+      case "RunExploration": {
+        const command = assertExactObject(
+          input,
+          [
+            "maximum_actions",
+            "maximum_depth",
+            "settle_milliseconds",
+            "excluded_stable_ids",
+            "actor_id",
+          ],
+          "Exploration input",
+          true,
+        );
+        const maximumActions = command["maximum_actions"];
+        const maximumDepth = command["maximum_depth"];
+        const settle = command["settle_milliseconds"];
+        const excluded = command["excluded_stable_ids"];
+        const actorId = command["actor_id"];
+        if (
+          !Number.isSafeInteger(maximumActions) ||
+          (maximumActions as number) < 1 ||
+          (maximumActions as number) > 500 ||
+          (maximumDepth !== undefined &&
+            (!Number.isSafeInteger(maximumDepth) ||
+              (maximumDepth as number) < 1 ||
+              (maximumDepth as number) > 32)) ||
+          (settle !== undefined &&
+            (!Number.isSafeInteger(settle) ||
+              (settle as number) < 0 ||
+              (settle as number) > 60_000)) ||
+          (excluded !== undefined &&
+            (!Array.isArray(excluded) ||
+              excluded.length > 128 ||
+              excluded.some(
+                (value) => typeof value !== "string" || value.length === 0 || value.length > 256,
+              ))) ||
+          (actorId !== undefined &&
+            (typeof actorId !== "string" || actorId.length === 0 || actorId.length > 256))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/exploration/operations",
+          command,
+          201,
+          options,
+        );
+        return validateOperationRef(value);
+      }
+      case "GetExplorationOperation": {
+        const query = assertExactObject(input, ["operation_id"], "Exploration operation lookup");
+        const operationId = query["operation_id"];
+        if (typeof operationId !== "string" || !OPERATION_ID_PATTERN.test(operationId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/exploration/operations/${encodeURIComponent(operationId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateOperationRecord(value);
+      }
+      case "CancelExploration": {
+        const command = assertExactObject(input, ["operation_id"], "Exploration cancel input");
+        const operationId = command["operation_id"];
+        if (typeof operationId !== "string" || !OPERATION_ID_PATTERN.test(operationId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          `/v1/exploration/operations/${encodeURIComponent(operationId)}/cancel`,
+          undefined,
+          200,
+          options,
+        );
+        return validateOperationRef(value);
+      }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
         const parameters = new URLSearchParams();
@@ -1737,6 +1823,51 @@ function normalizeListInput(value: unknown): JsonObject {
     ...(limit === undefined ? {} : { limit: limit as number }),
     ...(cursor === undefined ? {} : { cursor }),
   };
+}
+
+function validateOperationRef(value: JsonValue): JsonObject {
+  const ref = requireObject(value);
+  assertKeys(
+    ref,
+    ["operation_id", "kind", "state", "created_at", "updated_at", "progress", "result_ref", "error"],
+    true,
+  );
+  if (
+    typeof ref["operation_id"] !== "string" ||
+    !OPERATION_ID_PATTERN.test(ref["operation_id"]) ||
+    typeof ref["kind"] !== "string" ||
+    ref["kind"].length === 0 ||
+    ref["kind"].length > 128 ||
+    typeof ref["state"] !== "string" ||
+    !OPERATION_STATES.has(ref["state"]) ||
+    typeof ref["created_at"] !== "string" ||
+    typeof ref["updated_at"] !== "string"
+  ) {
+    throw invalidHostResult();
+  }
+  return ref;
+}
+
+function validateOperationRecord(value: JsonValue): JsonObject {
+  const record = requireObject(value);
+  assertKeys(
+    record,
+    ["protocol_version", "operation", "revision", "events", "result", "extensions"],
+    true,
+  );
+  const revision = record["revision"];
+  const events = record["events"];
+  if (
+    record["operation"] === undefined ||
+    !Number.isSafeInteger(revision) ||
+    (revision as number) < 1 ||
+    !Array.isArray(events) ||
+    events.length === 0
+  ) {
+    throw invalidHostResult();
+  }
+  validateOperationRef(record["operation"] as JsonValue);
+  return record;
 }
 
 function validateWorkspaceStatus(value: JsonValue): JsonObject {

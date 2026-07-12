@@ -14,10 +14,8 @@ Implemented Skills:
   Runtime with TTL and exact applied/rejected partitions
 - `vistrea-verify-change`: run the core validators and the CI gate, triage or
   suppress findings, and diff observed coverage between builds
-
-Planned Skills:
-
-- `vistrea-explore-ui`: drive bounded deterministic exploration and update the Deep Wiki once the Host exposes exploration sessions
+- `vistrea-explore-ui`: drive bounded deterministic exploration through the
+  Host's exploration Operations and read the resulting Screen Graph
 
 Create additional real packages only after callable interfaces and workflows exist:
 

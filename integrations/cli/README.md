@@ -51,6 +51,12 @@ vistrea validate get-build-diff <build_diff_id>
 vistrea pack export --json <command>
 vistrea pack import --file <path>
 vistrea object get --hash <sha256:...> --output <path>
+vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]
+vistrea explore get <operation_id>
+vistrea explore cancel <operation_id>
+vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]
+vistrea explore get <operation_id>
+vistrea explore cancel <operation_id>
 ```
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.

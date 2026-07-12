@@ -125,6 +125,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     [
       "vistrea_add_design_reference",
       "vistrea_apply_tuning_patch",
+      "vistrea_cancel_exploration",
       "vistrea_capture_snapshot",
       "vistrea_compare_builds",
       "vistrea_create_review_issue",
@@ -136,6 +137,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_get_design_comparison",
       "vistrea_get_design_reference",
       "vistrea_get_event_timeline",
+      "vistrea_get_exploration_operation",
       "vistrea_get_object",
       "vistrea_get_review_issue",
       "vistrea_get_screen_graph",
@@ -160,6 +162,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_related_wiki_nodes",
       "vistrea_revert_tuning_application",
       "vistrea_run_design_comparison",
+      "vistrea_run_exploration",
       "vistrea_search_wiki",
       "vistrea_suppress_validation_finding",
       "vistrea_transition_review_issue",

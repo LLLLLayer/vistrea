@@ -893,6 +893,59 @@ export const VISTREA_MCP_TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
   {
+    name: "vistrea_run_exploration",
+    title: "Run Exploration",
+    description:
+      "Start bounded deterministic exploration of the connected application as a background Operation; poll it with vistrea_get_exploration_operation.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["maximum_actions"],
+      properties: {
+        maximum_actions: { type: "integer", minimum: 1, maximum: 500 },
+        maximum_depth: { type: "integer", minimum: 1, maximum: 32 },
+        settle_milliseconds: { type: "integer", minimum: 0, maximum: 60000 },
+        excluded_stable_ids: {
+          type: "array",
+          maxItems: 128,
+          items: { type: "string", minLength: 1, maxLength: 256 },
+        },
+        actor_id: { type: "string", minLength: 1, maxLength: 256 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_exploration_operation",
+    title: "Get Exploration Operation",
+    description:
+      "Read one exploration Operation with its progress events and, once succeeded, the inline ExplorationReport result.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["operation_id"],
+      properties: {
+        operation_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_cancel_exploration",
+    title: "Cancel Exploration",
+    description:
+      "Request cancellation of the running exploration Operation; recorded observations stay in the Screen Graph.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["operation_id"],
+      properties: {
+        operation_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: "vistrea_get_object",
     title: "Get Object",
     description:
@@ -957,6 +1010,9 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_export_pack", "ExportPack"],
   ["vistrea_import_pack", "ImportPack"],
   ["vistrea_get_object", "GetObject"],
+  ["vistrea_run_exploration", "RunExploration"],
+  ["vistrea_get_exploration_operation", "GetExplorationOperation"],
+  ["vistrea_cancel_exploration", "CancelExploration"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

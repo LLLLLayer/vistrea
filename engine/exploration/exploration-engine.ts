@@ -60,7 +60,14 @@ export interface ExplorationReport {
   readonly steps: readonly ExecutedExplorationStep[];
   readonly discovered_state_ids: readonly string[];
   readonly action_count: number;
-  readonly stopped_reason: "action_budget" | "frontier_exhausted" | "stuck";
+  readonly stopped_reason: "action_budget" | "frontier_exhausted" | "stuck" | "cancelled";
+}
+
+/** Per-run observation hooks for long-running callers such as Operations. */
+export interface ExplorationRunHooks {
+  readonly onStep?: (step: ExecutedExplorationStep) => void;
+  /** Checked before every action; returning false stops the walk cleanly. */
+  readonly shouldContinue?: () => boolean;
 }
 
 export interface TagGraphVersionCommand {
@@ -109,7 +116,7 @@ export class ExplorationEngine {
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   }
 
-  async explore(command: ExploreCommand): Promise<ExplorationReport> {
+  async explore(command: ExploreCommand, hooks: ExplorationRunHooks = {}): Promise<ExplorationReport> {
     if (
       !Number.isSafeInteger(command.maximum_actions) ||
       command.maximum_actions < 1 ||
@@ -154,6 +161,10 @@ export class ExplorationEngine {
     let stoppedReason: ExplorationReport["stopped_reason"] = "frontier_exhausted";
 
     while (actionCount < command.maximum_actions) {
+      if (hooks.shouldContinue?.() === false) {
+        stoppedReason = "cancelled";
+        break;
+      }
       const currentStateId = depthStack[depthStack.length - 1] as string;
       const candidate = this.#nextCandidate(
         snapshot,
@@ -185,6 +196,7 @@ export class ExplorationEngine {
           created_transition: back.createdTransition,
           discovered_new_state: back.observed.created,
         });
+        hooks.onStep?.(steps[steps.length - 1] as ExecutedExplorationStep);
         if (returnedStateId === currentStateId) {
           // Back did not leave the state; stop instead of looping forever.
           stoppedReason = "stuck";
@@ -226,6 +238,7 @@ export class ExplorationEngine {
         created_transition: forward.createdTransition,
         discovered_new_state: discoveredNewState,
       });
+      hooks.onStep?.(steps[steps.length - 1] as ExecutedExplorationStep);
       if (targetStateId !== currentStateId) {
         if (discoveredNewState && depthStack.length < maximumDepth) {
           depthStack.push(targetStateId);

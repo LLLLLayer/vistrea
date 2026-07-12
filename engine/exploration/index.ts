@@ -24,3 +24,8 @@ export {
   type TagGraphVersionCommand,
   type TaggedGraphVersion,
 } from "./exploration-engine.js";
+export {
+  ExplorationOperationEngine,
+  type ExplorationOperationDependencies,
+  type RunExplorationCommand,
+} from "./exploration-operations.js";

@@ -15,6 +15,7 @@ import {
   type RuntimeCaptureResult,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
+import { AdbAutomationProvider, WdaAutomationProvider } from "../../engine/automation/index.js";
 import { TuningEngine, type RuntimeTuningPort } from "../../engine/design/index.js";
 import {
   startHostLocalApi,
@@ -24,6 +25,11 @@ import {
 
 const RUNTIME_TOKEN_BYTES = 32;
 
+/** The device automation provider one Host composition drives. */
+export type HostAutomationConfig =
+  | { readonly kind: "adb"; readonly adbPath: string; readonly serial: string }
+  | { readonly kind: "wda"; readonly baseUrl: string };
+
 export interface StartLocalHostOptions {
   readonly workspaceRoot: string;
   readonly validator: ProtocolValidator;
@@ -31,6 +37,8 @@ export interface StartLocalHostOptions {
   readonly runtimePort?: number;
   readonly apiPort?: number;
   readonly applicationVersion?: string;
+  /** Absent means exploration operations fail closed as unsupported. */
+  readonly automation?: HostAutomationConfig;
 }
 
 export interface LocalRuntimeEndpoint extends LoopbackRuntimeEndpoint {
@@ -82,6 +90,17 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
       isRuntimeConnected: () => runtime.connected,
       runtimeEventsStatus: () => runtime.eventsStatus,
       tuningReversionsStatus: () => runtime.tuningReversionsStatus,
+      ...(options.automation === undefined
+        ? {}
+        : {
+            automationProvider:
+              options.automation.kind === "adb"
+                ? new AdbAutomationProvider({
+                    adbPath: options.automation.adbPath,
+                    serial: options.automation.serial,
+                  })
+                : new WdaAutomationProvider({ baseUrl: options.automation.baseUrl }),
+          }),
       workspace: workspace.data,
       objects: workspace.objects,
       validator: options.validator,

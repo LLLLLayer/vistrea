@@ -17,7 +17,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 46 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
+All 49 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -65,6 +65,9 @@ All 46 operations below are implemented end to end through the Host Local API, t
 | `GetScreenGraph` | Q | `GET /v1/screen-graph` | `graph show` | `vistrea_get_screen_graph` |
 | `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` | `vistrea_get_screen_state` |
 | `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` | `vistrea_find_screen_path` |
+| `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` | `vistrea_run_exploration` |
+| `GetExplorationOperation` | Q | `GET /v1/exploration/operations/<id>` | `explore get` | `vistrea_get_exploration_operation` |
+| `CancelExploration` | C | `POST /v1/exploration/operations/<id>/cancel` | `explore cancel` | `vistrea_cancel_exploration` |
 
 ### Deep Wiki
 
@@ -163,10 +166,8 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 | Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
 |---|---|---|---|---|---|---|---|
-| `RunExploration` | C | `RunExplorationCommand -> ExplorationResult` | async | Exploration / Sn,Ob,Ev,G,Op,Vr | automation and safety policy | `explore run` / `vistrea_run_exploration` | 3 |
 | `PauseExploration` | C | `PauseExplorationCommand -> OperationRef` | sync | Exploration / Op | running operation | `explore pause` / — | 3 |
 | `ResumeExploration` | C | `ResumeExplorationCommand -> OperationRef` | sync | Exploration / Op | paused operation | `explore resume` / — | 3 |
-| `CancelExploration` | C | `CancelExplorationCommand -> OperationRef` | sync | Exploration / Op | cancellable operation | `explore cancel` / — | 3 |
 | `MergeScreenStates` | C | `MergeScreenStatesCommand -> StateIdentityDecision` | sync | Exploration / G,Vr | expected graph revision | `screen merge` / — | 3 |
 | `SplitScreenState` | C | `SplitScreenStateCommand -> StateIdentityDecision` | sync | Exploration / G,Vr | expected graph revision | `screen split` / — | 3 |
 | `MarkTransitionStatus` | C | `MarkTransitionStatusCommand -> Transition` | sync | Exploration / G,Vr | expected revision | `screen transition-mark` / — | 3 |

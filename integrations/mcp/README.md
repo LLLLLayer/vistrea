@@ -52,6 +52,12 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_export_pack` | `ExportPack` | Export refs and commits as a portable `.vistrea-pack` Object |
 | `vistrea_import_pack` | `ImportPack` | Import a base64 `.vistrea-pack` into the local Workspace |
 | `vistrea_get_object` | `GetObject` | Download one content-addressed Object into a new local file |
+| `vistrea_run_exploration` | `RunExploration` | Start bounded deterministic exploration as a background Operation |
+| `vistrea_get_exploration_operation` | `GetExplorationOperation` | Read one exploration Operation with progress and its report |
+| `vistrea_cancel_exploration` | `CancelExploration` | Request cancellation of the running exploration Operation |
+| `vistrea_run_exploration` | `RunExploration` | Start bounded deterministic exploration as a background Operation |
+| `vistrea_get_exploration_operation` | `GetExplorationOperation` | Read one exploration Operation with progress and its report |
+| `vistrea_cancel_exploration` | `CancelExploration` | Request cancellation of the running exploration Operation |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 
