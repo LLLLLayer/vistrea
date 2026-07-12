@@ -36,7 +36,7 @@ vistrea/
 │   │   ├── local-api.ts
 │   │   ├── local-host.ts
 │   │   └── serve.ts
-│   └── studio-macos/            # native SwiftUI Snapshot workspace
+│   └── studio-macos/            # native SwiftUI Studio workspace
 │       ├── Package.swift
 │       ├── Sources/
 │       ├── Tests/
@@ -55,12 +55,19 @@ vistrea/
 │   ├── README.md
 │   ├── ios/
 │   │   ├── Package.swift
-│   │   ├── Sources/             # models, UIKit capture, Runtime connection
+│   │   ├── Sources/
+│   │   │   ├── VistreaRuntimeModels/          # canonical Swift protocol models
+│   │   │   ├── VistreaRuntimeUIKit/           # UIKit hierarchy and screenshot capture
+│   │   │   ├── VistreaRuntimeSwiftUI/         # SwiftUI semantics annotation bridge
+│   │   │   ├── VistreaRuntimeConnection/      # protected Runtime transport and events
+│   │   │   └── VistreaRuntimeUIKitConnection/ # UIKit capture over the connection
 │   │   ├── Tests/
 │   │   └── README.md
 │   └── android/
 │       ├── runtime-android/      # Android View capture and Debug bridge
-│       ├── runtime-connection/   # protected Runtime transport
+│       ├── runtime-compose/      # Compose semantics annotation bridge
+│       ├── runtime-connection/   # protected Runtime transport and events
+│       ├── runtime-connection-interop/
 │       ├── src/                  # canonical Kotlin protocol adapter
 │       ├── tools/
 │       ├── build.gradle.kts
@@ -68,28 +75,36 @@ vistrea/
 │       └── README.md
 ├── engine/
 │   ├── README.md
-│   ├── workspace/
-│   │   └── README.md
 │   ├── connection/
 │   │   ├── README.md
 │   │   ├── snapshot-engine.ts
-│   │   └── loopback-runtime-transport.ts
+│   │   ├── event-engine.ts
+│   │   ├── loopback-runtime-transport.ts
+│   │   └── …
 │   ├── automation/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── automation-engine.ts
+│   │   ├── adb-provider.ts
+│   │   └── wda-provider.ts
 │   ├── exploration/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── exploration-engine.ts
+│   │   └── screen-graph-engine.ts
 │   ├── design/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   ├── design-review-engine.ts
+│   │   └── tuning-engine.ts
 │   ├── knowledge/
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── knowledge-engine.ts
 │   ├── validation/
-│   │   └── README.md
-│   ├── operations/
-│   │   └── README.md
-│   ├── versioning/
-│   │   └── README.md
-│   └── sync/
-│       └── README.md
+│   │   ├── README.md
+│   │   ├── validation-engine.ts
+│   │   └── build-diff-engine.ts
+│   ├── workspace/               # README-only reserved use cases
+│   ├── operations/              # README-only reserved use cases
+│   ├── versioning/              # README-only reserved use cases
+│   └── sync/                    # README-only reserved use cases
 ├── data/
 │   ├── README.md
 │   ├── api/
@@ -109,24 +124,26 @@ vistrea/
 │   ├── objects/
 │   │   ├── README.md
 │   │   └── file-object-store.ts
-│   ├── versioning/
-│   │   └── README.md
-│   ├── search/
-│   │   └── README.md
 │   ├── sync/
-│   │   └── README.md
-│   └── exchange/
-│       ├── README.md
-│       └── pack-exchange.ts
+│   │   ├── README.md
+│   │   └── hub-pack-sync.ts     # optional Hub pack push/fetch client
+│   ├── exchange/
+│   │   ├── README.md
+│   │   └── pack-exchange.ts
+│   ├── versioning/              # README-only reserved ports
+│   └── search/                  # README-only reserved indexes
 ├── services/
 │   ├── README.md
 │   └── hub/
-│       └── README.md
+│       ├── README.md
+│       ├── hub-server.ts        # optional loopback pack relay
+│       └── main.ts
 ├── integrations/
 │   ├── README.md
 │   ├── shared/                  # strict authenticated Host client
 │   ├── cli/
 │   │   ├── README.md
+│   │   ├── cli.ts
 │   │   └── main.ts
 │   ├── mcp/
 │   │   ├── README.md
@@ -134,9 +151,14 @@ vistrea/
 │   │   └── server.ts
 │   ├── skills/
 │   │   ├── README.md
-│   │   └── vistrea-inspect-runtime/
+│   │   ├── vistrea-inspect-runtime/
+│   │   ├── vistrea-review-design/
+│   │   ├── vistrea-tune-ui/
+│   │   └── vistrea-verify-change/
 │   └── ci/
-│       └── README.md
+│       ├── README.md
+│       ├── ci.ts
+│       └── main.ts
 ├── examples/
 │   ├── README.md
 │   ├── scenarios/
@@ -158,16 +180,20 @@ vistrea/
 │   ├── contract/
 │   │   ├── README.md
 │   │   ├── protocol-fixtures.test.mjs
-│   │   └── strict-json.test.mjs
+│   │   ├── strict-json.test.mjs
+│   │   └── …                    # Data, SQLite, Object Store, and pack contracts
 │   ├── integration/
 │   │   ├── README.md
 │   │   ├── agent-adapters.test.ts
 │   │   ├── ios-runtime-client-interop.test.ts
-│   │   └── android-runtime-client-interop.test.ts
+│   │   ├── android-runtime-client-interop.test.ts
+│   │   └── …                    # Engine, Host, CI gate, and Hub sync suites
 │   └── e2e/
 │       ├── README.md
 │       ├── ios-real-vertical-loop.test.ts
-│       └── android-real-vertical-loop.test.ts
+│       ├── android-real-vertical-loop.test.ts
+│       ├── ios-real-automation-loop.test.ts
+│       └── android-real-automation-loop.test.ts
 ├── tools/
 │   ├── README.md
 │   └── protocol/
@@ -206,7 +232,11 @@ vistrea/
     │   ├── 0000-template.md
     │   ├── 0001-contract-boundaries.md
     │   ├── 0002-json-schema-protocol.md
-    │   └── 0003-object-and-commit-identity.md
+    │   ├── 0003-object-and-commit-identity.md
+    │   ├── 0004-host-data-and-sqlite-migrations.md
+    │   ├── 0005-ios-first-vertical-loop.md
+    │   ├── 0006-vistrea-pack-container.md
+    │   └── 0007-screen-state-identity-and-device-automation.md
     └── roadmap/
         └── README.md
 ```
@@ -323,10 +353,12 @@ The first implementation keeps the language-neutral contracts while using toolch
 - file-backed SHA-256 content-addressed objects;
 - Swift Package Manager for iOS Runtime modules and native SwiftUI Studio;
 - Gradle/Kotlin Android libraries with Debug/Internal Runtime transport excluded from Release artifacts;
-- UIKit and Android View as the verified initial native adapters;
-- authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API.
+- UIKit and Android View as the verified initial native adapters, plus SwiftUI and Compose semantics annotation bridges feeding the same capture;
+- authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API;
+- `adb` and WebDriverAgent device automation providers behind one Engine port;
+- a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
-Future SwiftUI/Compose capture adapters, automation providers, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future full SwiftUI/Compose semantic-tree capture, physical-device tunneling, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

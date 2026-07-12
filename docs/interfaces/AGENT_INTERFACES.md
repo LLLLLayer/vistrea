@@ -28,19 +28,13 @@ Global options:
 --non-interactive
 ```
 
-Initial command families:
+The implemented command surface — Workspace status, Snapshot capture and inspection, Runtime events, design review, tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — is maintained command-for-command in `integrations/cli/README.md`. Reserved future command families follow the same `<resource> <verb>` shape:
 
 ```text
-vistrea workspace create|open|status|health|export|import|gc
+vistrea workspace create|open|health|gc
 vistrea device list|connect|disconnect|launch|terminate
-vistrea snapshot capture|get|list|compare
 vistrea node get|query
-vistrea screen list|get|path|compare
 vistrea explore run|status|pause|resume|cancel
-vistrea design reference-add|compare|issue-create|issue-update
-vistrea design tune-create|tune-apply|tune-revert|tune-export
-vistrea verify run|status|findings|compare-builds
-vistrea wiki get|search|backlinks|link|export
 vistrea version commit|log|ref|get|diff|tag
 vistrea sync status|fetch|pull|push|publish|subscribe
 ```
@@ -74,39 +68,26 @@ Exit codes:
 
 Long-running commands print or return an `operation_id`. `--wait` may stream NDJSON progress events.
 
-## 3. Initial MCP tools
+## 3. MCP tools
 
-Tool names use the `vistrea_` prefix and map one-to-one to public Engine use cases where practical:
+Tool names use the `vistrea_` prefix and map one-to-one to implemented Host operations. The stdio server in `integrations/mcp/server.ts` exposes 46 tools covering Workspace status, Snapshot capture and inspection, the Runtime event timeline, design review, reversible tuning, Screen Graph observations, states, and paths, Deep Wiki nodes and links, validation runs and findings, build diffs, portable pack exchange, and object downloads. The authoritative name-for-name tool table lives in `integrations/mcp/README.md` and matches the server code exactly.
 
-```text
-vistrea_get_workspace_status
-vistrea_list_devices
-vistrea_connect_runtime
-vistrea_capture_snapshot
-vistrea_query_ui_nodes
-vistrea_get_screen_graph
-vistrea_find_path
-vistrea_run_exploration
-vistrea_get_operation
-vistrea_compare_design
-vistrea_create_review_issue
-vistrea_create_tuning_patch
-vistrea_apply_tuning_patch
-vistrea_revert_tuning_application
-vistrea_run_validation
-vistrea_search_wiki
-vistrea_compare_builds
-vistrea_get_sync_status
-vistrea_publish_ref
-```
+Future tools for reserved operations (device connection, exploration sessions, generic operations, and sync) keep the same `vistrea_` naming convention and are reserved in `docs/interfaces/OPERATION_CATALOG.md`.
 
 MCP resources may expose read-heavy stable content such as Workspace status, selected Screen State, protocol documentation, or operation logs. Mutations remain tools.
 
 Synchronous tool responses return structured domain objects and common errors rather than CLI text. Asynchronous tools immediately return `OperationRef`; progress and the typed completion result use the generic operation APIs.
 
-## 4. Initial Skills
+## 4. Skills
 
-### `vistrea-explore-ui`
+Four Skills ship as real packages under `integrations/skills/`, each composing only implemented CLI and MCP operations:
+
+- `vistrea-inspect-runtime`: check Runtime readiness, capture canonical UI evidence, and inspect or retrieve the same persisted Snapshot;
+- `vistrea-review-design`: register a design baseline, map regions, run comparisons, and manage the Review Issue lifecycle;
+- `vistrea-tune-ui`: apply and revert allowlisted visual previews on the live Runtime;
+- `vistrea-verify-change`: run the core validators and CI gate, triage findings, and diff observed coverage between builds.
+
+### `vistrea-explore-ui` (planned)
 
 1. inspect Workspace, device, runtime, and safety status;
 2. establish SDK and automation sessions;
@@ -140,9 +121,30 @@ Synchronous tool responses return structured domain objects and common errors ra
 4. run validation and graph/build diff;
 5. report evidence and update version history.
 
-Do not create real `SKILL.md` packages until the referenced CLI/MCP operations exist.
+Do not create additional real `SKILL.md` packages until the referenced CLI/MCP operations exist.
 
-## 5. Deep links
+## 5. CI gate
+
+`integrations/ci/` provides a headless gate over the same authenticated Host Local API client:
+
+```text
+node .build/typescript/integrations/ci/main.js \
+  [--snapshot <snapshot_id>] \
+  [--project <project_id> --application <application_id>] \
+  [--left-build <build_id> --right-build <build_id>] \
+  [--fail-on info|warning|error|critical]
+```
+
+The gate validates the newest (or one named) Snapshot with the core rule set, optionally validates the Screen Graph and diffs two builds, and emits exactly one machine-readable JSON report on stdout.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Gate passed |
+| `1` | Open findings at or above `--fail-on` (default `error`) |
+| `2` | Usage error |
+| `3` | The Host was unavailable or an operation failed |
+
+## 6. Deep links
 
 ```text
 vistrea://workspace/<workspace_id>
@@ -156,7 +158,7 @@ vistrea://operation/<operation_id>
 
 Links are stable resource locators. Studio resolves permissions, local availability, remote subscription, and selected version before opening content.
 
-## 6. Confirmation and policy
+## 7. Confirmation and policy
 
 Agent adapters must request confirmation before:
 
@@ -169,6 +171,6 @@ Agent adapters must request confirmation before:
 
 An organization policy may pre-authorize a bounded action, but the resulting audit context remains attached to the operation.
 
-## 7. Parity tests
+## 8. Parity tests
 
 For each public Engine use case exposed through multiple adapters, contract tests verify equivalent input semantics, errors, operation IDs, and result objects across CLI and MCP.

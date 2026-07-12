@@ -237,7 +237,7 @@ type RefUpdatePrecondition =
   | { mode: "force"; authorization: ResourceRef };
 ```
 
-Normal authoring uses `must_match` or `must_not_exist`. `force` is never an omitted precondition: it requires an explicit protected-ref policy decision and a `ResourceRef` to an auditable authorization record.
+Normal authoring uses `must_match` or `must_not_exist`. `force` is never an omitted precondition: it requires an explicit protected-ref policy decision and a `ResourceRef` to an auditable authorization record. Until that policy layer exists, implementations reject `force` with `unsupported` instead of trusting an unverifiable authorization reference.
 
 ## 9. Object Store port
 

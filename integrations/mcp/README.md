@@ -31,6 +31,7 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_observe_screen_state` | `RecordStateObservation` | Record a persisted Snapshot as a deduplicated Screen State observation |
 | `vistrea_observe_transition` | `RecordTransitionObservation` | Record one executed action as a deduplicated Transition |
 | `vistrea_get_screen_graph` | `GetScreenGraph` | Read the materialized Screen Graph for a project and application |
+| `vistrea_get_screen_state` | `GetScreenState` | Read one Screen State with its representative Snapshot reference |
 | `vistrea_find_screen_path` | `FindScreenPath` | Find acyclic transition paths between two Screen States |
 | `vistrea_create_wiki_node` | `CreateWikiNode` | Create one Deep Wiki knowledge node |
 | `vistrea_update_wiki_node` | `UpdateWikiNode` | Revise one Deep Wiki node with optimistic concurrency |
@@ -50,6 +51,7 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_get_build_diff` | `GetBuildDiff` | Load one persisted Build Diff |
 | `vistrea_export_pack` | `ExportPack` | Export refs and commits as a portable `.vistrea-pack` Object |
 | `vistrea_import_pack` | `ImportPack` | Import a base64 `.vistrea-pack` into the local Workspace |
+| `vistrea_get_object` | `GetObject` | Download one content-addressed Object into a new local file |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 
@@ -64,4 +66,4 @@ node .build/typescript/integrations/mcp/main.js
 
 Configure an MCP client with that command and pass `VISTREA_HOST_URL` plus `VISTREA_HOST_TOKEN` in its controlled environment map. The token is intentionally not a tool argument or command-line option. Stdout is reserved exclusively for MCP JSON-RPC framing; startup failures write only one generic line to stderr.
 
-`vistrea_list_snapshots` and `vistrea_get_snapshot` expose the currently implemented read operations for Phase 0B parity even though their MCP names were not yet reserved in the draft Operation Catalog. Capture currently returns the Host endpoint's canonical `RuntimeSnapshot` synchronously; it must migrate to the catalog's `OperationRef` lifecycle when that Engine capability exists.
+Capture currently returns the Host endpoint's canonical `RuntimeSnapshot` synchronously; it must migrate to the catalog's `OperationRef` lifecycle when that Engine capability exists.

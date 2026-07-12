@@ -10,6 +10,7 @@ The canonical native UIKit executable fixture for Vistrea.
 - The data-driven UIKit renderer supports screen, loading, error, transient, overlay, dialog, banner, tap, type, wait, dismiss, and back fixtures needed by the current suite.
 - A Debug-only in-app Runtime Inspector captures the real hierarchy and screenshot through `VistreaRuntimeUIKit`, then shows the canonical Snapshot identity and View Tree.
 - A Debug-only Runtime connection entry composes the same UIKit capture with `VistreaRuntimeConnection` and serves authenticated Host `capture_request` messages.
+- Debug builds report transient banner presentation and dismissal as canonical Runtime events through the SDK's bounded `RuntimeEventRecorder`, which streams acknowledged event batches to the connected Host.
 - Release builds do not expose the Inspector entry point.
 
 The automation provider remains a separate implementation slice. User and automation actions operate UIKit controls; the Runtime SDK only observes their results.

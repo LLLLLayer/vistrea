@@ -31,15 +31,15 @@ vistrea graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <s
 vistrea graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]
 vistrea graph show --project <project_id> --application <application_id>
 vistrea graph get-state <screen_state_id>
-vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>]
+vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]
 vistrea wiki create --json <command>
 vistrea wiki update <wiki_node_id> --json <command>
 vistrea wiki get <wiki_node_id>
 vistrea wiki search [--text <phrase>] [--kinds a,b] [--labels a,b] [--statuses a,b] [--limit n] [--cursor c]
 vistrea wiki link --json <command>
 vistrea wiki unlink <wiki_link_id> --revision <n>
-vistrea wiki backlinks <wiki_node_id>
-vistrea wiki related --kind <resource_kind> --id <resource_id>
+vistrea wiki backlinks <wiki_node_id> [--limit <n>] [--cursor <cursor>]
+vistrea wiki related --kind <resource_kind> --id <resource_id> [--limit <n>] [--cursor <cursor>]
 vistrea validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual]
 vistrea validate graph --project <project_id> --application <application_id>
 vistrea validate get-run <validation_run_id>
@@ -50,6 +50,7 @@ vistrea validate build-diff --project <project_id> --application <application_id
 vistrea validate get-build-diff <build_diff_id>
 vistrea pack export --json <command>
 vistrea pack import --file <path>
+vistrea object get --hash <sha256:...> --output <path>
 ```
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.

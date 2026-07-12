@@ -14,8 +14,8 @@ The examples below define semantic operation names, not a programming-language A
 - `OpenWorkspace`
 - `CloseWorkspace`
 - `UpgradeWorkspace`
-- `ImportWorkspacePack`
-- `ExportWorkspacePack`
+- `ImportPack`
+- `ExportPack`
 - `CollectWorkspaceGarbage`
 
 `CreateWorkspace` returns a descriptor containing the genesis Commit ID and resolved default Ref only after the manifest, Commit, and Ref have been initialized atomically.
@@ -80,7 +80,7 @@ The examples below define semantic operation names, not a programming-language A
 - `GetExplorationOperation`
 - `GetScreenGraph`
 - `GetScreenState`
-- `FindPath`
+- `FindScreenPath`
 - `CompareScreenGraphs`
 - `ExplainStateIdentity`
 
@@ -116,17 +116,19 @@ Every tuning command must preserve original value, target Snapshot, project poli
 
 ### Commands
 
-- `RunValidation`
-- `RunBuildComparison`
+- `ValidateSnapshot`
+- `ValidateScreenGraph`
+- `CompareBuilds`
 - `CancelValidation`
 - `AcceptValidationBaseline`
 - `SuppressValidationFinding`
 
 ### Queries
 
-- `GetValidationOperation`
+- `GetValidationRun`
 - `ListValidationFindings`
 - `GetValidationFinding`
+- `GetBuildDiff`
 
 Validation input may be a Snapshot, Screen State, graph, path, build, design baseline, or selected rule set.
 
@@ -136,8 +138,8 @@ Validation input may be a Snapshot, Screen State, graph, path, build, design bas
 
 - `CreateWikiNode`
 - `UpdateWikiNode`
-- `LinkWikiNodes`
-- `UnlinkWikiNodes`
+- `LinkWikiNode`
+- `UnlinkWikiNode`
 - `AttachRuntimeEvidence`
 - `ExportWiki`
 - `PublishKnowledgeCollection`
@@ -145,9 +147,9 @@ Validation input may be a Snapshot, Screen State, graph, path, build, design bas
 ### Queries
 
 - `GetWikiNode`
-- `GetBacklinks`
-- `SearchWiki`
-- `GetRelatedRuntimeContext`
+- `GetWikiBacklinks`
+- `ListWikiNodes`
+- `GetRelatedWikiNodes`
 - `GetKnowledgeGraph`
 
 ## 9. Version and synchronization use cases
@@ -186,7 +188,7 @@ Validation input may be a Snapshot, Screen State, graph, path, build, design bas
 - `GetOperationResult`
 - `SubscribeOperationEvents`
 
-Typed helpers such as `GetExplorationOperation` and `GetValidationOperation` may remain, but they resolve through the same generic operation lifecycle and event cursor semantics.
+Typed helpers such as `GetExplorationOperation` and `GetValidationRun` may remain, but they resolve through the same generic operation lifecycle and event cursor semantics.
 
 Long-running domains persist operation state through the Operations Engine. Cancellation is best-effort and never rewrites a completed side effect as cancelled.
 

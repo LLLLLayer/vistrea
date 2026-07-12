@@ -56,7 +56,7 @@ The interface specifications define shared IDs, errors, operation behavior, SDK 
 
 ## Native Demo Apps
 
-The native iOS UIKit and Android View Demo Apps implement the same 12 required cross-platform Scenario IDs. Both now provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage. The remaining scenario contracts continue to stage later event, automation, exploration, design, tuning, validation, and build-diff work.
+The native iOS UIKit and Android View Demo Apps implement the same 12 required cross-platform Scenario IDs. Both provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage, plus verified Runtime events and reversible tuning; real-input automation is verified on Android. Design comparison and validation scenario coverage remain staged, with `examples/scenarios/manifest.json` as the authoritative per-platform status.
 
 - `examples/ios/VistreaDemoApp/`
 - `examples/android/VistreaDemoApp/`
@@ -76,11 +76,11 @@ The native iOS UIKit and Android View Demo Apps implement the same 12 required c
 
 ## Recommended implementation sequence
 
-1. Add protected design review and reversible tuning over the verified Snapshot and event evidence.
-2. Add WDA/UIAutomator actions, exploration, and Screen State identity.
-3. Persist Canvas and Deep Wiki knowledge, then add validation and build diff.
-4. Expand CLI, MCP, Skills, and CI with those Engine use cases.
-5. Implement optional Vistrea Hub synchronization after local semantics are stable.
+1. Run the implemented iOS WebDriverAgent automation lane on a real Simulator and re-run the Android lane's exploration segment to verify those capabilities.
+2. Extend the SwiftUI and Compose annotation bridges into full semantic-tree capture.
+3. Cover the design comparison and validation scenario contracts in both Demo Apps.
+4. Add Canvas curation and Deep Wiki editing to Studio.
+5. Grow Vistrea Hub beyond the loopback pack relay: namespaces, permissions, discovery, and collaboration.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
@@ -88,7 +88,7 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 
 Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and both Runtime SDKs now stream negotiated, acknowledged Runtime event batches into the same Host. A production local Host, macOS Snapshot Studio with an event timeline, strict CLI, stdio MCP server, and `vistrea-inspect-runtime` Skill consume the same persisted Snapshot and event path. This does not yet implement device automation, exploration, design tuning, full Canvas or Deep Wiki workflows, CI validation, or Vistrea Hub.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming and protected reversible tuning are also verified on both platforms. Device automation, deterministic exploration, the Screen Graph, design review, the Deep Wiki, core validation and build diff, and an optional loopback Hub pack relay are implemented behind the same production Host, with the Android real-input automation acceptance verified and the iOS WebDriverAgent lane awaiting its first device run. Agents consume this surface through 45 Host operations exposed by the strict CLI, 44 stdio MCP tools, four Skills, and a headless CI gate. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
 
 Run the current executable checks with:
 

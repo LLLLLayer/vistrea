@@ -98,7 +98,7 @@ Initial platform sources:
 | Android View | Activity, Fragment, Window, ViewGroup | Resource ID and accessibility |
 | Android Compose | Semantics Tree and TestTag | Host View and explicit semantics |
 
-The current verified native slice covers UIKit and Android View hierarchy capture, synchronized PNG screenshots, protected Debug/Internal Runtime connection, and canonical Snapshot delivery to the local Host. SwiftUI, Compose, Runtime Event Batch capture, and reversible tuning remain follow-up adapters or capabilities.
+The current verified native slice covers UIKit and Android View hierarchy capture, synchronized PNG screenshots, protected Debug/Internal Runtime connection, canonical Snapshot delivery to the local Host, negotiated Runtime Event Batch streaming, and reversible allowlisted tuning previews. SwiftUI and Compose ship semantics annotation bridges that feed the existing capture; full SwiftUI and Compose semantic-tree capture remains follow-up adapter work.
 
 The SDK observes. It must not bypass real UI paths by calling arbitrary business methods.
 
@@ -135,7 +135,7 @@ It manages:
 
 Device automation performs real tap, type, swipe, back, launch, and system UI interaction. SDK-reported nodes may guide targeting, but the action still occurs through the real automation layer.
 
-The implemented Host slice currently owns authenticated loopback Runtime sessions, canonical Snapshot capture/get/list use cases, ordered Object-before-metadata persistence, the loopback Local API, and production local Workspace composition. Automation, exploration, design, knowledge, validation, versioning workflows above the Data ports, and Hub sync remain future Engine slices.
+The implemented Host slice owns authenticated loopback Runtime sessions, canonical Snapshot capture/get/list use cases, ordered Object-before-metadata persistence, the loopback Local API, and production local Workspace composition. Device automation (`adb` and WebDriverAgent providers), deterministic exploration with Screen State identity, design review and reversible tuning, Deep Wiki knowledge, core validation and build diff, and optional Hub pack sync are implemented behind the same Data ports; real-input automation is verified on Android while the iOS WebDriverAgent lane awaits its first device run. Dedicated versioning and long-running operation use cases above the Data ports remain future Engine slices.
 
 ### 2.5 Vistrea Studio for macOS
 
@@ -155,7 +155,7 @@ It includes:
 
 Studio composes Engine use cases. Views and ViewModels must not access SQLite, object paths, automation implementations, or Hub transport directly.
 
-The current native SwiftUI Studio implements the first Snapshot workspace: Host status, capture and list, screenshot evidence, 2D UI tree, node properties, scenario/build/source context, and explicit loading/error states. Canvas, Deep Wiki, event timeline, design review, tuning, validation, build diff, and sync screens remain planned.
+The current native SwiftUI Studio implements the Snapshot workspace — Host status, capture and list, screenshot evidence, 2D UI tree, node properties, scenario/build/source context, and explicit loading/error states — plus a persisted Runtime event timeline, a Review Issues pane, a Screen State Canvas tab, a Deep Wiki search tab, and a SceneKit 3D Layer Inspector. Wiki editing, Canvas curation, the design comparison workbench, and validation, build-diff, and sync screens remain planned; `apps/studio-macos/README.md` tracks the exact implemented surface.
 
 ### 2.6 Design review and UI tuning
 
@@ -211,7 +211,7 @@ The Deep Wiki is not just a canvas. It must be persistent, searchable, linked, v
 
 ### 2.8 Native Demo Apps
 
-Vistrea includes canonical native Demo Apps for iOS and Android. Both applications implement all 12 required shared Scenario IDs and act as executable contract fixtures, not marketing samples. The `demo.navigation.basic` Runtime Snapshot path is verified end to end on iOS UIKit and Android View; the remaining scenarios currently define deterministic acceptance contracts for later capabilities.
+Vistrea includes canonical native Demo Apps for iOS and Android. Both applications implement all 12 required shared Scenario IDs and act as executable contract fixtures, not marketing samples. The `demo.navigation.basic` Runtime Snapshot path is verified end to end on iOS UIKit and Android View, Runtime events and reversible tuning are verified on both platforms, and real-input automation is verified on Android; `examples/scenarios/manifest.json` records the authoritative per-platform capability status for the remaining scenario contracts.
 
 Both applications must implement the same required Scenario IDs for:
 
@@ -395,7 +395,7 @@ Vistrea exposes the same Engine use cases through:
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-The implemented Agent slice provides strict JSON CLI commands and MCP tools for Workspace status plus Snapshot capture, list, and get. Both use the same authenticated Host Local API client, and the `vistrea-inspect-runtime` Skill composes status, capture, and persisted inspection without accessing SQLite or artifact paths. Exploration, design review, tuning, validation, versioning, and Hub operations remain future adapter work.
+The implemented Agent slice exposes 45 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — through one authenticated Host Local API client. The strict JSON CLI, 44 stdio MCP tools, four Skills (`vistrea-inspect-runtime`, `vistrea-review-design`, `vistrea-tune-ui`, `vistrea-verify-change`), and the headless CI gate consume that same client without accessing SQLite or artifact paths. Exploration sessions, versioning, and sync operations remain future adapter work; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
 
 Additional Skill concepts:
 
@@ -454,6 +454,8 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 
 ## 11. Delivery roadmap
 
+Phase markers summarize the current boundary status; `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream truth and verification evidence.
+
 ### Phase 0: contracts and local data foundation — verified
 
 - Core runtime, design, version, and object models are verified as protocol v1 schemas and fixtures.
@@ -470,7 +472,7 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 - SQLite metadata and content-addressed objects persist and reopen the identical Snapshot.
 - CLI reads the same persisted result; platform implementation remains in progress beyond Snapshot and connection capabilities.
 
-### Phase 2: SDKs, Inspector, and design workflow
+### Phase 2: SDKs, Inspector, and design workflow — verified
 
 - platform adapters and in-app Inspector;
 - transient event capture;
@@ -478,25 +480,31 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 - Review Issues;
 - allowlisted tuning and reversible Tuning Patches.
 
-### Phase 3: exploration and Deep Wiki
+Runtime events and reversible tuning are verified on both platforms; the design comparison workbench and full SwiftUI/Compose capture continue as follow-up slices.
+
+### Phase 3: exploration and Deep Wiki — verified on Android, implemented on iOS
 
 - WDA/UIAutomator execution;
 - deterministic exploration;
 - state identity, deduplication, recovery, and safety;
 - Canvas, paths, backlinks, search, and version history.
 
-### Phase 4: validation and advanced inspection
+The real-input automation acceptance has passed on Android; the iOS WebDriverAgent lane is implemented and awaits its first device run. Exploration and the Deep Wiki are implemented with passing integration tests.
+
+### Phase 4: validation and advanced inspection — implemented
 
 - structural, design, visual, behavioral, and accessibility rules;
 - build graph and Snapshot diff;
 - 3D View/Layer Inspector;
 - failure evidence replay.
 
-### Phase 5: expanded Agents and Vistrea Hub
+### Phase 5: expanded Agents and Vistrea Hub — implemented for the local surface
 
 - extend the initial Snapshot CLI, MCP, and Skill adapters to all stable Engine use cases;
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
+
+The Agent adapters cover all 45 implemented Host operations, and an optional loopback Hub pack relay serves push and fetch; team spaces, permissions, discovery, and collaboration remain future Hub work.
 
 ## 12. First complete demonstration
 

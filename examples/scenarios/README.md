@@ -110,7 +110,7 @@ Demo App launch
 -> Data reopen
 ```
 
-Both loop statuses are `verified`. Their real-device acceptance tests validate canonical protocol structure, the required `demo.home.open_catalog` stable node, PNG object integrity, Studio presentation, CLI equality, production SQLite/Object Store reopen, credential rotation, and secret-free artifacts. This evidence verifies the native Snapshot and Runtime connection capabilities; each platform remains `in-progress` because events, automation, exploration, design tuning, and validation are not implemented.
+Both loop statuses are `verified`. Their real-device acceptance tests validate canonical protocol structure, the required `demo.home.open_catalog` stable node, PNG object integrity, Studio presentation, CLI equality, production SQLite/Object Store reopen, credential rotation, and secret-free artifacts. This evidence verifies the native Snapshot and Runtime connection capabilities. Runtime events and design tuning are also verified on both platforms, real-input automation and state-identity normalization are verified on Android, and the remaining automation and exploration capabilities are implemented pending device verification; design comparison and the validation capabilities are still planned. Each platform therefore remains `in-progress`, with `manifest.json` as the authoritative per-capability status.
 
 ## Validation
 

@@ -7,7 +7,7 @@ This module is the authenticated loopback HTTP adapter shared by Vistrea Studio 
 - The caller must bind an explicit literal `127.0.0.1` or `::1` address. Hostnames, wildcard addresses, and non-loopback interfaces fail closed.
 - Every server start creates an independent 256-bit bearer token. The token is returned once in the `HostLocalApiHandle`, is not a Runtime transport credential, and is never persisted in the Workspace.
 - Every route requires exactly one `Authorization: Bearer <token>` header.
-- JSON request bodies default to a 64 KiB limit and cannot exceed a configured 1 MiB ceiling.
+- JSON request bodies default to a 64 KiB limit and cannot exceed a configured 1 MiB ceiling; Deep Wiki node writes get a fixed 2 MiB budget so the documented 262144-character Markdown capacity stays reachable.
 - JSON object keys must be unique at every nesting level and are checked before `JSON.parse` can normalize duplicate values.
 - HTTP errors expose stable codes and sanitized messages, never stack traces, secrets, SQLite rows, or physical paths.
 
@@ -22,6 +22,21 @@ All JSON uses `application/json; charset=utf-8`. Successful Snapshot responses a
 | `GET` | `/v1/snapshots/<snapshot_id>` | canonical `RuntimeSnapshot` |
 | `POST` | `/v1/captures` | canonical `RuntimeSnapshot` with HTTP `201` |
 | `GET` | `/v1/objects/<sha256:hex>` | exact encoded object bytes |
+| `GET` | `/v1/events` | persisted Runtime event timeline with gap evidence |
+
+The remaining implemented route families return canonical domain resources
+(creations use HTTP `201`) and map one-to-one to the operations in
+`docs/interfaces/OPERATION_CATALOG.md`:
+
+| Family | Routes |
+|---|---|
+| Design assets and references | `POST /v1/design-assets`, `POST /v1/design-references`, `GET /v1/design-references/<id>`, `POST /v1/design-mappings`, `POST /v1/design-comparisons`, `GET /v1/design-comparisons/<id>` |
+| Review issues | `POST /v1/review-issues`, `GET /v1/review-issues`, `GET /v1/review-issues/<id>`, `POST /v1/review-issues/<id>/transitions`, `POST /v1/review-issues/<id>/verifications` |
+| Protected tuning | `POST /v1/tuning-patches`, `GET /v1/tuning-patches/<id>`, `POST /v1/tuning-applications`, `GET /v1/tuning-applications/active`, `GET /v1/tuning-applications/<id>`, `POST /v1/tuning-applications/<id>/revert` |
+| Screen graph | `POST /v1/screen-graph/state-observations`, `POST /v1/screen-graph/transition-observations`, `GET /v1/screen-graph`, `GET /v1/screen-graph/paths`, `GET /v1/screen-states/<id>` |
+| Deep Wiki | `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes`, `GET /v1/wiki/nodes/<id>`, `POST /v1/wiki/nodes/<id>/revisions`, `GET /v1/wiki/nodes/<id>/backlinks`, `POST /v1/wiki/links`, `POST /v1/wiki/links/<id>/unlink`, `GET /v1/wiki/related` |
+| Validation and build diff | `POST /v1/validation/snapshot-runs`, `POST /v1/validation/graph-runs`, `GET /v1/validation/runs/<id>`, `GET /v1/validation/findings`, `GET /v1/validation/findings/<id>`, `POST /v1/validation/findings/<id>/suppress`, `POST /v1/validation/build-diffs`, `GET /v1/validation/build-diffs/<id>` |
+| Portable exchange | `POST /v1/exchange/exports`, `POST /v1/exchange/imports` |
 
 `POST /v1/captures` accepts `{}` and applies this deterministic default Engine command:
 
