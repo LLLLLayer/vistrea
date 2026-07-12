@@ -76,18 +76,17 @@ The native iOS UIKit and Android View Demo Apps implement the same 12 required c
 
 ## Recommended implementation sequence
 
-1. Complete portable `.vistrea-pack` exchange over the verified protocol and local Data foundation.
-2. Add Runtime events plus protected design review and reversible tuning.
-3. Add WDA/UIAutomator actions, exploration, and Screen State identity.
-4. Persist Canvas and Deep Wiki knowledge, then add validation and build diff.
-5. Expand CLI, MCP, Skills, and CI with those Engine use cases.
-6. Implement optional Vistrea Hub synchronization after local semantics are stable.
+1. Add Runtime events plus protected design review and reversible tuning.
+2. Add WDA/UIAutomator actions, exploration, and Screen State identity.
+3. Persist Canvas and Deep Wiki knowledge, then add validation and build diff.
+4. Expand CLI, MCP, Skills, and CI with those Engine use cases.
+5. Implement optional Vistrea Hub synchronization after local semantics are stable.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
 ## Current status
 
-Phase 0A1, Phase 0A2, and the Phase 0B local Data foundation are verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 78 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, and a file-backed content-addressed Object Store. Phase 0 remains open because portable `.vistrea-pack` exchange is not implemented.
+Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
 
 The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View. A production local Host, macOS Snapshot Studio, strict CLI, stdio MCP server, and `vistrea-inspect-runtime` Skill consume the same persisted Snapshot path. This does not yet implement Runtime events, device automation, exploration, design tuning, full Canvas or Deep Wiki workflows, `.vistrea-pack`, CI validation, or Vistrea Hub.
 

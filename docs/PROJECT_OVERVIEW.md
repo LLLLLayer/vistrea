@@ -454,12 +454,12 @@ See `docs/REPOSITORY_STRUCTURE.md` for ownership and dependency rules.
 
 ## 11. Delivery roadmap
 
-### Phase 0: contracts and local data foundation — in progress
+### Phase 0: contracts and local data foundation — verified
 
 - Core runtime, design, version, and object models are verified as protocol v1 schemas and fixtures.
 - Common, Runtime connection, automation, Engine, Data, Agent, and Hub interfaces are documented.
 - The language-owned Data API, in-memory reference adapter, SQLite metadata, content-addressed local Object Store, and Commit/Ref persistence are verified.
-- Portable `.vistrea-pack` exchange remains incomplete, so Phase 0 is not complete.
+- Portable full and thin `.vistrea-pack` export/import is verified over the shared Commit and ObjectRef identity; readable Markdown/HTML exports remain a later exchange slice.
 
 ### Phase 1: native Snapshot loops — verified for UIKit and Android View
 

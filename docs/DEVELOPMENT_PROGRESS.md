@@ -14,10 +14,10 @@ Last updated: 2026-07-12
 
 Two roadmap boundaries are tracked independently:
 
-- **Phase 0: contracts and local data foundation — In progress.** Phase 0A1, Phase 0A2, and the Phase 0B local Data foundation are verified. Portable `.vistrea-pack` exchange is not implemented, so Phase 0 is not complete.
+- **Phase 0: contracts and local data foundation — Verified.** Phase 0A1, Phase 0A2, the Phase 0B local Data foundation, and portable `.vistrea-pack` export/import are verified, which completes the Phase 0 boundary. Readable Markdown/HTML exports remain a later exchange slice.
 - **Phase 1: native Snapshot loop — Verified for iOS UIKit and Android View.** Both real native Demo Apps can connect to the production Host, capture a canonical Snapshot and PNG, render the evidence through Studio, read the same Snapshot through CLI, persist it through SQLite and the content-addressed Object Store, and reopen identical data.
 
-The verified Snapshot loops do not imply that the complete product is implemented. Runtime events, device automation, exploration, Screen State identity, design review, protected tuning, full Canvas and Deep Wiki workflows, validation, build diff, portable exchange, CI orchestration, and Vistrea Hub remain later slices.
+The verified Snapshot loops do not imply that the complete product is implemented. Runtime events, device automation, exploration, Screen State identity, design review, protected tuning, full Canvas and Deep Wiki workflows, validation, build diff, CI orchestration, and Vistrea Hub remain later slices.
 
 ## Workstream status
 
@@ -29,7 +29,7 @@ The verified Snapshot loops do not imply that the complete product is implemente
 | Data API and in-memory adapter | `data-1` | Verified | All nine repositories, transaction-bound Unit of Work, deterministic reference adapter, semantic validation, revisions, and Commit/Ref CAS | 10 memory Data contract tests; commit `5496a24` |
 | SQLite metadata | `sqlite-1` | Verified | Forward-only exact-byte migrations, all repositories, durable ObjectRef catalog and associations, transactions, reopen, health, and corruption rejection | 9 SQLite contracts in the 30-test Host contract suite; commit `08359d1` |
 | Content-addressed Object Store | `objects-1` | Verified | Encoded-byte SHA-256 identity, atomic publication, integrity checks, range reads, retention, recovery, and symlink-safe paths | 11 Object Store contracts in the 30-test Host contract suite; commit `08359d1` |
-| Portable exchange | `data-exchange-draft-1` | Planned | `.vistrea-pack` format is documented but no exporter or importer exists | No executable acceptance yet |
+| Portable exchange | `data-exchange-1` | Verified | Full and thin `.vistrea-pack` exporter/importer over the shared Commit and ObjectRef identity, protocol pack schema and fixtures, deterministic bytes, and `LocalDataWorkspace.exchange` composition; readable exports remain later | 7 exchange contracts in the 37-test Host contract suite plus a cross-Workspace integration; commit `b801349` |
 | Snapshot Engine and production local Host | `local-host-1` | Verified | Capture/Get/List, Object-before-metadata ordering, authenticated Runtime transport, Local API, Runtime session routing, production Workspace composition, and private connection descriptor | 30 Host contracts and 28 Host integrations; commits `87490c4`, `70a6c8f`, `6198de1`, and `28915b7` |
 | iOS Runtime SDK and Demo App | `uikit-runtime-loop-1` | In progress | Canonical models, all shared scenarios, UIKit hierarchy/PNG capture, Debug Inspector, hardened Runtime connection, and verified first Snapshot loop exist; events and protected tuning remain | 17 Swift tests in Debug and Release, 4 Node/Swift interop tests, real iOS E2E; commits `4c67fb2`, `be60c0b`, `7671364`, and `74967a6` |
 | Android Runtime SDK and Demo App | `android-view-runtime-loop-1` | In progress | Canonical models, all shared scenarios, View/ViewGroup capture, Debug Inspector, protected Runtime connection, Release exclusion, and verified first Snapshot loop exist; events and protected tuning remain | 4 Node/Kotlin interop tests, 5 API 36.1 instrumentation tests, release-boundary verification, and real Android E2E; commit `1925b3a` |
@@ -55,6 +55,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | Complete `DataUnitOfWork` shared model coverage | Accepted for pre-release v1 | `docs/protocol/DATA_MODEL_COVERAGE.md` and `protocol/model-coverage/v1.json` |
 | Host and local Data stack | Accepted | Node.js/TypeScript, `better-sqlite3`, forward-only migrations, and file-backed content-addressed objects in ADR-0004 |
 | First vertical-loop boundary | Accepted and verified | iOS-first acceptance in ADR-0005, followed by the symmetric Android View loop |
+| `.vistrea-pack` version 1 container and import order | Accepted and verified | ADR-0006 with `protocol/schema/v1/exchange-pack.schema.json` and canonical fixtures |
 | Native Runtime transport | Verified | Authenticated bounded loopback JSON lines, best-effort exactly-one capture termination, and Debug/Internal clients only |
 | Local product adapter | Implemented | Authenticated loopback HTTP Host Local API with independent per-run credentials |
 | macOS UI stack | Implemented for Snapshot scope | Native SwiftUI package and application |
@@ -85,6 +86,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `3d7092c` | Added and passed the symmetric real persisted Android vertical-loop acceptance test. |
 | `28915b7` | Hardened Host and iOS capture cancellation races and unsupported field-mask handling. |
 | `1925b3a` | Connected the protected Android Runtime to Host with Release exclusion and race-safe cancellation. |
+| `b801349` | Added portable full/thin `.vistrea-pack` exchange and completed the Phase 0 boundary. |
 
 ## Native vertical-loop evidence
 
@@ -143,10 +145,14 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-12 | Android production-backed vertical loop | `pnpm test:e2e:android-real-vertical` | 1 of 1 passed; exact evidence recorded above |
 | 2026-07-12 | Android connection lifecycle regression | `./gradlew :runtime-connection:testDebugUnitTest`; final changed-code detekt | 12 of 12 Debug unit tests passed; stalled-handshake caller cancellation and explicit close both resume without waiting for the 300-second timeout; detekt reported 0 issues |
 | 2026-07-12 | Final integrated repository check | `pnpm install --frozen-lockfile`; `pnpm check` | Locked install passed; 78 fixtures, 24 protocol contracts, 30 Host contracts, 28 Host integrations, and 14 Scenario tests passed |
+| 2026-07-12 | Exchange pack protocol schema and fixtures | `pnpm protocol:validate` | Model coverage and 84 of 84 fixtures passed, including 6 exchange-pack fixtures |
+| 2026-07-12 | Portable `.vistrea-pack` exchange contracts | `pnpm test:host-contract` | 37 of 37 tests passed, including 7 pack contracts: full round trip, deterministic bytes, thin prerequisites, tamper and truncation rejection, ref-conflict reporting, payload rejection, and command validation |
+| 2026-07-12 | Cross-Workspace pack transfer | `pnpm test:host-integration` | 29 of 29 tests passed, including one full pack moved between two production local Workspaces through `LocalDataWorkspace.exchange` |
+| 2026-07-12 | Complete executable check after exchange | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 29 Host integrations, and 14 Scenario tests passed |
 
 ## Known follow-up gaps
 
-- `.vistrea-pack` export/import and thin-pack policy remain the explicit Phase 0 completion gap.
+- Readable Markdown/HTML exports (`exportReadable`) and compressed pack payload support remain later exchange slices.
 - Compressed Object fixtures do not yet include executable gzip/zstd and byte-range vectors.
 - Runtime Event Batch production capture and event timeline are not implemented.
 - WDA and UIAutomator providers, action safety enforcement, exploration, recovery, and Screen State deduplication are not implemented.
@@ -157,8 +163,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 
 ## Next milestones
 
-1. Implement `.vistrea-pack` export/import over existing Commit, Ref, ObjectRef, SQLite, and Object Store contracts to complete Phase 0.
-2. Add production Runtime Event Batch capture and expose the event timeline through Host and Studio.
-3. Implement one design-reference comparison, one Review Issue flow, and one protected allowlisted tuning property with apply/revert and re-verification.
-4. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
-5. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
+1. Add production Runtime Event Batch capture and expose the event timeline through Host and Studio.
+2. Implement one design-reference comparison, one Review Issue flow, and one protected allowlisted tuning property with apply/revert and re-verification.
+3. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
+4. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
