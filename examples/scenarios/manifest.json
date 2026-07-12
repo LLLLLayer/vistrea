@@ -32,7 +32,7 @@
       "implementation_status": "in-progress",
       "initial_adapter": "view-viewgroup",
       "capabilities": {
-        "runtime.snapshot": "planned",
+        "runtime.snapshot": "implemented",
         "runtime.events": "planned",
         "runtime.connection": "planned",
         "automation.actions": "planned",
@@ -45,7 +45,7 @@
         "validation.build-diff": "planned"
       },
       "limitations": [
-        "The native Demo App and Debug View Tree are implemented; canonical View capture and Host Runtime connection remain planned."
+        "The canonical View capture adapter is implemented and instrumented; the Demo Inspector and Host Runtime connection are not yet composed."
       ]
     }
   },

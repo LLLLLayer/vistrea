@@ -1,0 +1,187 @@
+@file:Suppress("DEPRECATION")
+
+package dev.vistrea.runtime.android
+
+import android.graphics.Color
+import android.test.InstrumentationTestCase
+import android.text.InputType
+import android.view.View
+import android.widget.Button
+import android.widget.EditText
+import android.widget.FrameLayout
+import dev.vistrea.protocol.v1.BuildId
+import dev.vistrea.protocol.v1.ObjectHash
+import dev.vistrea.protocol.v1.ProjectId
+import dev.vistrea.protocol.v1.RedactedContentField
+import dev.vistrea.protocol.v1.RuntimeSnapshotJson
+import java.security.MessageDigest
+
+class AndroidViewRuntimeCaptureInstrumentedTest : InstrumentationTestCase() {
+    fun testCapturesCanonicalTreeAndPngObject() {
+        lateinit var captured: AndroidViewRuntimeCaptureResult
+        instrumentation.runOnMainSync {
+            val root = fixtureRoot()
+            captured = adapter().capture(
+                rootView = root,
+                scenarioId = "demo.navigation.basic",
+                includeScreenshot = true,
+            )
+        }
+
+        val snapshot = captured.snapshot
+        assertEquals("demo.navigation.basic", snapshot.extensions["vistrea.scenario_id"]?.toString()?.trim('"'))
+        assertEquals(1, snapshot.trees.size)
+        val nodes = requireNotNull(snapshot.trees.single().payload.inlineNodes)
+        assertEquals(2, nodes.size)
+        val button = snapshot.trees.single().payload.inlineNodes
+            ?.single { it.stableId?.value == BUTTON_ID }
+        assertNotNull(button)
+        assertTrue(button?.actions?.contains(dev.vistrea.protocol.v1.NodeAction.TAP) == true)
+        val root = snapshot.trees.single().payload.inlineNodes
+            ?.single { it.stableId?.value == ROOT_ID }
+        assertEquals(root?.nodeId, button?.parentId)
+        assertEquals(listOf(button?.nodeId), root?.childIds)
+
+        val objectValue = captured.objects.single()
+        assertEquals("image/png", objectValue.reference.mediaType)
+        val objectBytes = objectValue.bytes
+        assertEquals(objectBytes.size.toLong(), objectValue.reference.byteSize.value)
+        assertTrue(objectBytes.size > PNG_SIGNATURE.size)
+        assertTrue(objectBytes.copyOf(PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE))
+        val digest = MessageDigest.getInstance("SHA-256").digest(objectBytes)
+        val expectedHash = "sha256:" + digest.joinToString("") { "%02x".format(it.toInt() and BYTE_MASK) }
+        assertEquals(ObjectHash(expectedHash), objectValue.reference.hash)
+        objectBytes[0] = 0
+        assertTrue(objectValue.bytes.copyOf(PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE))
+        val screenshot = requireNotNull(snapshot.screenshot)
+        assertEquals(objectValue.reference, screenshot.objectRef)
+        assertEquals(
+            screenshot.pixelSize.width.value.toDouble(),
+            screenshot.coverage.width * snapshot.display.pixelScaleX,
+            PIXEL_EPSILON,
+        )
+        assertEquals(
+            screenshot.pixelSize.height.value.toDouble(),
+            screenshot.coverage.height * snapshot.display.pixelScaleY,
+            PIXEL_EPSILON,
+        )
+        assertEquals(snapshot, RuntimeSnapshotJson.decode(RuntimeSnapshotJson.encode(snapshot)))
+    }
+
+    fun testPasswordTextIsRedacted() {
+        lateinit var captured: AndroidViewRuntimeCaptureResult
+        instrumentation.runOnMainSync {
+            val context = instrumentation.targetContext
+            val root = FrameLayout(context).apply {
+                tag = ROOT_ID
+                setBackgroundColor(Color.WHITE)
+            }
+            val password = EditText(context).apply {
+                tag = PASSWORD_ID
+                contentDescription = PASSWORD_ID
+                setText("secret-value")
+                hint = "Password"
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            root.addView(password, FrameLayout.LayoutParams(MATCH_PARENT, CONTROL_HEIGHT_PX))
+            layoutRoot(root)
+            captured = adapter().capture(root, includeScreenshot = false)
+        }
+
+        val passwordNode = captured.snapshot.trees.single().payload.inlineNodes
+            ?.single { it.stableId?.value == PASSWORD_ID }
+        assertNull(passwordNode?.content?.text)
+        assertNull(passwordNode?.content?.value)
+        assertNull(passwordNode?.accessibility?.value)
+        assertEquals(
+            listOf(RedactedContentField.TEXT, RedactedContentField.VALUE),
+            passwordNode?.content?.redactedFields,
+        )
+    }
+
+    fun testNodeLimitAndMainThreadFailClosed() {
+        lateinit var root: FrameLayout
+        instrumentation.runOnMainSync {
+            root = fixtureRoot()
+        }
+        val wrongThread = runCatching { adapter().capture(root) }.exceptionOrNull()
+        assertTrue(wrongThread is AndroidRuntimeCaptureException)
+        assertEquals(
+            AndroidRuntimeCaptureFailure.WRONG_THREAD,
+            (wrongThread as AndroidRuntimeCaptureException).failure,
+        )
+
+        var nodeLimit: Throwable? = null
+        instrumentation.runOnMainSync {
+            nodeLimit = runCatching {
+                adapter(maximumNodeCount = 1).capture(root, includeScreenshot = false)
+            }.exceptionOrNull()
+        }
+        assertTrue(nodeLimit is AndroidRuntimeCaptureException)
+        assertEquals(
+            AndroidRuntimeCaptureFailure.NODE_LIMIT_EXCEEDED,
+            (nodeLimit as AndroidRuntimeCaptureException).failure,
+        )
+    }
+
+    private fun fixtureRoot(): FrameLayout {
+        val context = instrumentation.targetContext
+        val root = FrameLayout(context).apply {
+            tag = ROOT_ID
+            contentDescription = ROOT_ID
+            setBackgroundColor(Color.WHITE)
+        }
+        val button = Button(context).apply {
+            tag = BUTTON_ID
+            contentDescription = BUTTON_ID
+            text = "Open catalog"
+            setOnClickListener { }
+        }
+        root.addView(button, FrameLayout.LayoutParams(MATCH_PARENT, CONTROL_HEIGHT_PX))
+        layoutRoot(root)
+        return root
+    }
+
+    private fun layoutRoot(root: View) {
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(ROOT_WIDTH_PX, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(ROOT_HEIGHT_PX, View.MeasureSpec.EXACTLY),
+        )
+        root.layout(0, 0, ROOT_WIDTH_PX, ROOT_HEIGHT_PX)
+    }
+
+    private fun adapter(maximumNodeCount: Int = DEFAULT_TEST_NODE_LIMIT) =
+        AndroidViewRuntimeCaptureAdapter(
+            AndroidViewRuntimeCaptureConfiguration(
+                projectId = ProjectId("project_019f0000-0000-7000-8000-000000000001"),
+                buildId = BuildId("build_019f0000-0000-7000-8000-000000000002"),
+                sdkVersion = "0.1.0",
+                adapterVersion = "0.1.0",
+                applicationVersionOverride = "1.0.0",
+                maximumNodeCount = maximumNodeCount,
+            ),
+        )
+
+    private companion object {
+        const val ROOT_ID = "demo.capture.root"
+        const val BUTTON_ID = "demo.capture.button"
+        const val PASSWORD_ID = "demo.capture.password"
+        const val ROOT_WIDTH_PX = 360
+        const val ROOT_HEIGHT_PX = 640
+        const val CONTROL_HEIGHT_PX = 96
+        const val MATCH_PARENT = -1
+        const val DEFAULT_TEST_NODE_LIMIT = 100
+        const val BYTE_MASK = 0xff
+        const val PIXEL_EPSILON = 0.000_001
+        val PNG_SIGNATURE = byteArrayOf(
+            0x89.toByte(),
+            0x50,
+            0x4e,
+            0x47,
+            0x0d,
+            0x0a,
+            0x1a,
+            0x0a,
+        )
+    }
+}
