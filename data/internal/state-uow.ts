@@ -1579,6 +1579,14 @@ class StateVersionRepository extends BoundStateRepository implements VersionRepo
     return paginate(values, page, this.unit.snapshotVersion);
   }
 
+  listRefs(page?: PageRequest): Page<Ref> {
+    this.read();
+    const values = [...this.unit.state.refs.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    return paginate(values, page, this.unit.snapshotVersion);
+  }
+
   resolveRef(name: string): Ref {
     this.read();
     const value = this.unit.state.refs.get(name);

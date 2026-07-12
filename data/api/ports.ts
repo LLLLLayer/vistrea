@@ -249,6 +249,7 @@ export interface VersionRepository extends UnitOfWorkBound {
   getCommit(commitId: string): Commit;
   listCommits(query?: CommitQuery, page?: PageRequest): Page<Commit>;
   resolveRef(name: string): Ref;
+  listRefs(page?: PageRequest): Page<Ref>;
   updateRef(name: string, commitId: string, precondition: RefUpdatePrecondition): Ref;
   createTag(tag: Tag): Tag;
   reachableObjects(commitIds: readonly string[]): Iterable<ObjectRef>;
