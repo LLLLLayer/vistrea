@@ -186,7 +186,9 @@ test(
     await delay(settleMilliseconds);
 
     // Home Snapshot and its Screen State observation through the product API.
-    const homeSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const homeSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
     validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, homeSnapshot);
     assert.equal(hasStableId(homeSnapshot, homeStableId), true);
     const homeObserved = await postJson(
@@ -232,7 +234,9 @@ test(
     assert.equal(tapResult.target_resolution?.resolution_method, "accessibility");
     await delay(settleMilliseconds);
 
-    const catalogSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, catalogStableId),
+    );
     assert.equal(hasStableId(catalogSnapshot, catalogStableId), true);
     assert.notEqual(
       ScreenGraphEngine.computeStructuralIdentity(
@@ -277,7 +281,9 @@ test(
     });
     assert.equal(backResult.outcome, "uncertain");
     await delay(settleMilliseconds);
-    const homeAgainSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const homeAgainSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
     assert.equal(hasStableId(homeAgainSnapshot, homeStableId), true);
     assert.equal(
       ScreenGraphEngine.computeStructuralIdentity(
@@ -338,7 +344,14 @@ test(
       automation_session_id: session.automation_session_id,
       maximum_actions: 8,
       settle_milliseconds: settleMilliseconds,
+      // The in-app Inspector launcher is Vistrea tooling and "BackButton" is
+      // UIKit's own navigation-bar chrome: neither is application frontier,
+      // and physical back is already the engine's return mechanism.
+      excluded_stable_ids: ["vistrea.inspector.capture", "BackButton"],
     });
+    if (report.discovered_state_ids.length !== 3 || report.stopped_reason !== "frontier_exhausted") {
+      console.error(`Exploration evidence: ${JSON.stringify(report)}`);
+    }
     assert.equal(report.stopped_reason, "frontier_exhausted");
     assert.equal(report.discovered_state_ids.length, 3);
     const version = exploration.tagGraphVersion({
@@ -368,6 +381,27 @@ test(
     );
   },
 );
+
+/**
+ * Polls real captures until the screen settles into the expected structure.
+ * Cold-start navigation regularly outlasts one fixed settle delay, so the
+ * acceptance waits for evidence; on deadline it returns the last capture so
+ * the caller's assertions fail with the actually observed screen.
+ */
+async function captureUntil(
+  host: LocalHostHandle,
+  secrets: readonly string[],
+  predicate: (snapshot: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const snapshot = await captureSnapshotThroughApi(host, secrets);
+    if (predicate(snapshot) || Date.now() >= deadline) {
+      return snapshot;
+    }
+    await delay(1_000);
+  }
+}
 
 function hasStableId(snapshot: Record<string, unknown>, stableId: string): boolean {
   return asArray(snapshot["trees"], "Snapshot trees").some((treeValue) => {

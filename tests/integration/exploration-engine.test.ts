@@ -308,6 +308,19 @@ test("deterministic exploration discovers, deduplicates, and versions the Screen
   });
   assert.ok(paths.length >= 1);
   assert.equal(paths[0]?.transition_ids.length, 2);
+
+  // Excluded stable IDs (for example Vistrea's own Inspector launcher) never
+  // enter the frontier, so an excluded entry point ends the walk immediately.
+  const fenced = await explorationContext();
+  const fencedReport = await fenced.exploration.explore({
+    automation_session_id: fenced.sessionId,
+    maximum_actions: 20,
+    settle_milliseconds: 0,
+    excluded_stable_ids: ["demo.home.open_catalog"],
+  });
+  assert.equal(fencedReport.discovered_state_ids.length, 1);
+  assert.equal(fencedReport.stopped_reason, "frontier_exhausted");
+  assert.deepEqual(fencedReport.steps, []);
 });
 
 test("a bounded budget stops exploration early and later runs extend the same versioned graph", async () => {

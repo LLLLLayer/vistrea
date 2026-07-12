@@ -13,6 +13,7 @@ Screen State identity, deduplication, and Screen Graph materialization over pers
 `ExplorationEngine` adds bounded deterministic exploration and path versioning on top:
 
 - walks the running application depth-first over real executed actions: tap candidates come only from nodes the captured tree declares tappable, in sorted stable-identifier order, and system back physically returns after a branch is exhausted;
+- keeps caller-declared `excluded_stable_ids` out of the frontier, so Vistrea's own debug tooling (the in-app Inspector launcher) and platform navigation chrome (UIKit's `BackButton`) never count as application behavior;
 - captures before and after every action, deduplicates both endpoint states, and records every Transition, so repeated runs create nothing new and only accumulate occurrence evidence;
 - stops on the explicit action budget, an exhausted frontier, or a stuck back gesture, and never generates dangerous or forbidden actions;
 - freezes the current materialized graph under `tag` version selectors (`tagGraphVersion`) and diffs two frozen materializations (`compareGraphVersions`) so partial and complete coverage runs compare precisely.

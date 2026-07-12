@@ -132,6 +132,28 @@ test(
       allowFailure: true,
       label: "Android keyguard dismissal",
     });
+    // The default 30-second display sleep swallows injected input while
+    // in-process capture keeps working, so the display must stay awake for
+    // the whole automation walk.
+    await runAdb(serial, ["shell", "svc", "power", "stayon", "true"], {
+      allowFailure: true,
+      label: "Android display stay-awake",
+    });
+    // A cold boot reports boot_completed while the launcher is still
+    // starting; launching the Demo into that churn races its capture surface
+    // and connection, so wait for a focused launcher first.
+    const launcherDeadline = Date.now() + 60_000;
+    for (;;) {
+      const focus = await runAdb(serial, ["shell", "dumpsys", "window", "windows"], {
+        allowFailure: true,
+        label: "Android launcher readiness",
+      });
+      const focused = /mCurrentFocus=Window\{[^}]*\}/.exec(focus.stdout)?.[0] ?? "";
+      if (/launcher/i.test(focused) || Date.now() >= launcherDeadline) {
+        break;
+      }
+      await delay(2_000);
+    }
     await runAdb(serial, ["shell", "am", "force-stop", debugPackage], {
       allowFailure: true,
       label: "stale Android Demo stop",
@@ -161,61 +183,81 @@ test(
       { secrets: knownSecrets, label: "Android Runtime adb reverse" },
     );
 
-    const runtimeTokenBytes = Buffer.from(resources.host.runtime.authorizationToken, "utf8");
-    try {
-      await runCommand(tokenInstaller, [], {
-        cwd: demoRoot,
-        environment: cleanEnvironment({
-          ANDROID_HOME: androidHome,
-          ANDROID_SERIAL: serial,
-          ADB: adbPath,
-          VISTREA_ANDROID_PACKAGE: debugPackage,
-        }),
-        input: runtimeTokenBytes,
-        secrets: knownSecrets,
-        forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
-        label: "one-shot Android Runtime token installation",
-      });
-    } finally {
-      runtimeTokenBytes.fill(0);
-    }
+    // The one-shot token allows exactly one connection attempt, and a
+    // cold-booted system can still be churning when the Demo starts, so a
+    // failed attempt gets a fresh token and a clean relaunch.
+    for (let attempt = 1; ; attempt += 1) {
+      if (attempt > 1) {
+        await runAdb(serial, ["shell", "am", "force-stop", debugPackage], {
+          allowFailure: true,
+          label: "Android Demo relaunch stop",
+        });
+      }
+      const runtimeTokenBytes = Buffer.from(resources.host.runtime.authorizationToken, "utf8");
+      try {
+        await runCommand(tokenInstaller, [], {
+          cwd: demoRoot,
+          environment: cleanEnvironment({
+            ANDROID_HOME: androidHome,
+            ANDROID_SERIAL: serial,
+            ADB: adbPath,
+            VISTREA_ANDROID_PACKAGE: debugPackage,
+          }),
+          input: runtimeTokenBytes,
+          secrets: knownSecrets,
+          forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
+          label: "one-shot Android Runtime token installation",
+        });
+      } finally {
+        runtimeTokenBytes.fill(0);
+      }
 
-    const launch = await runAdb(
-      serial,
-      [
-        "shell",
-        "am",
-        "start",
-        "-W",
-        "-n",
-        debugComponent,
-        "--es",
-        "VISTREA_RUNTIME_HOST",
-        "127.0.0.1",
-        "--es",
-        "VISTREA_RUNTIME_PORT",
-        String(resources.host.runtime.port),
-        "--es",
-        "vistrea.scenario_id",
-        scenarioId,
-        "--es",
-        "vistrea.profile_id",
-        scenarioProfile,
-      ],
-      {
-        secrets: knownSecrets,
-        forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
-        timeoutMilliseconds: 60_000,
-        label: "Android Demo Scenario launch",
-      },
-    );
-    assert.match(launch.stdout, /Status:\s+ok/);
-    await resources.host.waitForRuntime(60_000);
+      const launch = await runAdb(
+        serial,
+        [
+          "shell",
+          "am",
+          "start",
+          "-W",
+          "-n",
+          debugComponent,
+          "--es",
+          "VISTREA_RUNTIME_HOST",
+          "127.0.0.1",
+          "--es",
+          "VISTREA_RUNTIME_PORT",
+          String(resources.host.runtime.port),
+          "--es",
+          "vistrea.scenario_id",
+          scenarioId,
+          "--es",
+          "vistrea.profile_id",
+          scenarioProfile,
+        ],
+        {
+          secrets: knownSecrets,
+          forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
+          timeoutMilliseconds: 60_000,
+          label: "Android Demo Scenario launch",
+        },
+      );
+      assert.match(launch.stdout, /Status:\s+ok/);
+      try {
+        await resources.host.waitForRuntime(30_000);
+        break;
+      } catch (error) {
+        if (attempt >= 3) {
+          throw error;
+        }
+      }
+    }
     assert.equal(resources.host.runtimeConnected, true);
     await delay(settleMilliseconds);
 
     // Home Snapshot and its Screen State observation through the product API.
-    const homeSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const homeSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
     validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, homeSnapshot);
     assert.equal(hasStableId(homeSnapshot, homeStableId), true);
     const homeObserved = await postJson(
@@ -226,6 +268,16 @@ test(
     );
     assert.equal(homeObserved["created"], true);
     const homeState = asRecord(homeObserved["screen_state"], "Home Screen State");
+
+    // The display must be interactive before any injected input.
+    await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_WAKEUP"], {
+      allowFailure: true,
+      label: "Android display wake",
+    });
+    await runAdb(serial, ["shell", "wm", "dismiss-keyguard"], {
+      allowFailure: true,
+      label: "Android keyguard re-dismissal",
+    });
 
     // A real user-level tap through adb, resolved from the persisted Snapshot.
     // A real wall clock keeps authorization expiry meaningful for the
@@ -266,7 +318,12 @@ test(
     await delay(settleMilliseconds);
 
     // The catalog Snapshot proves the tap actually navigated.
-    const catalogSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, catalogStableId),
+    );
+    if (!hasStableId(catalogSnapshot, catalogStableId)) {
+      await dumpDeviceEvidence(serial, "tap-did-not-navigate");
+    }
     validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, catalogSnapshot);
     assert.equal(hasStableId(catalogSnapshot, catalogStableId), true);
     assert.equal(hasStableId(catalogSnapshot, homeStableId), false);
@@ -317,7 +374,9 @@ test(
     });
     assert.equal(backResult.outcome, "uncertain");
     await delay(settleMilliseconds);
-    const homeAgainSnapshot = await captureSnapshotThroughApi(resources.host, knownSecrets);
+    const homeAgainSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
     assert.equal(hasStableId(homeAgainSnapshot, homeStableId), true);
     assert.equal(
       ScreenGraphEngine.computeStructuralIdentity(
@@ -397,7 +456,13 @@ test(
       automation_session_id: session.automation_session_id,
       maximum_actions: 8,
       settle_milliseconds: settleMilliseconds,
+      // The in-app Inspector launcher is Vistrea tooling, not app frontier;
+      // tapping it traps the walk behind the Inspector overlay.
+      excluded_stable_ids: ["android.debug.inspector.open"],
     });
+    if (report.discovered_state_ids.length !== 3 || report.stopped_reason !== "frontier_exhausted") {
+      console.error(`Exploration evidence: ${JSON.stringify(report)}`);
+    }
     assert.equal(report.stopped_reason, "frontier_exhausted");
     assert.equal(report.discovered_state_ids.length, 3);
     const exploredGraph = graphEngine.getGraph({
@@ -439,6 +504,27 @@ test(
     );
   },
 );
+
+/**
+ * Polls real captures until the screen settles into the expected structure.
+ * Cold-start navigation regularly outlasts one fixed settle delay, so the
+ * acceptance waits for evidence; on deadline it returns the last capture so
+ * the caller's assertions fail with the actually observed screen.
+ */
+async function captureUntil(
+  host: LocalHostHandle,
+  secrets: readonly string[],
+  predicate: (snapshot: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const snapshot = await captureSnapshotThroughApi(host, secrets);
+    if (predicate(snapshot) || Date.now() >= deadline) {
+      return snapshot;
+    }
+    await delay(1_000);
+  }
+}
 
 function hasStableId(snapshot: Record<string, unknown>, stableId: string): boolean {
   return asArray(snapshot["trees"], "Snapshot trees").some((treeValue) => {
@@ -608,6 +694,41 @@ async function waitForAndroidBoot(resources: AcceptanceResources): Promise<void>
     await delay(1_000);
   }
   throw new Error("The dedicated Android API 36+ emulator did not finish booting.");
+}
+
+/**
+ * Screenshots remain the final visual truth: when injected input has no
+ * visible effect, the acceptance preserves what the device actually showed.
+ */
+async function dumpDeviceEvidence(serial: string, label: string): Promise<void> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), `vistrea-acceptance-${label}-`));
+  const focus = await runAdb(serial, ["shell", "dumpsys", "window", "windows"], {
+    allowFailure: true,
+    label: "window focus evidence",
+  });
+  const focusLines = focus.stdout
+    .split("\n")
+    .filter((line) => /mCurrentFocus|mFocusedApp|mObscuring|keyguard/i.test(line))
+    .join("\n");
+  await fs.writeFile(path.join(directory, "window-focus.txt"), `${focusLines}\n`, "utf8");
+  await runAdb(serial, ["shell", "uiautomator", "dump", "/sdcard/vistrea-evidence.xml"], {
+    allowFailure: true,
+    label: "ui dump evidence",
+  });
+  const tree = await runAdb(serial, ["shell", "cat", "/sdcard/vistrea-evidence.xml"], {
+    allowFailure: true,
+    label: "ui dump read",
+  });
+  await fs.writeFile(path.join(directory, "ui-dump.xml"), tree.stdout, "utf8");
+  await runAdb(serial, ["shell", "screencap", "-p", "/sdcard/vistrea-evidence.png"], {
+    allowFailure: true,
+    label: "screen evidence capture",
+  });
+  await runAdb(serial, ["pull", "/sdcard/vistrea-evidence.png", path.join(directory, "screen.png")], {
+    allowFailure: true,
+    label: "screen evidence pull",
+  });
+  console.error(`Device evidence preserved under ${directory}`);
 }
 
 async function runAdb(

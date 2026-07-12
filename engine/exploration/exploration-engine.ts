@@ -36,6 +36,12 @@ export interface ExploreCommand {
   readonly maximum_actions: number;
   readonly maximum_depth?: number;
   readonly settle_milliseconds?: number;
+  /**
+   * Stable IDs exploration must never tap. Debug tooling controls (for
+   * example the in-app Inspector launcher) belong to Vistrea, not to the
+   * application frontier, and tapping them traps the walk behind overlays.
+   */
+  readonly excluded_stable_ids?: readonly string[];
 }
 
 export interface ExecutedExplorationStep {
@@ -120,6 +126,16 @@ export class ExplorationEngine {
       throw new DataError("invalid_argument", "maximum_depth is outside the supported range.");
     }
     const settleMilliseconds = command.settle_milliseconds ?? DEFAULT_SETTLE_MILLISECONDS;
+    const excluded = command.excluded_stable_ids ?? [];
+    if (
+      excluded.length > 128 ||
+      excluded.some(
+        (value) => typeof value !== "string" || value.length === 0 || value.length > 256,
+      )
+    ) {
+      throw new DataError("invalid_argument", "excluded_stable_ids is invalid.");
+    }
+    const excludedStableIds = new Set(excluded);
 
     let snapshot = await this.#capture.captureSnapshot("before_action");
     let observed = this.#graph.recordStateObservation({
@@ -139,7 +155,12 @@ export class ExplorationEngine {
 
     while (actionCount < command.maximum_actions) {
       const currentStateId = depthStack[depthStack.length - 1] as string;
-      const candidate = this.#nextCandidate(snapshot, executedByState, currentStateId);
+      const candidate = this.#nextCandidate(
+        snapshot,
+        executedByState,
+        currentStateId,
+        excludedStableIds,
+      );
 
       if (candidate === undefined) {
         // The branch is exhausted; physically return when depth remains.
@@ -359,6 +380,7 @@ export class ExplorationEngine {
     snapshot: RuntimeSnapshot,
     executedByState: Map<string, Set<string>>,
     stateId: string,
+    excludedStableIds: ReadonlySet<string>,
   ): FrontierEntry | undefined {
     const executed = executedByState.get(stateId) ?? new Set<string>();
     const candidates: string[] = [];
@@ -367,7 +389,12 @@ export class ExplorationEngine {
       for (const node of (payload["inline_nodes"] ?? []) as readonly JsonObject[]) {
         const stableId = node["stable_id"];
         const actions = (node["actions"] ?? []) as readonly string[];
-        if (typeof stableId === "string" && actions.includes("tap") && !executed.has(stableId)) {
+        if (
+          typeof stableId === "string" &&
+          actions.includes("tap") &&
+          !executed.has(stableId) &&
+          !excludedStableIds.has(stableId)
+        ) {
           candidates.push(stableId);
         }
       }
