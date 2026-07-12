@@ -33,6 +33,7 @@ The canonical model target does not import UIKit or Core Graphics.
 - verifies every Object byte count, SHA-256 identity, and Snapshot association before transfer;
 - arbitrates cancellation against completion or failure so each capture emits exactly one terminal frame and a crossing late cancel remains a best-effort no-op;
 - answers `subscribe_events` from the bounded `RuntimeEventRecorder`, streams strictly ordered `event_batch` frames with explicit dropped-range evidence, releases retained events only after `acknowledge_events`, and reports unresolvable epochs or ranges as `subscribe_error` conflicts;
+- negotiates `design.tuning` when a `RuntimeTuningApplying` controller is attached, applies only the alpha allowlist with stale-snapshot, original-value, and target checks, returns the canonical `TuningApplication`, and always restores captured originals on explicit revert, TTL expiry, partial failure, disconnect, and close;
 - handles disconnect, transport failure, and concurrent request bounds without logging credentials.
 
 `RuntimeSnapshotCaptureProvider` is the injectable observation boundary. The package tests and Swift/Node interoperability executable use fixture providers. The separate `VistreaRuntimeUIKitConnection` bridge target adapts that port to `UIKitRuntimeCaptureAdapter` on the main actor without making the observation-only UIKit target depend on transport.
@@ -48,7 +49,7 @@ This first TCP loopback slice connects directly from the iOS Simulator. A physic
 
 The adapter is compiled only where UIKit is available. It is included only by internal Debug Demo App builds in the current vertical slice.
 
-The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. Protected Design Tuning, automatic UIKit event observation, and the SwiftUI semantic adapter remain separate follow-up capabilities.
+The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews only their alpha on the main actor. Automatic UIKit event observation, additional tuning properties, and the SwiftUI semantic adapter remain separate follow-up capabilities.
 
 ## Verify
 

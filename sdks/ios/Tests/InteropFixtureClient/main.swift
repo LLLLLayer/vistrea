@@ -39,6 +39,18 @@ private actor FixtureCaptureProvider: RuntimeSnapshotCaptureProvider {
     }
 }
 
+private actor InteropTuningController: RuntimeTuningApplying {
+    private var alphaByStableID: [String: Double] = ["demo.home.root": 1.0]
+
+    func currentAlpha(stableID: String) async -> Double? {
+        alphaByStableID[stableID]
+    }
+
+    func setAlpha(stableID: String, value: Double) async {
+        alphaByStableID[stableID] = value
+    }
+}
+
 @main
 private struct InteropFixtureClient {
     static func main() async {
@@ -88,10 +100,15 @@ private struct InteropFixtureClient {
                     }
                 }
             }
+            let tuningController: InteropTuningController? =
+                environment["VISTREA_RUNTIME_TUNING"] == "scripted"
+                    ? InteropTuningController()
+                    : nil
             let client = LoopbackRuntimeClient(
                 configuration: configuration,
                 captureProvider: FixtureCaptureProvider(payload: payload),
-                eventRecorder: recorder
+                eventRecorder: recorder,
+                tuningController: tuningController
             )
             defer {
                 scriptTask?.cancel()

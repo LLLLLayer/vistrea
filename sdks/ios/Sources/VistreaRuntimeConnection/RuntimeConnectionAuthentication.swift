@@ -53,6 +53,7 @@ enum RuntimeConnectionAuthentication {
     static let method = "hmac-sha256"
     static let snapshotCapability = "runtime.snapshot"
     static let eventsCapability = "runtime.events"
+    static let tuningCapability = "design.tuning"
     static let version = RuntimeConnectionProtocolVersion(major: 1, minor: 0)
 
     static func clientProof(

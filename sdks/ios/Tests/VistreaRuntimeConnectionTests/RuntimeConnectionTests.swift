@@ -319,3 +319,155 @@ extension RuntimeConnectionTests {
         )
     }
 }
+
+private actor ScriptedTuningController: RuntimeTuningApplying {
+    private var alphaByStableID: [String: Double]
+
+    init(_ initial: [String: Double]) {
+        alphaByStableID = initial
+    }
+
+    func currentAlpha(stableID: String) async -> Double? {
+        alphaByStableID[stableID]
+    }
+
+    func setAlpha(stableID: String, value: Double) async {
+        alphaByStableID[stableID] = value
+    }
+
+    func alpha(_ stableID: String) -> Double? {
+        alphaByStableID[stableID]
+    }
+}
+
+extension RuntimeConnectionTests {
+    private static func alphaPatch(
+        preview: Double,
+        original: Double = 1.0,
+        property: String = "alpha",
+        stableID: String? = "demo.home.open_catalog"
+    ) -> JSONValue {
+        var target: [String: JSONValue] = [
+            "snapshot_id": .string("snapshot_019f0000-0000-7000-8000-000000000001"),
+            "tree_id": .string("tree_019f0000-0000-7000-8000-000000000002"),
+            "node_id": .string("node_019f0000-0000-7000-8000-000000000011"),
+            "extensions": .object([:]),
+        ]
+        if let stableID {
+            target["stable_id"] = .string(stableID)
+        }
+        return .object([
+            "patch_id": .string("patch_019f0000-0000-7000-8000-000000000001"),
+            "revision": .integer(1),
+            "target_snapshot_id": .string("snapshot_019f0000-0000-7000-8000-000000000001"),
+            "changes": .array([
+                .object([
+                    "tuning_change_id": .string("tuningchange_019f0000-0000-7000-8000-000000000001"),
+                    "runtime_target": .object(target),
+                    "property": .string(property),
+                    "original_value": .object([
+                        "kind": .string("number"),
+                        "value": .number(original),
+                        "unit": .string("ratio"),
+                        "extensions": .object([:]),
+                    ]),
+                    "preview_value": .object([
+                        "kind": .string("number"),
+                        "value": .number(preview),
+                        "unit": .string("ratio"),
+                        "extensions": .object([:]),
+                    ]),
+                ]),
+            ]),
+        ])
+    }
+
+    func testTuningProcessorAppliesAlphaAndBuildsCanonicalApplication() async throws {
+        let controller = ScriptedTuningController(["demo.home.open_catalog": 1.0])
+        let outcome = try await RuntimeTuningProcessor.apply(
+            patch: Self.alphaPatch(preview: 0.7),
+            expectedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000001",
+            lastCapturedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000001",
+            connectionID: "connection_019f0000-0000-7000-8000-000000000001",
+            controller: controller
+        )
+        XCTAssertTrue(outcome.isActive)
+        let appliedAlpha = await controller.alpha("demo.home.open_catalog")
+        XCTAssertEqual(appliedAlpha, 0.7)
+        XCTAssertEqual(outcome.restoreEntries.count, 1)
+        XCTAssertEqual(outcome.restoreEntries[0].originalAlpha, 1.0)
+        guard case let .string(status)? = outcome.application["status"],
+              case let .array(applied)? = outcome.application["applied_changes"],
+              case let .array(rejected)? = outcome.application["rejected_changes"],
+              case let .string(applicationID)? = outcome.application["tuning_application_id"]
+        else {
+            return XCTFail("The application shape is incomplete.")
+        }
+        XCTAssertEqual(status, "active")
+        XCTAssertEqual(applied.count, 1)
+        XCTAssertTrue(rejected.isEmpty)
+        XCTAssertTrue(applicationID.hasPrefix("tuningapp_"))
+
+        let terminal = RuntimeTuningProcessor.terminalApplication(
+            from: outcome.application,
+            reason: "explicit_revert"
+        )
+        guard case let .integer(revision)? = terminal["revision"],
+              case let .string(terminalStatus)? = terminal["status"],
+              case let .string(reason)? = terminal["reversion_reason"]
+        else {
+            return XCTFail("The terminal application shape is incomplete.")
+        }
+        XCTAssertEqual(revision, 2)
+        XCTAssertEqual(terminalStatus, "reverted")
+        XCTAssertEqual(reason, "explicit_revert")
+    }
+
+    func testTuningProcessorRejectsAndRestoresExplicitly() async throws {
+        // A stale snapshot rejects every change without touching a view.
+        let staleController = ScriptedTuningController(["demo.home.open_catalog": 1.0])
+        let stale = try await RuntimeTuningProcessor.apply(
+            patch: Self.alphaPatch(preview: 0.7),
+            expectedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000001",
+            lastCapturedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000002",
+            connectionID: "connection_019f0000-0000-7000-8000-000000000001",
+            controller: staleController
+        )
+        XCTAssertFalse(stale.isActive)
+        let staleAlpha = await staleController.alpha("demo.home.open_catalog")
+        XCTAssertEqual(staleAlpha, 1.0)
+        guard case let .array(staleRejected)? = stale.application["rejected_changes"],
+              case let .object(staleChange)? = staleRejected.first,
+              case let .string(staleReason)? = staleChange["reason_code"]
+        else {
+            return XCTFail("The stale rejection shape is incomplete.")
+        }
+        XCTAssertEqual(staleReason, "stale_snapshot")
+
+        // Disallowed properties and original-value mismatches reject explicitly.
+        for (patch, expectedReason) in [
+            (Self.alphaPatch(preview: 0.7, property: "frame"), "property_not_allowed"),
+            (Self.alphaPatch(preview: 0.7, original: 0.5), "original_value_mismatch"),
+            (Self.alphaPatch(preview: 0.7, stableID: nil), "target_not_found"),
+        ] {
+            let controller = ScriptedTuningController(["demo.home.open_catalog": 1.0])
+            let outcome = try await RuntimeTuningProcessor.apply(
+                patch: patch,
+                expectedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000001",
+                lastCapturedSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000001",
+                connectionID: "connection_019f0000-0000-7000-8000-000000000001",
+                controller: controller
+            )
+            XCTAssertFalse(outcome.isActive)
+            let untouchedAlpha = await controller.alpha("demo.home.open_catalog")
+            XCTAssertEqual(untouchedAlpha, 1.0)
+            guard case let .array(rejected)? = outcome.application["rejected_changes"],
+                  case let .object(change)? = rejected.first,
+                  case let .string(reason)? = change["reason_code"]
+            else {
+                return XCTFail("The rejection shape is incomplete.")
+            }
+            XCTAssertEqual(reason, expectedReason)
+        }
+    }
+}

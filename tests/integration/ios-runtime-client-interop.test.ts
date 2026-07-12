@@ -635,3 +635,128 @@ async function withTimeout<T>(
     }
   }
 }
+
+test(
+  "Swift Runtime client applies, reverts, and expires protected tuning previews",
+  { skip: swiftAvailable ? false : "Swift is unavailable on this host." },
+  async (t) => {
+    const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+    const child = spawnSwiftClient(host.endpoint.host, host.endpoint.port, authorizationToken, {
+      VISTREA_RUNTIME_TUNING: "scripted",
+    });
+    const childOutput = collectChildOutput(child);
+    let session: LoopbackRuntimeSession | undefined;
+    t.after(async () => {
+      session?.close();
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+      }
+      await host.close();
+    });
+
+    session = await withTimeout(host.acceptSession(), 60_000, "Swift tuning handshake");
+    assert.deepEqual(session.enabledCapabilities, ["design.tuning", "runtime.snapshot"]);
+
+    // A capture must establish the current Snapshot before tuning applies.
+    const captured = await withTimeout(
+      session.captureSnapshot({
+        include: { paths: ["trees", "screenshot"] },
+        screenshot: "reference",
+        reason: "manual",
+      }),
+      10_000,
+      "Swift tuning capture",
+    );
+    const snapshotId = record(captured.snapshot)["snapshot_id"] as string;
+
+    const patch = {
+      patch_id: "patch_019f0000-0000-7000-8000-000000000001",
+      revision: 1,
+      target_snapshot_id: snapshotId,
+      changes: [
+        {
+          tuning_change_id: "tuningchange_019f0000-0000-7000-8000-000000000001",
+          runtime_target: {
+            snapshot_id: snapshotId,
+            tree_id: "tree_019f0000-0000-7000-8000-000000000001",
+            node_id: "node_019f0000-0000-7000-8000-000000000001",
+            stable_id: "demo.home.root",
+            extensions: {},
+          },
+          property: "alpha",
+          original_value: { kind: "number", value: 1, unit: "ratio", extensions: {} },
+          preview_value: { kind: "number", value: 0.5, unit: "ratio", extensions: {} },
+        },
+      ],
+    };
+    const applied = record(
+      await withTimeout(
+        session.applyTuning({ patch, expectedSnapshotId: snapshotId }),
+        10_000,
+        "Swift tuning apply",
+      ),
+    );
+    assert.equal(applied["status"], "active");
+    assert.equal(applied["patch_id"], patch.patch_id);
+    assert.equal(applied["connection_id"], session.connectionId);
+    assert.equal((applied["applied_changes"] as readonly unknown[]).length, 1);
+    assert.deepEqual(applied["rejected_changes"], []);
+
+    const reverted = record(
+      await withTimeout(
+        session.revertTuning(applied["tuning_application_id"] as string),
+        10_000,
+        "Swift tuning revert",
+      ),
+    );
+    assert.equal(reverted["status"], "reverted");
+    assert.equal(reverted["revision"], 2);
+    assert.equal(reverted["reversion_reason"], "explicit_revert");
+
+    // Reverting again conflicts because the preview is already restored.
+    await assert.rejects(
+      session.revertTuning(applied["tuning_application_id"] as string),
+      (error: unknown) =>
+        error instanceof LoopbackTransportError && error.code === "conflict",
+    );
+
+    // A stale expected Snapshot rejects every change explicitly.
+    const stale = record(
+      await withTimeout(
+        session.applyTuning({
+          patch: { ...patch, target_snapshot_id: snapshotId },
+          expectedSnapshotId: "snapshot_019f0000-0000-7000-8000-000000000099",
+        }),
+        10_000,
+        "Swift stale tuning apply",
+      ),
+    );
+    assert.equal(stale["status"], "failed");
+    assert.equal(
+      (record((stale["rejected_changes"] as readonly unknown[])[0]))["reason_code"],
+      "stale_snapshot",
+    );
+
+    // A TTL preview reverts itself and reports the terminal application.
+    const expiring = record(
+      await withTimeout(
+        session.applyTuning({ patch, expectedSnapshotId: snapshotId, previewTtlMs: 400 }),
+        10_000,
+        "Swift TTL tuning apply",
+      ),
+    );
+    assert.equal(expiring["status"], "active");
+    const selfReverted = record(
+      await withTimeout(session.nextRevertedTuning(), 10_000, "Swift TTL reversion"),
+    );
+    assert.equal(selfReverted["tuning_application_id"], expiring["tuning_application_id"]);
+    assert.equal(selfReverted["status"], "expired");
+    assert.equal(selfReverted["reversion_reason"], "ttl_expiry");
+
+    session.close();
+    const exit = await withTimeout(childOutput, 10_000, "Swift Runtime process exit");
+    assert.equal(exit.code, 0, exit.stderr);
+    assert.equal(exit.stdout.includes(authorizationToken), false);
+    assert.equal(exit.stderr.includes(authorizationToken), false);
+  },
+);

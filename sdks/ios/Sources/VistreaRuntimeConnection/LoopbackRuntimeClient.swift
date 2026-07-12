@@ -29,6 +29,12 @@ private struct CaptureTaskEntry: Sendable {
     let task: Task<Void, Never>
 }
 
+private struct ActiveTuningState: Sendable {
+    var application: [String: JSONValue]
+    let restoreEntries: [RuntimeTuningRestoreEntry]
+    var ttlTask: Task<Void, Never>?
+}
+
 /// Authenticated Snapshot-only Runtime client for the Node loopback Host.
 ///
 /// The client is intentionally limited to explicit loopback TCP endpoints and
@@ -43,10 +49,12 @@ public actor LoopbackRuntimeClient {
     public private(set) var state: RuntimeConnectionState = .disconnected
     public private(set) var connectionID: String?
     public private(set) var eventStreamingEnabled = false
+    public private(set) var tuningEnabled = false
 
     private let configuration: LoopbackRuntimeClientConfiguration
     private let captureProvider: any RuntimeSnapshotCaptureProvider
     private let eventRecorder: RuntimeEventRecorder?
+    private let tuningController: (any RuntimeTuningApplying)?
     private var connection: NWConnection?
     private var lineDecoder: BoundedJSONLineDecoder
     private var handshakePhase: HandshakePhase = .awaitingChallenge
@@ -56,17 +64,21 @@ public actor LoopbackRuntimeClient {
     private var captureTasks: [String: CaptureTaskEntry] = [:]
     private var eventSubscriptionID: String?
     private var eventPumpTask: Task<Void, Never>?
+    private var lastCapturedSnapshotID: String?
+    private var activeTunings: [String: ActiveTuningState] = [:]
     private var closeWaiters: [CheckedContinuation<Void, any Error>] = []
     private var terminalError: RuntimeConnectionError?
 
     public init(
         configuration: LoopbackRuntimeClientConfiguration,
         captureProvider: any RuntimeSnapshotCaptureProvider,
-        eventRecorder: RuntimeEventRecorder? = nil
+        eventRecorder: RuntimeEventRecorder? = nil,
+        tuningController: (any RuntimeTuningApplying)? = nil
     ) {
         self.configuration = configuration
         self.captureProvider = captureProvider
         self.eventRecorder = eventRecorder
+        self.tuningController = tuningController
         lineDecoder = BoundedJSONLineDecoder(
             maximumLineBytes: configuration.maximumInboundLineBytes
         )
@@ -291,16 +303,17 @@ public actor LoopbackRuntimeClient {
         var wireEpoch: WireEventEpoch?
         if let eventRecorder {
             let epoch = await eventRecorder.epoch
-            capabilities = [
-                RuntimeConnectionAuthentication.eventsCapability,
-                RuntimeConnectionAuthentication.snapshotCapability,
-            ]
+            capabilities.insert(RuntimeConnectionAuthentication.eventsCapability, at: 0)
             wireEpoch = WireEventEpoch(
                 eventEpochID: epoch.eventEpochID,
                 oldestRetainedSequence: epoch.oldestRetainedSequence,
                 nextSequence: epoch.nextSequence
             )
         }
+        if tuningController != nil {
+            capabilities.insert(RuntimeConnectionAuthentication.tuningCapability, at: 0)
+        }
+        capabilities.sort()
         let proof = RuntimeConnectionAuthentication.clientProof(
             key: configuration.authorizationKey,
             connectionAttemptID: challenge.connectionAttemptID,
@@ -336,17 +349,19 @@ public actor LoopbackRuntimeClient {
         let normalizedCapabilities = RuntimeConnectionAuthentication.normalize(
             capabilities: welcome.enabledCapabilities
         )
-        let snapshotOnly = [RuntimeConnectionAuthentication.snapshotCapability]
-        let snapshotAndEvents = [
-            RuntimeConnectionAuthentication.eventsCapability,
-            RuntimeConnectionAuthentication.snapshotCapability,
-        ]
-        let allowedCapabilitySets =
-            eventRecorder == nil ? [snapshotOnly] : [snapshotOnly, snapshotAndEvents]
+        var offered = Set([RuntimeConnectionAuthentication.snapshotCapability])
+        if eventRecorder != nil {
+            offered.insert(RuntimeConnectionAuthentication.eventsCapability)
+        }
+        if tuningController != nil {
+            offered.insert(RuntimeConnectionAuthentication.tuningCapability)
+        }
+        let enabledSet = Set(normalizedCapabilities)
         guard welcome.type == "host_welcome",
               isBoundedString(welcome.connectionID, maximumUTF8Bytes: 128),
               welcome.selectedVersion == RuntimeConnectionAuthentication.version,
-              allowedCapabilitySets.contains(normalizedCapabilities),
+              enabledSet.contains(RuntimeConnectionAuthentication.snapshotCapability),
+              enabledSet.isSubset(of: offered),
               RuntimeConnectionAuthentication.verifyHostProof(
                 welcome.hostProof,
                 key: configuration.authorizationKey,
@@ -361,7 +376,7 @@ public actor LoopbackRuntimeClient {
         else {
             throw RuntimeConnectionError.authenticationFailed
         }
-        let eventsEnabled = normalizedCapabilities == snapshotAndEvents
+        let eventsEnabled = enabledSet.contains(RuntimeConnectionAuthentication.eventsCapability)
         if eventsEnabled {
             guard let eventRecorder,
                   let welcomeEpoch = welcome.eventEpoch,
@@ -396,6 +411,7 @@ public actor LoopbackRuntimeClient {
         )
         connectionID = welcome.connectionID
         eventStreamingEnabled = eventsEnabled
+        tuningEnabled = enabledSet.contains(RuntimeConnectionAuthentication.tuningCapability)
         state = .ready
     }
 
@@ -437,6 +453,10 @@ public actor LoopbackRuntimeClient {
             try await acknowledgeEvents(try decode(WireAcknowledgeEvents.self, from: data))
         case "unsubscribe_events":
             try unsubscribeEvents(try decode(WireUnsubscribeEvents.self, from: data))
+        case "apply_tuning":
+            try await applyTuning(try decode(WireApplyTuning.self, from: data))
+        case "revert_tuning":
+            try await revertTuning(try decode(WireRevertTuning.self, from: data))
         case "disconnect":
             let message = try decode(WireDisconnect.self, from: data)
             guard message.type == "disconnect" else {
@@ -647,6 +667,124 @@ public actor LoopbackRuntimeClient {
         eventSubscriptionID = nil
     }
 
+    private func applyTuning(_ message: WireApplyTuning) async throws {
+        guard message.type == "apply_tuning",
+              isRequestID(message.requestID),
+              tuningEnabled,
+              let tuningController,
+              let connectionID
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        if let ttl = message.command.previewTtlMs, !(100...3_600_000).contains(ttl) {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        let outcome: RuntimeTuningOutcome
+        do {
+            outcome = try await RuntimeTuningProcessor.apply(
+                patch: message.command.patch,
+                expectedSnapshotID: message.command.expectedSnapshotID,
+                lastCapturedSnapshotID: lastCapturedSnapshotID,
+                connectionID: connectionID,
+                controller: tuningController
+            )
+        } catch {
+            try await send(WireTuningError(requestID: message.requestID, code: "conflict"))
+            return
+        }
+        var application = outcome.application
+        if outcome.isActive {
+            guard case let .string(applicationID)? = application["tuning_application_id"] else {
+                throw RuntimeConnectionError.protocolViolation
+            }
+            var ttlTask: Task<Void, Never>?
+            if let ttl = message.command.previewTtlMs {
+                application["preview_expires_at"] = .string(
+                    Self.canonicalTimestamp(Date().addingTimeInterval(Double(ttl) / 1_000))
+                )
+                ttlTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: ttl * 1_000_000)
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    await self?.expireTuning(applicationID: applicationID)
+                }
+            }
+            activeTunings[applicationID] = ActiveTuningState(
+                application: application,
+                restoreEntries: outcome.restoreEntries,
+                ttlTask: ttlTask
+            )
+        }
+        try await send(
+            WireTuningResult(
+                type: "tuning_result",
+                requestID: message.requestID,
+                application: .object(application)
+            )
+        )
+    }
+
+    private func revertTuning(_ message: WireRevertTuning) async throws {
+        guard message.type == "revert_tuning",
+              isRequestID(message.requestID),
+              tuningEnabled
+        else {
+            throw RuntimeConnectionError.protocolViolation
+        }
+        guard let active = activeTunings.removeValue(forKey: message.tuningApplicationID) else {
+            try await send(WireTuningError(requestID: message.requestID, code: "conflict"))
+            return
+        }
+        active.ttlTask?.cancel()
+        await restoreEntries(active.restoreEntries)
+        let terminal = RuntimeTuningProcessor.terminalApplication(
+            from: active.application,
+            reason: "explicit_revert"
+        )
+        try await send(
+            WireTuningResult(
+                type: "revert_result",
+                requestID: message.requestID,
+                application: .object(terminal)
+            )
+        )
+    }
+
+    private func expireTuning(applicationID: String) async {
+        guard state == .ready,
+              let active = activeTunings.removeValue(forKey: applicationID)
+        else {
+            return
+        }
+        await restoreEntries(active.restoreEntries)
+        let terminal = RuntimeTuningProcessor.terminalApplication(
+            from: active.application,
+            reason: "ttl_expiry"
+        )
+        do {
+            try await send(WireTuningReverted(application: .object(terminal)))
+        } catch {
+            // The preview is already restored; a vanished connection needs no report.
+        }
+    }
+
+    private func restoreEntries(_ entries: [RuntimeTuningRestoreEntry]) async {
+        guard let tuningController else {
+            return
+        }
+        for entry in entries.reversed() {
+            await tuningController.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+        }
+    }
+
+    private nonisolated static func canonicalTimestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
     private func cancelCapture(_ message: WireCaptureCancel) async throws {
         guard message.type == "capture_cancel",
               isRequestID(message.requestID)
@@ -724,6 +862,7 @@ public actor LoopbackRuntimeClient {
             throw RuntimeConnectionError.protocolViolation
         }
         try Task.checkCancellation()
+        lastCapturedSnapshotID = payload.snapshot.snapshotID.rawValue
         try await send(
             WireCaptureResult(
                 requestID: requestID,
@@ -885,6 +1024,24 @@ public actor LoopbackRuntimeClient {
         eventPumpTask?.cancel()
         eventPumpTask = nil
         eventSubscriptionID = nil
+        let tuningsToRestore = activeTunings.values.map(\.restoreEntries)
+        for active in activeTunings.values {
+            active.ttlTask?.cancel()
+        }
+        activeTunings.removeAll()
+        if let tuningController, !tuningsToRestore.isEmpty {
+            // Disconnect, close, and failure always revert active previews.
+            Task {
+                for entries in tuningsToRestore {
+                    for entry in entries.reversed() {
+                        await tuningController.setAlpha(
+                            stableID: entry.stableID,
+                            value: entry.originalAlpha
+                        )
+                    }
+                }
+            }
+        }
         connection?.stateUpdateHandler = nil
         connection?.cancel()
         connection = nil

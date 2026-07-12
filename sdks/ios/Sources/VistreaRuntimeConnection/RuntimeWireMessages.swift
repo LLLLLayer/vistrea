@@ -511,6 +511,100 @@ struct WireEventsClosed: Encodable, Sendable {
     }
 }
 
+struct WireApplyTuning: Decodable, Sendable {
+    let type: String
+    let requestID: String
+    let command: WireApplyTuningCommand
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case requestID = "request_id"
+        case command
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        command = try container.decode(WireApplyTuningCommand.self, forKey: .command)
+    }
+}
+
+struct WireApplyTuningCommand: Decodable, Sendable {
+    let patch: JSONValue
+    let expectedSnapshotID: String
+    let previewTtlMs: UInt64?
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case patch
+        case expectedSnapshotID = "expected_snapshot_id"
+        case previewTtlMs = "preview_ttl_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        patch = try container.decode(JSONValue.self, forKey: .patch)
+        expectedSnapshotID = try container.decode(String.self, forKey: .expectedSnapshotID)
+        previewTtlMs = try container.decodeIfPresent(UInt64.self, forKey: .previewTtlMs)
+    }
+}
+
+struct WireRevertTuning: Decodable, Sendable {
+    let type: String
+    let requestID: String
+    let tuningApplicationID: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case requestID = "request_id"
+        case tuningApplicationID = "tuning_application_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        try decoder.rejectRuntimeWireUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        tuningApplicationID = try container.decode(String.self, forKey: .tuningApplicationID)
+    }
+}
+
+struct WireTuningResult: Encodable, Sendable {
+    let type: String
+    let requestID: String
+    let application: JSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case requestID = "request_id"
+        case application
+    }
+}
+
+struct WireTuningError: Encodable, Sendable {
+    let type = "tuning_error"
+    let requestID: String
+    let code: String
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case requestID = "request_id"
+        case code
+    }
+}
+
+struct WireTuningReverted: Encodable, Sendable {
+    let type = "tuning_reverted"
+    let application: JSONValue
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case application
+    }
+}
+
 private struct RuntimeWireAnyCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?

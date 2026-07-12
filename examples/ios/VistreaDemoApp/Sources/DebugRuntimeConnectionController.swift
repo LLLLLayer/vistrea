@@ -62,7 +62,8 @@ final class DebugRuntimeConnectionController {
             client = LoopbackRuntimeClient(
                 configuration: configuration,
                 captureProvider: captureProvider,
-                eventRecorder: eventRecorder
+                eventRecorder: eventRecorder,
+                tuningController: UIKitRuntimeTuningController(windowProvider: windowProvider)
             )
         } catch {
             return nil
