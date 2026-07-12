@@ -128,6 +128,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_capture_snapshot",
       "vistrea_create_review_issue",
       "vistrea_create_tuning_patch",
+      "vistrea_create_wiki_node",
       "vistrea_find_screen_path",
       "vistrea_get_design_comparison",
       "vistrea_get_design_reference",
@@ -137,16 +138,23 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_get_snapshot",
       "vistrea_get_tuning_application",
       "vistrea_get_tuning_patch",
+      "vistrea_get_wiki_backlinks",
+      "vistrea_get_wiki_node",
       "vistrea_get_workspace_status",
+      "vistrea_link_wiki_node",
       "vistrea_list_active_tuning",
       "vistrea_list_review_issues",
       "vistrea_list_snapshots",
       "vistrea_map_design_region",
       "vistrea_observe_screen_state",
       "vistrea_observe_transition",
+      "vistrea_related_wiki_nodes",
       "vistrea_revert_tuning_application",
       "vistrea_run_design_comparison",
+      "vistrea_search_wiki",
       "vistrea_transition_review_issue",
+      "vistrea_unlink_wiki_node",
+      "vistrea_update_wiki_node",
       "vistrea_upload_design_asset",
       "vistrea_verify_review_issue",
     ],
@@ -483,6 +491,101 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assert.equal(
     (parseCliEnvelope(cliGraphState.stdout).data as JsonObject)["revision"],
     2,
+  );
+
+  // Deep Wiki: create, revise, search, link, and backlinks round trip.
+  const wikiCreate = await runCli(
+    [
+      "wiki",
+      "create",
+      "--json",
+      JSON.stringify({
+        kind: "screen",
+        title: "Home knowledge",
+        markdown: "# Home\n\nEntry screen for the demo scenario.",
+        labels: ["demo"],
+        related_resources: [
+          { kind: "snapshot", id: capturedSnapshot["snapshot_id"] },
+        ],
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(wikiCreate.exitCode, 0, wikiCreate.stdout);
+  const wikiNode = parseCliEnvelope(wikiCreate.stdout).data as JsonObject;
+  assert.equal(wikiNode["status"], "draft");
+
+  const wikiPublish = await mcp.callTool({
+    name: "vistrea_update_wiki_node",
+    arguments: {
+      wiki_node_id: wikiNode["wiki_node_id"],
+      expected_revision: 1,
+      to_status: "published",
+      updated_by: JSON.parse(actorJson),
+    },
+  });
+  assert.equal(wikiPublish.isError, undefined);
+  assert.equal((wikiPublish.structuredContent as JsonObject)["status"], "published");
+
+  const wikiSearch = await runCli(
+    ["wiki", "search", "--text", "entry screen", "--statuses", "published"],
+    environment,
+  );
+  assert.equal(wikiSearch.exitCode, 0, wikiSearch.stdout);
+  const wikiHits = (parseCliEnvelope(wikiSearch.stdout).data as JsonObject)[
+    "items"
+  ] as readonly JsonObject[];
+  assert.deepEqual(
+    wikiHits.map((hit) => hit["wiki_node_id"]),
+    [wikiNode["wiki_node_id"]],
+  );
+
+  const noteCreate = await mcp.callTool({
+    name: "vistrea_create_wiki_node",
+    arguments: {
+      kind: "note",
+      title: "Follow-up",
+      markdown: "Check the banner timing.",
+      created_by: JSON.parse(actorJson),
+    },
+  });
+  assert.equal(noteCreate.isError, undefined);
+  const note = noteCreate.structuredContent as JsonObject;
+  const wikiLink = await runCli(
+    [
+      "wiki",
+      "link",
+      "--json",
+      JSON.stringify({
+        source_node_id: note["wiki_node_id"],
+        target: { kind: "wiki_node", id: wikiNode["wiki_node_id"] },
+        relation: "relates_to",
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(wikiLink.exitCode, 0, wikiLink.stdout);
+  const backlinks = await mcp.callTool({
+    name: "vistrea_get_wiki_backlinks",
+    arguments: { wiki_node_id: wikiNode["wiki_node_id"] },
+  });
+  assert.equal(backlinks.isError, undefined);
+  assert.equal(
+    ((backlinks.structuredContent as JsonObject)["items"] as readonly JsonObject[]).length,
+    1,
+  );
+  const relatedNodes = await mcp.callTool({
+    name: "vistrea_related_wiki_nodes",
+    arguments: { kind: "snapshot", id: capturedSnapshot["snapshot_id"] },
+  });
+  assert.equal(relatedNodes.isError, undefined);
+  assert.deepEqual(
+    ((relatedNodes.structuredContent as JsonObject)["items"] as readonly JsonObject[]).map(
+      (item) => item["wiki_node_id"],
+    ),
+    [wikiNode["wiki_node_id"]],
   );
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";

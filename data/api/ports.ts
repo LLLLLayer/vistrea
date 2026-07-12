@@ -25,6 +25,7 @@ import type {
   GraphDiff,
   KnowledgeCollection,
   KnowledgeCollectionQuery,
+  WikiNodeQuery,
   ImportPackCommand,
   ImportPackResult,
   MigrationResult,
@@ -133,6 +134,7 @@ export interface WikiRepository extends UnitOfWorkBound {
   create(node: WikiNode, precondition?: MutationPrecondition): WikiNode;
   update(node: WikiNode, precondition: RevisionPrecondition): WikiNode;
   get(nodeId: string, at?: VersionSelector): WikiNode;
+  listNodes(query?: WikiNodeQuery, page?: PageRequest): Page<WikiNode>;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
   unlink(linkId: string, precondition: RevisionPrecondition): void;
   backlinks(nodeId: string, page?: PageRequest): Page<WikiLink>;

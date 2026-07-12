@@ -46,6 +46,11 @@ const TRANSITION_ID_PATTERN =
 const PROJECT_ID_PATTERN =
   /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const APPLICATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
+const WIKI_NODE_ID_PATTERN =
+  /^wiki_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const WIKI_LINK_ID_PATTERN =
+  /^wikilink_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const RESOURCE_KIND_PATTERN = /^[a-z][a-z0-9._-]*$/;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -85,6 +90,14 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "GetScreenGraph",
   "GetScreenState",
   "FindScreenPath",
+  "CreateWikiNode",
+  "UpdateWikiNode",
+  "GetWikiNode",
+  "ListWikiNodes",
+  "LinkWikiNode",
+  "UnlinkWikiNode",
+  "GetWikiBacklinks",
+  "GetRelatedWikiNodes",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -758,6 +771,200 @@ export class HostLocalApiClient {
         );
         return validateScreenPathResult(value);
       }
+      case "CreateWikiNode": {
+        const command = assertExactObject(
+          input,
+          ["kind", "title", "slug", "summary", "markdown", "labels", "related_resources", "created_by"],
+          "Wiki node input",
+          true,
+        );
+        const value = await this.#request("POST", "/v1/wiki/nodes", command, 201, options);
+        return validateIdentifiedResource(value, "wiki_node_id", WIKI_NODE_ID_PATTERN);
+      }
+      case "UpdateWikiNode": {
+        const command = assertExactObject(
+          input,
+          [
+            "wiki_node_id",
+            "expected_revision",
+            "title",
+            "summary",
+            "markdown",
+            "labels",
+            "related_resources",
+            "to_status",
+            "updated_by",
+          ],
+          "Wiki node revision input",
+          true,
+        );
+        const nodeId = command["wiki_node_id"];
+        if (typeof nodeId !== "string" || !WIKI_NODE_ID_PATTERN.test(nodeId)) {
+          throw invalidInput();
+        }
+        const { wiki_node_id: _nodeId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/wiki/nodes/${encodeURIComponent(nodeId)}/revisions`,
+          body,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "wiki_node_id", WIKI_NODE_ID_PATTERN);
+      }
+      case "GetWikiNode": {
+        const query = assertExactObject(input, ["wiki_node_id"], "Wiki node lookup");
+        const nodeId = query["wiki_node_id"];
+        if (typeof nodeId !== "string" || !WIKI_NODE_ID_PATTERN.test(nodeId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/wiki/nodes/${encodeURIComponent(nodeId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "wiki_node_id", WIKI_NODE_ID_PATTERN);
+      }
+      case "ListWikiNodes": {
+        const query = assertExactObject(
+          input,
+          ["text", "kinds", "labels", "statuses", "limit", "cursor"],
+          "Wiki search input",
+          true,
+        );
+        const parameters = new URLSearchParams();
+        for (const key of ["text", "cursor"] as const) {
+          const value = query[key];
+          if (value !== undefined) {
+            if (typeof value !== "string" || value.length === 0 || value.length > 4_096) {
+              throw invalidInput();
+            }
+            parameters.set(key, value);
+          }
+        }
+        for (const key of ["kinds", "labels", "statuses"] as const) {
+          const value = query[key];
+          if (value !== undefined) {
+            if (
+              !Array.isArray(value) ||
+              value.length === 0 ||
+              value.length > 16 ||
+              !value.every(
+                (entry) => typeof entry === "string" && /^[a-z][a-z0-9_-]{0,63}$/.test(entry),
+              )
+            ) {
+              throw invalidInput();
+            }
+            parameters.set(key, value.join(","));
+          }
+        }
+        const limit = query["limit"];
+        if (limit !== undefined) {
+          if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
+            throw invalidInput();
+          }
+          parameters.set("limit", String(limit));
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request("GET", `/v1/wiki/nodes${suffix}`, undefined, 200, options);
+        return validateWikiNodePage(value);
+      }
+      case "LinkWikiNode": {
+        const command = assertExactObject(
+          input,
+          ["source_node_id", "target", "relation", "label", "annotation", "created_by"],
+          "Wiki link input",
+          true,
+        );
+        const sourceId = command["source_node_id"];
+        if (typeof sourceId !== "string" || !WIKI_NODE_ID_PATTERN.test(sourceId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request("POST", "/v1/wiki/links", command, 201, options);
+        return validateIdentifiedResource(value, "wiki_link_id", WIKI_LINK_ID_PATTERN);
+      }
+      case "UnlinkWikiNode": {
+        const command = assertExactObject(
+          input,
+          ["wiki_link_id", "expected_revision"],
+          "Wiki unlink input",
+        );
+        const linkId = command["wiki_link_id"];
+        if (
+          typeof linkId !== "string" ||
+          !WIKI_LINK_ID_PATTERN.test(linkId) ||
+          !Number.isSafeInteger(command["expected_revision"])
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          `/v1/wiki/links/${encodeURIComponent(linkId)}/unlink`,
+          { expected_revision: command["expected_revision"] as number },
+          200,
+          options,
+        );
+        const result = requireObject(value);
+        assertKeys(result, ["unlinked"]);
+        if (result["unlinked"] !== true) {
+          throw invalidHostResult();
+        }
+        return result;
+      }
+      case "GetWikiBacklinks": {
+        const query = assertExactObject(
+          input,
+          ["wiki_node_id", "limit", "cursor"],
+          "Wiki backlink lookup",
+          true,
+        );
+        const nodeId = query["wiki_node_id"];
+        if (typeof nodeId !== "string" || !WIKI_NODE_ID_PATTERN.test(nodeId)) {
+          throw invalidInput();
+        }
+        const parameters = pageParameters(query);
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/wiki/nodes/${encodeURIComponent(nodeId)}/backlinks${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateWikiLinkPage(value);
+      }
+      case "GetRelatedWikiNodes": {
+        const query = assertExactObject(
+          input,
+          ["kind", "id", "limit", "cursor"],
+          "Related wiki lookup",
+          true,
+        );
+        const kind = query["kind"];
+        const id = query["id"];
+        if (
+          typeof kind !== "string" ||
+          !RESOURCE_KIND_PATTERN.test(kind) ||
+          typeof id !== "string" ||
+          id.length === 0 ||
+          id.length > 320
+        ) {
+          throw invalidInput();
+        }
+        const parameters = pageParameters(query);
+        parameters.set("kind", kind);
+        parameters.set("id", id);
+        const value = await this.#request(
+          "GET",
+          `/v1/wiki/related?${parameters.toString()}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateWikiNodePage(value);
+      }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
         const parameters = new URLSearchParams();
@@ -1267,6 +1474,51 @@ function validateIdentifiedResource(
     throw invalidHostResult();
   }
   return resource;
+}
+
+function pageParameters(query: JsonObject): URLSearchParams {
+  const parameters = new URLSearchParams();
+  const limit = query["limit"];
+  if (limit !== undefined) {
+    if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 500) {
+      throw invalidInput();
+    }
+    parameters.set("limit", String(limit));
+  }
+  const cursor = query["cursor"];
+  if (cursor !== undefined) {
+    if (typeof cursor !== "string" || cursor.length === 0 || cursor.length > 4_096) {
+      throw invalidInput();
+    }
+    parameters.set("cursor", cursor);
+  }
+  return parameters;
+}
+
+function validateWikiNodePage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor", "snapshot_version"], true);
+  const items = page["items"];
+  if (!Array.isArray(items) || items.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const item of items) {
+    validateIdentifiedResource(item as JsonValue, "wiki_node_id", WIKI_NODE_ID_PATTERN);
+  }
+  return page;
+}
+
+function validateWikiLinkPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor", "snapshot_version"], true);
+  const items = page["items"];
+  if (!Array.isArray(items) || items.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const item of items) {
+    validateIdentifiedResource(item as JsonValue, "wiki_link_id", WIKI_LINK_ID_PATTERN);
+  }
+  return page;
 }
 
 function validateStateObservationResult(value: JsonValue): JsonObject {

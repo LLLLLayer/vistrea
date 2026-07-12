@@ -84,6 +84,14 @@ export async function runVistreaCli(
           "graph show --project <project_id> --application <application_id>",
           "graph get-state <screen_state_id>",
           "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>]",
+          "wiki create --json <command>",
+          "wiki update <wiki_node_id> --json <command>",
+          "wiki get <wiki_node_id>",
+          "wiki search [--text <phrase>] [--kinds a,b] [--labels a,b] [--statuses a,b] [--limit n] [--cursor c]",
+          "wiki link --json <command>",
+          "wiki unlink <wiki_link_id> --revision <n>",
+          "wiki backlinks <wiki_node_id>",
+          "wiki related --kind <resource_kind> --id <resource_id>",
         ],
         format: "json",
       });
@@ -289,6 +297,89 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
     return invocation(
       "GetScreenState",
       { screen_state_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "wiki" && command[1] === "create") {
+    return invocation("CreateWikiNode", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "wiki" && command[1] === "update" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "UpdateWikiNode",
+      { ...input, wiki_node_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "wiki" && command[1] === "get" && command.length === 3) {
+    return invocation("GetWikiNode", { wiki_node_id: command[2] as string }, timeoutMilliseconds);
+  }
+  if (command[0] === "wiki" && command[1] === "search") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--text", "--kinds", "--labels", "--statuses", "--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const text = values.get("--text");
+    const kinds = values.get("--kinds");
+    const labels = values.get("--labels");
+    const statuses = values.get("--statuses");
+    const cursor = values.get("--cursor");
+    return invocation(
+      "ListWikiNodes",
+      {
+        ...(text === undefined ? {} : { text }),
+        ...(kinds === undefined ? {} : { kinds: kinds.split(",") }),
+        ...(labels === undefined ? {} : { labels: labels.split(",") }),
+        ...(statuses === undefined ? {} : { statuses: statuses.split(",") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "wiki" && command[1] === "link") {
+    return invocation("LinkWikiNode", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "wiki" && command[1] === "unlink" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--revision"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const revision = requireOption(values, "--revision");
+    if (!/^[1-9][0-9]{0,8}$/.test(revision)) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "UnlinkWikiNode",
+      { wiki_link_id: command[2] as string, expected_revision: Number(revision) },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "wiki" && command[1] === "backlinks" && command.length === 3) {
+    return invocation(
+      "GetWikiBacklinks",
+      { wiki_node_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "wiki" && command[1] === "related") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--kind", "--id"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    return invocation(
+      "GetRelatedWikiNodes",
+      { kind: requireOption(values, "--kind"), id: requireOption(values, "--id") },
       timeoutMilliseconds,
     );
   }

@@ -33,6 +33,7 @@ import {
   type RuntimeTuningPort,
 } from "../../engine/design/index.js";
 import { ScreenGraphEngine } from "../../engine/exploration/index.js";
+import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -152,6 +153,7 @@ export async function startHostLocalApi(
   const design = new DesignReviewEngine(options);
   const tuning = new TuningEngine(options);
   const graph = new ScreenGraphEngine(options);
+  const knowledge = new KnowledgeEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -171,6 +173,7 @@ export async function startHostLocalApi(
         design,
         tuning,
         graph,
+        knowledge,
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -235,6 +238,7 @@ interface RequestHandlerContext {
   readonly design: DesignReviewEngine;
   readonly tuning: TuningEngine;
   readonly graph: ScreenGraphEngine;
+  readonly knowledge: KnowledgeEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -674,6 +678,148 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoRequestBody(request);
     const stateId = decodeResourceSegment(screenStateMatch[1] as string, "screen state ID");
     writeJson(response, 200, context.graph.getState(stateId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/wiki/nodes") {
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      const values = readSingleValueParameters(url, [
+        "text",
+        "kinds",
+        "labels",
+        "statuses",
+        "limit",
+        "cursor",
+      ]);
+      const query = {
+        ...(values["text"] === undefined ? {} : { text: values["text"] }),
+        ...(values["kinds"] === undefined ? {} : { kinds: values["kinds"].split(",") }),
+        ...(values["labels"] === undefined ? {} : { labels: values["labels"].split(",") }),
+        ...(values["statuses"] === undefined ? {} : { statuses: values["statuses"].split(",") }),
+      };
+      const page = readPageValues(url);
+      writeJson(
+        response,
+        200,
+        context.knowledge.listNodes(query, page) as unknown as JsonObject,
+      );
+      return;
+    }
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["kind", "title", "slug", "summary", "markdown", "labels", "related_resources", "created_by"],
+      ["kind", "title", "markdown", "created_by"],
+    );
+    const node = context.knowledge.createNode(
+      command as unknown as Parameters<KnowledgeEngine["createNode"]>[0],
+    );
+    writeJson(response, 201, node as unknown as JsonObject);
+    return;
+  }
+
+  const wikiRevisionMatch = /^\/v1\/wiki\/nodes\/([^/]+)\/revisions$/.exec(pathname);
+  if (wikiRevisionMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const nodeId = decodeResourceSegment(wikiRevisionMatch[1] as string, "wiki node ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "expected_revision",
+        "title",
+        "summary",
+        "markdown",
+        "labels",
+        "related_resources",
+        "to_status",
+        "updated_by",
+      ],
+      ["expected_revision", "updated_by"],
+    );
+    const node = context.knowledge.updateNode({
+      ...(command as unknown as Omit<
+        Parameters<KnowledgeEngine["updateNode"]>[0],
+        "wiki_node_id"
+      >),
+      wiki_node_id: nodeId,
+    });
+    writeJson(response, 200, node as unknown as JsonObject);
+    return;
+  }
+
+  const wikiBacklinksMatch = /^\/v1\/wiki\/nodes\/([^/]+)\/backlinks$/.exec(pathname);
+  if (wikiBacklinksMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const nodeId = decodeResourceSegment(wikiBacklinksMatch[1] as string, "wiki node ID");
+    writeJson(
+      response,
+      200,
+      context.knowledge.backlinks(nodeId, readPageValues(url)) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  const wikiNodeMatch = /^\/v1\/wiki\/nodes\/([^/]+)$/.exec(pathname);
+  if (wikiNodeMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const nodeId = decodeResourceSegment(wikiNodeMatch[1] as string, "wiki node ID");
+    writeJson(response, 200, context.knowledge.getNode(nodeId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/wiki/links") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["source_node_id", "target", "relation", "label", "annotation", "created_by"],
+      ["source_node_id", "target", "relation", "created_by"],
+    );
+    const link = context.knowledge.linkNode(
+      command as unknown as Parameters<KnowledgeEngine["linkNode"]>[0],
+    );
+    writeJson(response, 201, link as unknown as JsonObject);
+    return;
+  }
+
+  const wikiUnlinkMatch = /^\/v1\/wiki\/links\/([^/]+)\/unlink$/.exec(pathname);
+  if (wikiUnlinkMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const linkId = decodeResourceSegment(wikiUnlinkMatch[1] as string, "wiki link ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, ["expected_revision"], ["expected_revision"]);
+    context.knowledge.unlinkNode({
+      wiki_link_id: linkId,
+      expected_revision: command["expected_revision"] as number,
+    });
+    writeJson(response, 200, { unlinked: true });
+    return;
+  }
+
+  if (pathname === "/v1/wiki/related") {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const values = readSingleValueParameters(url, ["kind", "id", "limit", "cursor"]);
+    const kind = values["kind"];
+    const id = values["id"];
+    if (kind === undefined || id === undefined) {
+      throw invalidArgument("kind and id are required.");
+    }
+    writeJson(
+      response,
+      200,
+      context.knowledge.relatedTo({ kind, id }, readPageValues(url)) as unknown as JsonObject,
+    );
     return;
   }
 

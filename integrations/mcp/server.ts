@@ -513,6 +513,201 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "vistrea_create_wiki_node",
+    title: "Create Wiki Node",
+    description: "Create one Deep Wiki knowledge node with inline Markdown content.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "title", "markdown", "created_by"],
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["screen", "component", "path", "requirement", "test", "design", "concept", "note"],
+        },
+        title: { type: "string", minLength: 1, maxLength: 512 },
+        slug: { type: "string", minLength: 1, maxLength: 256 },
+        summary: { type: "string", minLength: 1, maxLength: 2048 },
+        markdown: { type: "string", minLength: 1, maxLength: 262144 },
+        labels: {
+          type: "array",
+          maxItems: 16,
+          items: { type: "string", minLength: 1, maxLength: 64 },
+        },
+        related_resources: {
+          type: "array",
+          maxItems: 32,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["kind", "id"],
+            properties: {
+              kind: { type: "string", maxLength: 64 },
+              id: { type: "string", maxLength: 320 },
+            },
+          },
+        },
+        created_by: { type: "object" },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_update_wiki_node",
+    title: "Update Wiki Node",
+    description:
+      "Revise one Deep Wiki node with optimistic concurrency; published knowledge archives instead of reverting to draft.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["wiki_node_id", "expected_revision", "updated_by"],
+      properties: {
+        wiki_node_id: { type: "string", maxLength: 128 },
+        expected_revision: { type: "integer", minimum: 1 },
+        title: { type: "string", minLength: 1, maxLength: 512 },
+        summary: { type: "string", minLength: 1, maxLength: 2048 },
+        markdown: { type: "string", minLength: 1, maxLength: 262144 },
+        labels: {
+          type: "array",
+          maxItems: 16,
+          items: { type: "string", minLength: 1, maxLength: 64 },
+        },
+        related_resources: {
+          type: "array",
+          maxItems: 32,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["kind", "id"],
+            properties: {
+              kind: { type: "string", maxLength: 64 },
+              id: { type: "string", maxLength: 320 },
+            },
+          },
+        },
+        to_status: { type: "string", enum: ["draft", "published", "archived"] },
+        updated_by: { type: "object" },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_wiki_node",
+    title: "Get Wiki Node",
+    description: "Load one Deep Wiki node.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["wiki_node_id"],
+      properties: { wiki_node_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_search_wiki",
+    title: "Search Wiki",
+    description: "Search Deep Wiki nodes by text, kind, label, and status.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        text: { type: "string", minLength: 1, maxLength: 512 },
+        kinds: { type: "array", maxItems: 16, items: { type: "string", maxLength: 64 } },
+        labels: { type: "array", maxItems: 16, items: { type: "string", maxLength: 64 } },
+        statuses: { type: "array", maxItems: 16, items: { type: "string", maxLength: 64 } },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+        cursor: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_link_wiki_node",
+    title: "Link Wiki Node",
+    description: "Link one Deep Wiki node to another node or any workspace resource.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["source_node_id", "target", "relation", "created_by"],
+      properties: {
+        source_node_id: { type: "string", maxLength: 128 },
+        target: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "id"],
+          properties: {
+            kind: { type: "string", maxLength: 64 },
+            id: { type: "string", maxLength: 320 },
+          },
+        },
+        relation: {
+          type: "string",
+          enum: [
+            "relates_to",
+            "documents",
+            "evidence_for",
+            "implements",
+            "tests",
+            "depends_on",
+            "supersedes",
+          ],
+        },
+        label: { type: "string", minLength: 1, maxLength: 256 },
+        annotation: { type: "string", minLength: 1, maxLength: 2048 },
+        created_by: { type: "object" },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_unlink_wiki_node",
+    title: "Unlink Wiki Node",
+    description: "Remove one Deep Wiki link with optimistic concurrency.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["wiki_link_id", "expected_revision"],
+      properties: {
+        wiki_link_id: { type: "string", maxLength: 128 },
+        expected_revision: { type: "integer", minimum: 1 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_wiki_backlinks",
+    title: "Get Wiki Backlinks",
+    description: "List links pointing at one Deep Wiki node.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["wiki_node_id"],
+      properties: {
+        wiki_node_id: { type: "string", maxLength: 128 },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+        cursor: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_related_wiki_nodes",
+    title: "Related Wiki Nodes",
+    description: "List Deep Wiki nodes related to one workspace resource.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "id"],
+      properties: {
+        kind: { type: "string", maxLength: 64 },
+        id: { type: "string", maxLength: 320 },
+        limit: { type: "integer", minimum: 1, maximum: 500 },
+        cursor: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -542,6 +737,14 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_observe_transition", "RecordTransitionObservation"],
   ["vistrea_get_screen_graph", "GetScreenGraph"],
   ["vistrea_find_screen_path", "FindScreenPath"],
+  ["vistrea_create_wiki_node", "CreateWikiNode"],
+  ["vistrea_update_wiki_node", "UpdateWikiNode"],
+  ["vistrea_get_wiki_node", "GetWikiNode"],
+  ["vistrea_search_wiki", "ListWikiNodes"],
+  ["vistrea_link_wiki_node", "LinkWikiNode"],
+  ["vistrea_unlink_wiki_node", "UnlinkWikiNode"],
+  ["vistrea_get_wiki_backlinks", "GetWikiBacklinks"],
+  ["vistrea_related_wiki_nodes", "GetRelatedWikiNodes"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

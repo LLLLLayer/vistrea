@@ -32,6 +32,14 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_observe_transition` | `RecordTransitionObservation` | Record one executed action as a deduplicated Transition |
 | `vistrea_get_screen_graph` | `GetScreenGraph` | Read the materialized Screen Graph for a project and application |
 | `vistrea_find_screen_path` | `FindScreenPath` | Find acyclic transition paths between two Screen States |
+| `vistrea_create_wiki_node` | `CreateWikiNode` | Create one Deep Wiki knowledge node |
+| `vistrea_update_wiki_node` | `UpdateWikiNode` | Revise one Deep Wiki node with optimistic concurrency |
+| `vistrea_get_wiki_node` | `GetWikiNode` | Load one Deep Wiki node |
+| `vistrea_search_wiki` | `ListWikiNodes` | Search Deep Wiki nodes by text, kind, label, and status |
+| `vistrea_link_wiki_node` | `LinkWikiNode` | Link a node to another node or workspace resource |
+| `vistrea_unlink_wiki_node` | `UnlinkWikiNode` | Remove one Deep Wiki link |
+| `vistrea_get_wiki_backlinks` | `GetWikiBacklinks` | List links pointing at one node |
+| `vistrea_related_wiki_nodes` | `GetRelatedWikiNodes` | List nodes related to one workspace resource |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 

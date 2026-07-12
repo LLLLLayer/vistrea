@@ -62,6 +62,7 @@ import {
   type VersionSelector,
   type WikiLink,
   type WikiNode,
+  type WikiNodeQuery,
   type WorkingChange,
   type WorkingSet,
 } from "../api/models.js";
@@ -612,6 +613,45 @@ class StateWikiRepository extends BoundStateRepository implements WikiRepository
       link: cloneValue(current),
       deleted_revision: current.revision + 1,
     });
+  }
+
+  listNodes(query?: WikiNodeQuery, page?: PageRequest): Page<WikiNode> {
+    this.read();
+    const text = query?.text?.toLowerCase();
+    const kinds = query?.kinds === undefined ? undefined : new Set(query.kinds);
+    const labels = query?.labels === undefined ? undefined : new Set(query.labels);
+    const statuses = query?.statuses === undefined ? undefined : new Set(query.statuses);
+    const values = [...this.unit.state.wikiNodes.values()]
+      .filter((node) => {
+        if (kinds !== undefined && !kinds.has(node["kind"] as string)) {
+          return false;
+        }
+        if (statuses !== undefined && !statuses.has(node["status"] as string)) {
+          return false;
+        }
+        const nodeLabels = (node["labels"] ?? []) as readonly string[];
+        if (labels !== undefined && !nodeLabels.some((label) => labels.has(label))) {
+          return false;
+        }
+        if (text !== undefined) {
+          const content = node["content"] as { readonly text?: string } | undefined;
+          const haystack = [
+            node["title"] as string,
+            (node["slug"] as string | undefined) ?? "",
+            (node["summary"] as string | undefined) ?? "",
+            content?.text ?? "",
+            ...nodeLabels,
+          ]
+            .join("\n")
+            .toLowerCase();
+          if (!haystack.includes(text)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((left, right) => left.wiki_node_id.localeCompare(right.wiki_node_id));
+    return paginate(values, page, this.unit.snapshotVersion);
   }
 
   backlinks(nodeId: string, page?: PageRequest): Page<WikiLink> {

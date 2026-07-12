@@ -656,6 +656,13 @@ export interface GraphDiff {
   readonly removed_transition_ids: readonly string[];
 }
 
+export interface WikiNodeQuery {
+  readonly text?: string;
+  readonly kinds?: readonly string[];
+  readonly labels?: readonly string[];
+  readonly statuses?: readonly string[];
+}
+
 export interface KnowledgeCollectionQuery {
   readonly text?: string;
   readonly publication_states?: readonly string[];
