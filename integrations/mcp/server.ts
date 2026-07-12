@@ -87,6 +87,34 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "vistrea_get_event_timeline",
+    title: "Get Runtime Event Timeline",
+    description:
+      "Read the persisted Runtime event timeline, including reported gap evidence.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        event_epoch_id: {
+          type: "string",
+          maxLength: 128,
+          pattern:
+            "^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        },
+        kinds: {
+          type: "array",
+          minItems: 1,
+          maxItems: 16,
+          uniqueItems: true,
+          items: { type: "string", pattern: "^[a-z][a-z0-9_]{0,63}$" },
+        },
+        first_sequence: { type: "integer", minimum: 0 },
+        last_sequence: { type: "integer", minimum: 0 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -94,6 +122,7 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_capture_snapshot", "CaptureSnapshot"],
   ["vistrea_list_snapshots", "ListSnapshots"],
   ["vistrea_get_snapshot", "GetSnapshot"],
+  ["vistrea_get_event_timeline", "GetEventTimeline"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

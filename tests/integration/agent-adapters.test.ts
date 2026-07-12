@@ -124,6 +124,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     tools.tools.map((tool) => tool.name).sort(),
     [
       "vistrea_capture_snapshot",
+      "vistrea_get_event_timeline",
       "vistrea_get_snapshot",
       "vistrea_get_workspace_status",
       "vistrea_list_snapshots",
@@ -177,6 +178,35 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   });
   assert.equal(mcpGet.isError, undefined);
   assert.deepEqual(mcpGet.structuredContent, cliGetEnvelope.data);
+
+  const eventBatch = JSON.parse(
+    await fs.readFile(
+      path.join(
+        repositoryRoot,
+        "protocol/fixtures/v1/runtime-event-batch/valid/ordered-with-filtered-gap.json",
+      ),
+      "utf8",
+    ),
+  ) as { event_epoch_id: string; events: readonly { event_id: string }[] };
+  const eventUnit = workspace.beginUnitOfWork("write");
+  eventUnit.runtimeEvents.appendBatch(eventBatch as never);
+  eventUnit.commit();
+  const cliEvents = await runCli(
+    ["events", "list", "--epoch", eventBatch.event_epoch_id],
+    environment,
+  );
+  assert.equal(cliEvents.exitCode, 0);
+  const cliEventsEnvelope = parseCliEnvelope(cliEvents.stdout);
+  assert.equal(
+    ((cliEventsEnvelope.data as JsonObject)["events"] as readonly JsonObject[]).length,
+    eventBatch.events.length,
+  );
+  const mcpEvents = await mcp.callTool({
+    name: "vistrea_get_event_timeline",
+    arguments: { event_epoch_id: eventBatch.event_epoch_id },
+  });
+  assert.equal(mcpEvents.isError, undefined);
+  assert.deepEqual(mcpEvents.structuredContent, cliEventsEnvelope.data);
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);

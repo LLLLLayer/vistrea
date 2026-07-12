@@ -21,12 +21,16 @@ import type {
 } from "./snapshot-engine.js";
 
 const SNAPSHOT_CAPABILITY = "runtime.snapshot";
+const EVENTS_CAPABILITY = "runtime.events";
 const AUTH_METHOD = "hmac-sha256";
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const CAPABILITY_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/;
 const RUNTIME_INSTANCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const NONCE_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 const HEX_PROOF_PATTERN = /^[0-9a-f]{64}$/;
+const EVENT_EPOCH_PATTERN =
+  /^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EVENT_KIND_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const DEFAULT_MAXIMUM_LINE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAXIMUM_OBJECT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAXIMUM_CHUNK_BYTES = 64 * 1024;
@@ -34,6 +38,9 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_CAPTURE_TIMEOUT_MS = 30_000;
 const MAXIMUM_CAPTURE_OBJECTS = 256;
 const MAXIMUM_OBJECT_INDEX = MAXIMUM_CAPTURE_OBJECTS - 1;
+const MAXIMUM_EVENT_KINDS = 16;
+const MAXIMUM_EVENTS_PER_BATCH = 1_024;
+const MAXIMUM_BUFFERED_EVENT_BATCHES = 64;
 
 export type LoopbackTransportErrorCode =
   | "unauthenticated"
@@ -44,6 +51,7 @@ export type LoopbackTransportErrorCode =
   | "cancelled"
   | "timeout"
   | "unavailable"
+  | "conflict"
   | "remote_error";
 
 export class LoopbackTransportError extends Error {
@@ -51,6 +59,58 @@ export class LoopbackTransportError extends Error {
     super(message);
     this.name = "LoopbackTransportError";
   }
+}
+
+/** Rejection carrying the Runtime's epoch recovery hints from `subscribe_error`. */
+export class RuntimeEventSubscribeError extends LoopbackTransportError {
+  readonly oldestAvailableSequence: number | undefined;
+  readonly nextSequence: number | undefined;
+
+  constructor(
+    code: LoopbackTransportErrorCode,
+    message: string,
+    hints: {
+      readonly oldestAvailableSequence?: number;
+      readonly nextSequence?: number;
+    } = {},
+  ) {
+    super(code, message);
+    this.name = "RuntimeEventSubscribeError";
+    this.oldestAvailableSequence = hints.oldestAvailableSequence;
+    this.nextSequence = hints.nextSequence;
+  }
+}
+
+export interface RuntimeEventEpochDescriptor {
+  readonly eventEpochId: string;
+  readonly oldestRetainedSequence: number;
+  readonly nextSequence: number;
+}
+
+export type RuntimeEventStart =
+  | { readonly mode: "after_sequence"; readonly sequence: number }
+  | { readonly mode: "oldest_retained" }
+  | { readonly mode: "tail" };
+
+export interface SubscribeRuntimeEventsCommand {
+  readonly eventEpochId: string;
+  readonly eventKinds: readonly string[];
+  readonly start: RuntimeEventStart;
+  readonly maxBatchSize?: number;
+}
+
+/** One ordered Runtime event stream negotiated over an authenticated session. */
+export interface RuntimeEventSubscription {
+  readonly subscriptionId: string;
+  readonly eventEpochId: string;
+  /**
+   * Resolves the next untrusted RuntimeEventBatch candidate, or undefined when
+   * the Runtime or the Host ended the stream normally.
+   */
+  nextBatch(): Promise<unknown | undefined>;
+  /** Reports durable persistence so the Runtime may release retained events. */
+  acknowledge(durableThroughSequence: number): void;
+  close(): void;
 }
 
 export interface LoopbackProtocolVersion {
@@ -435,9 +495,18 @@ class HostRuntimeConnection {
         "The Runtime does not support the required Snapshot capability.",
       );
     }
+    // Events are negotiated only when the Runtime offers the capability AND
+    // declares its current epoch; offering the capability without an epoch
+    // downgrades the session to Snapshot-only instead of failing it.
+    const eventEpoch = capabilities.includes(EVENTS_CAPABILITY)
+      ? parseEventEpoch(message["event_epoch"])
+      : undefined;
 
     const connectionId = randomUUID();
-    const enabledCapabilities = [SNAPSHOT_CAPABILITY] as const;
+    const enabledCapabilities =
+      eventEpoch === undefined
+        ? ([SNAPSHOT_CAPABILITY] as const)
+        : ([EVENTS_CAPABILITY, SNAPSHOT_CAPABILITY] as const);
     const selectedVersion = { major: 1, minor: 0 } as const;
     const hostProof = computeLoopbackHostProof(this.#secret, {
       connectionAttemptId,
@@ -460,6 +529,15 @@ class HostRuntimeConnection {
         maximum_object_bytes: this.#limits.maximumObjectBytes,
         maximum_chunk_bytes: this.#limits.maximumChunkBytes,
       },
+      ...(eventEpoch === undefined
+        ? {}
+        : {
+            event_epoch: {
+              event_epoch_id: eventEpoch.eventEpochId,
+              oldest_retained_sequence: eventEpoch.oldestRetainedSequence,
+              next_sequence: eventEpoch.nextSequence,
+            },
+          }),
     });
     clearTimeout(this.#handshakeTimer);
     this.#state = "ready";
@@ -469,6 +547,7 @@ class HostRuntimeConnection {
       runtimeInstanceId,
       selectedVersion,
       enabledCapabilities,
+      ...(eventEpoch === undefined ? {} : { eventEpoch }),
       limits: this.#limits,
       onFatal: (error) => this.#fail(error),
     });
@@ -529,8 +608,126 @@ interface LoopbackRuntimeSessionOptions {
   readonly runtimeInstanceId: string;
   readonly selectedVersion: LoopbackProtocolVersion;
   readonly enabledCapabilities: readonly string[];
+  readonly eventEpoch?: RuntimeEventEpochDescriptor;
   readonly limits: TransportLimits;
   readonly onFatal: (error: LoopbackTransportError) => void;
+}
+
+interface PendingSubscribe {
+  readonly requestId: string;
+  readonly command: SubscribeRuntimeEventsCommand;
+  readonly resolve: (subscription: RuntimeEventSubscription) => void;
+  readonly reject: (error: LoopbackTransportError) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
+interface EventBatchWaiter {
+  readonly resolve: (batch: unknown | undefined) => void;
+  readonly reject: (error: LoopbackTransportError) => void;
+}
+
+class ActiveEventSubscription implements RuntimeEventSubscription {
+  readonly subscriptionId: string;
+  readonly eventEpochId: string;
+  readonly #send: (message: Readonly<Record<string, unknown>>) => void;
+  readonly #onLocalClose: (subscription: ActiveEventSubscription) => void;
+  readonly #queue: unknown[] = [];
+  readonly #waiters: EventBatchWaiter[] = [];
+  #closed = false;
+  #closeError: LoopbackTransportError | undefined;
+
+  constructor(options: {
+    readonly subscriptionId: string;
+    readonly eventEpochId: string;
+    readonly send: (message: Readonly<Record<string, unknown>>) => void;
+    readonly onLocalClose: (subscription: ActiveEventSubscription) => void;
+  }) {
+    this.subscriptionId = options.subscriptionId;
+    this.eventEpochId = options.eventEpochId;
+    this.#send = options.send;
+    this.#onLocalClose = options.onLocalClose;
+  }
+
+  get bufferedBatchCount(): number {
+    return this.#queue.length;
+  }
+
+  nextBatch(): Promise<unknown | undefined> {
+    if (this.#queue.length > 0) {
+      return Promise.resolve(this.#queue.shift());
+    }
+    if (this.#closed) {
+      return this.#closeError === undefined
+        ? Promise.resolve(undefined)
+        : Promise.reject(this.#closeError);
+    }
+    return new Promise<unknown | undefined>((resolve, reject) => {
+      this.#waiters.push({ resolve, reject });
+    });
+  }
+
+  acknowledge(durableThroughSequence: number): void {
+    if (this.#closed) {
+      return;
+    }
+    if (!Number.isSafeInteger(durableThroughSequence) || durableThroughSequence < 0) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The event acknowledgement sequence is invalid.",
+      );
+    }
+    try {
+      this.#send({
+        type: "acknowledge_events",
+        subscription_id: this.subscriptionId,
+        event_epoch_id: this.eventEpochId,
+        durable_through_sequence: durableThroughSequence,
+      });
+    } catch {
+      // A vanished connection already terminates the stream through the session.
+    }
+  }
+
+  close(): void {
+    if (this.#closed) {
+      return;
+    }
+    try {
+      this.#send({ type: "unsubscribe_events", subscription_id: this.subscriptionId });
+    } catch {
+      // Local teardown still completes when the connection is already gone.
+    }
+    this.settle(undefined);
+    this.#onLocalClose(this);
+  }
+
+  enqueue(batch: unknown): void {
+    if (this.#closed) {
+      return;
+    }
+    const waiter = this.#waiters.shift();
+    if (waiter === undefined) {
+      this.#queue.push(batch);
+    } else {
+      waiter.resolve(batch);
+    }
+  }
+
+  /** Ends the stream: undefined for a normal end, an error for a failed one. */
+  settle(error: LoopbackTransportError | undefined): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    this.#closeError = error;
+    for (const waiter of this.#waiters.splice(0)) {
+      if (error === undefined) {
+        waiter.resolve(undefined);
+      } else {
+        waiter.reject(error);
+      }
+    }
+  }
 }
 
 type CapturePhase =
@@ -576,11 +773,14 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
   readonly runtimeInstanceId: string;
   readonly selectedVersion: LoopbackProtocolVersion;
   readonly enabledCapabilities: readonly string[];
+  readonly eventEpoch: RuntimeEventEpochDescriptor | undefined;
   readonly #channel: BoundedJsonLineChannel;
   readonly #limits: TransportLimits;
   readonly #onFatal: (error: LoopbackTransportError) => void;
   readonly #pending = new Map<string, PendingCapture>();
   readonly #cancelled = new Set<string>();
+  readonly #pendingSubscribes = new Map<string, PendingSubscribe>();
+  readonly #subscriptions = new Map<string, ActiveEventSubscription>();
   #state: LoopbackRuntimeSessionState = "ready";
 
   constructor(options: LoopbackRuntimeSessionOptions) {
@@ -589,12 +789,71 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
     this.runtimeInstanceId = options.runtimeInstanceId;
     this.selectedVersion = Object.freeze({ ...options.selectedVersion });
     this.enabledCapabilities = Object.freeze([...options.enabledCapabilities]);
+    this.eventEpoch =
+      options.eventEpoch === undefined ? undefined : Object.freeze({ ...options.eventEpoch });
     this.#limits = options.limits;
     this.#onFatal = options.onFatal;
   }
 
   get state(): LoopbackRuntimeSessionState {
     return this.#state;
+  }
+
+  subscribeEvents(command: SubscribeRuntimeEventsCommand): Promise<RuntimeEventSubscription> {
+    if (this.#state !== "ready") {
+      return Promise.reject(
+        new LoopbackTransportError("unavailable", "The Runtime session is not ready."),
+      );
+    }
+    if (!this.enabledCapabilities.includes(EVENTS_CAPABILITY)) {
+      return Promise.reject(
+        new LoopbackTransportError(
+          "unsupported",
+          "The Runtime session did not negotiate the events capability.",
+        ),
+      );
+    }
+    if (this.#subscriptions.size > 0 || this.#pendingSubscribes.size > 0) {
+      return Promise.reject(
+        new LoopbackTransportError(
+          "resource_exhausted",
+          "The Runtime session already has an active event subscription.",
+        ),
+      );
+    }
+    let normalized: Readonly<Record<string, unknown>>;
+    try {
+      normalized = normalizeSubscribeCommand(command);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const requestId = randomUUID();
+    return new Promise<RuntimeEventSubscription>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const pending = this.#pendingSubscribes.get(requestId);
+        if (pending !== undefined) {
+          this.#pendingSubscribes.delete(requestId);
+          pending.reject(
+            new LoopbackTransportError("timeout", "The Runtime event subscription timed out."),
+          );
+        }
+      }, this.#limits.captureTimeoutMs);
+      timer.unref();
+      this.#pendingSubscribes.set(requestId, { requestId, command, resolve, reject, timer });
+      try {
+        this.#channel.send({
+          type: "subscribe_events",
+          request_id: requestId,
+          ...normalized,
+        });
+      } catch {
+        this.#pendingSubscribes.delete(requestId);
+        clearTimeout(timer);
+        reject(
+          new LoopbackTransportError("unavailable", "The Runtime connection is unavailable."),
+        );
+      }
+    });
   }
 
   captureSnapshot(
@@ -675,6 +934,22 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
       }
       if (type === "capture_error") {
         this.#captureError(message);
+        return;
+      }
+      if (type === "subscribe_result") {
+        this.#subscribeResult(message);
+        return;
+      }
+      if (type === "subscribe_error") {
+        this.#subscribeError(message);
+        return;
+      }
+      if (type === "event_batch") {
+        this.#eventBatch(message);
+        return;
+      }
+      if (type === "events_closed") {
+        this.#eventsClosed(message);
         return;
       }
       if (this.#drainCancelledCapture(message, type)) {
@@ -992,6 +1267,111 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
     this.#finishResolved(pending, result);
   }
 
+  #subscribeResult(message: Readonly<Record<string, unknown>>): void {
+    const requestId = requireString(message, "request_id", 128);
+    const subscriptionId = requireString(message, "subscription_id", 128);
+    const pending = this.#pendingSubscribes.get(requestId);
+    if (pending === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime confirmed an unknown event subscription.",
+      );
+    }
+    if (this.#subscriptions.has(subscriptionId)) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime reused an event subscription identifier.",
+      );
+    }
+    this.#pendingSubscribes.delete(requestId);
+    clearTimeout(pending.timer);
+    const subscription = new ActiveEventSubscription({
+      subscriptionId,
+      eventEpochId: pending.command.eventEpochId,
+      send: (value) => this.#channel.send(value),
+      onLocalClose: (closed) => this.#subscriptions.delete(closed.subscriptionId),
+    });
+    this.#subscriptions.set(subscriptionId, subscription);
+    pending.resolve(subscription);
+  }
+
+  #subscribeError(message: Readonly<Record<string, unknown>>): void {
+    const requestId = requireString(message, "request_id", 128);
+    const pending = this.#pendingSubscribes.get(requestId);
+    if (pending === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime rejected an unknown event subscription.",
+      );
+    }
+    this.#pendingSubscribes.delete(requestId);
+    clearTimeout(pending.timer);
+    const code = message["code"] === "conflict" ? "conflict" : "remote_error";
+    const oldest = optionalSafeUnsigned(message["oldest_available_sequence"]);
+    const next = optionalSafeUnsigned(message["next_sequence"]);
+    pending.reject(
+      new RuntimeEventSubscribeError(
+        code,
+        code === "conflict"
+          ? "The Runtime no longer retains the requested event range or epoch."
+          : "The Runtime rejected the event subscription.",
+        {
+          ...(oldest === undefined ? {} : { oldestAvailableSequence: oldest }),
+          ...(next === undefined ? {} : { nextSequence: next }),
+        },
+      ),
+    );
+  }
+
+  #eventBatch(message: Readonly<Record<string, unknown>>): void {
+    const subscriptionId = requireString(message, "subscription_id", 128);
+    const subscription = this.#subscriptions.get(subscriptionId);
+    if (subscription === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime streamed events for an unknown subscription.",
+      );
+    }
+    const batch = requireRecord(message["batch"], "Runtime event batch");
+    const events = batch["events"];
+    if (!Array.isArray(events) || events.length > MAXIMUM_EVENTS_PER_BATCH) {
+      throw new LoopbackTransportError(
+        "resource_exhausted",
+        "A Runtime event batch exceeds the configured event limit.",
+      );
+    }
+    if (subscription.bufferedBatchCount >= MAXIMUM_BUFFERED_EVENT_BATCHES) {
+      throw new LoopbackTransportError(
+        "resource_exhausted",
+        "The Host event batch buffer is full; the consumer is not draining.",
+      );
+    }
+    subscription.enqueue(structuredClone(batch));
+  }
+
+  #eventsClosed(message: Readonly<Record<string, unknown>>): void {
+    const subscriptionId = requireString(message, "subscription_id", 128);
+    const subscription = this.#subscriptions.get(subscriptionId);
+    if (subscription === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime closed an unknown event subscription.",
+      );
+    }
+    this.#subscriptions.delete(subscriptionId);
+    const code = message["code"];
+    subscription.settle(
+      code === undefined
+        ? undefined
+        : new LoopbackTransportError(
+            code === "conflict" ? "conflict" : "remote_error",
+            code === "conflict"
+              ? "The Runtime reset its event epoch or discarded the subscribed range."
+              : "The Runtime ended the event stream with an error.",
+          ),
+    );
+  }
+
   #captureError(message: Readonly<Record<string, unknown>>): void {
     const requestId = requireString(message, "request_id", 128);
     if (this.#cancelled.delete(requestId)) {
@@ -1078,6 +1458,15 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
       this.#finishRejected(pending, error);
     }
     this.#cancelled.clear();
+    for (const pending of [...this.#pendingSubscribes.values()]) {
+      this.#pendingSubscribes.delete(pending.requestId);
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    for (const subscription of [...this.#subscriptions.values()]) {
+      this.#subscriptions.delete(subscription.subscriptionId);
+      subscription.settle(error.code === "cancelled" ? undefined : error);
+    }
   }
 }
 
@@ -1127,6 +1516,113 @@ function normalizeCaptureCommand(
     screenshot: command.screenshot,
     reason: command.reason,
   };
+}
+
+function parseEventEpoch(value: unknown): RuntimeEventEpochDescriptor | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const record = requireRecord(value, "ClientHello event epoch");
+  const eventEpochId = requireString(record, "event_epoch_id", 128);
+  const oldestRetainedSequence = requireSafeUnsigned(
+    record["oldest_retained_sequence"],
+    "oldest_retained_sequence",
+  );
+  const nextSequence = requireSafeUnsigned(record["next_sequence"], "next_sequence");
+  if (!EVENT_EPOCH_PATTERN.test(eventEpochId) || oldestRetainedSequence > nextSequence) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "ClientHello event epoch is invalid.",
+    );
+  }
+  return { eventEpochId, oldestRetainedSequence, nextSequence };
+}
+
+function normalizeSubscribeCommand(
+  command: SubscribeRuntimeEventsCommand,
+): Readonly<Record<string, unknown>> {
+  if (command === null || typeof command !== "object") {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents command must be an object.",
+    );
+  }
+  if (
+    typeof command.eventEpochId !== "string" ||
+    !EVENT_EPOCH_PATTERN.test(command.eventEpochId)
+  ) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents event epoch is invalid.",
+    );
+  }
+  if (
+    !Array.isArray(command.eventKinds) ||
+    command.eventKinds.length === 0 ||
+    command.eventKinds.length > MAXIMUM_EVENT_KINDS ||
+    new Set(command.eventKinds).size !== command.eventKinds.length ||
+    !command.eventKinds.every(
+      (kind) => typeof kind === "string" && EVENT_KIND_PATTERN.test(kind),
+    )
+  ) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents event kinds are invalid.",
+    );
+  }
+  const start = command.start;
+  if (
+    start === null ||
+    typeof start !== "object" ||
+    (start.mode !== "after_sequence" && start.mode !== "oldest_retained" && start.mode !== "tail")
+  ) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents start mode is invalid.",
+    );
+  }
+  if (
+    start.mode === "after_sequence" &&
+    (!Number.isSafeInteger(start.sequence) || start.sequence < 0)
+  ) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents resume sequence is invalid.",
+    );
+  }
+  if (
+    command.maxBatchSize !== undefined &&
+    (!Number.isSafeInteger(command.maxBatchSize) ||
+      command.maxBatchSize < 1 ||
+      command.maxBatchSize > MAXIMUM_EVENTS_PER_BATCH)
+  ) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "SubscribeRuntimeEvents batch size is invalid.",
+    );
+  }
+  return {
+    event_epoch_id: command.eventEpochId,
+    event_kinds: [...command.eventKinds].sort(),
+    start:
+      start.mode === "after_sequence"
+        ? { mode: "after_sequence", sequence: start.sequence }
+        : { mode: start.mode },
+    ...(command.maxBatchSize === undefined ? {} : { max_batch_size: command.maxBatchSize }),
+  };
+}
+
+function optionalSafeUnsigned(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new LoopbackTransportError(
+      "protocol_error",
+      "A Runtime transport integer field is invalid.",
+    );
+  }
+  return value as number;
 }
 
 function normalizeLimits(options: LoopbackRuntimeHostOptions): TransportLimits {
@@ -1433,6 +1929,8 @@ function publicErrorMessage(code: LoopbackTransportErrorCode): string {
       return "Runtime transport operation was cancelled.";
     case "unavailable":
       return "Runtime connection is unavailable.";
+    case "conflict":
+      return "Runtime state conflicts with the requested operation.";
     case "remote_error":
       return "Runtime reported an operation failure.";
     case "protocol_error":

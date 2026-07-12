@@ -17,6 +17,11 @@ const SNAPSHOT_ID_PATTERN =
   /^snapshot_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const WORKSPACE_ID_PATTERN =
   /^workspace_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EVENT_EPOCH_ID_PATTERN =
+  /^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EVENT_ID_PATTERN =
+  /^event_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EVENT_KIND_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
 
 export const HOST_LOCAL_API_ENVIRONMENT = {
@@ -31,6 +36,7 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "CaptureSnapshot",
   "ListSnapshots",
   "GetSnapshot",
+  "GetEventTimeline",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -226,6 +232,25 @@ export class HostLocalApiClient {
           );
         }
         return snapshot;
+      }
+      case "GetEventTimeline": {
+        const query = normalizeEventTimelineInput(input);
+        const parameters = new URLSearchParams();
+        if (query["event_epoch_id"] !== undefined) {
+          parameters.set("event_epoch_id", query["event_epoch_id"] as string);
+        }
+        if (query["kinds"] !== undefined) {
+          parameters.set("kinds", (query["kinds"] as readonly string[]).join(","));
+        }
+        if (query["first_sequence"] !== undefined) {
+          parameters.set("first_sequence", String(query["first_sequence"]));
+        }
+        if (query["last_sequence"] !== undefined) {
+          parameters.set("last_sequence", String(query["last_sequence"]));
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request("GET", `/v1/events${suffix}`, undefined, 200, options);
+        return validateEventTimeline(value);
       }
       default:
         throw new HostClientError("unsupported", "The Host operation is not implemented.");
@@ -494,7 +519,11 @@ function normalizeListInput(value: unknown): JsonObject {
 
 function validateWorkspaceStatus(value: JsonValue): JsonObject {
   const status = requireObject(value);
-  assertKeys(status, ["status", "runtime_connected", "workspace_id", "message"], true);
+  assertKeys(
+    status,
+    ["status", "runtime_connected", "runtime_events", "workspace_id", "message"],
+    true,
+  );
   if (
     (status["status"] !== "ready" && status["status"] !== "degraded") ||
     typeof status["runtime_connected"] !== "boolean" ||
@@ -506,7 +535,123 @@ function validateWorkspaceStatus(value: JsonValue): JsonObject {
   ) {
     throw invalidHostResult();
   }
+  const events = status["runtime_events"];
+  if (events !== undefined) {
+    const record = requireObject(events);
+    assertKeys(
+      record,
+      ["state", "event_epoch_id", "persisted_through_sequence", "error_code"],
+      true,
+    );
+    if (
+      (record["state"] !== "idle" &&
+        record["state"] !== "unsupported" &&
+        record["state"] !== "running" &&
+        record["state"] !== "stopped" &&
+        record["state"] !== "failed") ||
+      (record["event_epoch_id"] !== undefined &&
+        (typeof record["event_epoch_id"] !== "string" ||
+          !EVENT_EPOCH_ID_PATTERN.test(record["event_epoch_id"]))) ||
+      (record["persisted_through_sequence"] !== undefined &&
+        (!Number.isSafeInteger(record["persisted_through_sequence"]) ||
+          (record["persisted_through_sequence"] as number) < 0)) ||
+      (record["error_code"] !== undefined &&
+        (typeof record["error_code"] !== "string" || record["error_code"].length > 64))
+    ) {
+      throw invalidHostResult();
+    }
+  }
   return status;
+}
+
+function normalizeEventTimelineInput(value: unknown): JsonObject {
+  const input = assertExactObject(
+    value,
+    ["event_epoch_id", "kinds", "first_sequence", "last_sequence"],
+    "Event timeline input",
+    true,
+  );
+  const eventEpochId = input["event_epoch_id"];
+  if (
+    eventEpochId !== undefined &&
+    (typeof eventEpochId !== "string" || !EVENT_EPOCH_ID_PATTERN.test(eventEpochId))
+  ) {
+    throw invalidInput();
+  }
+  const kinds = input["kinds"];
+  if (
+    kinds !== undefined &&
+    (!Array.isArray(kinds) ||
+      kinds.length === 0 ||
+      kinds.length > 16 ||
+      new Set(kinds).size !== kinds.length ||
+      !kinds.every(
+        (kind) => typeof kind === "string" && EVENT_KIND_PATTERN.test(kind),
+      ))
+  ) {
+    throw invalidInput();
+  }
+  for (const field of ["first_sequence", "last_sequence"] as const) {
+    const sequence = input[field];
+    if (
+      sequence !== undefined &&
+      (!Number.isSafeInteger(sequence) || (sequence as number) < 0)
+    ) {
+      throw invalidInput();
+    }
+  }
+  if (
+    input["first_sequence"] !== undefined &&
+    input["last_sequence"] !== undefined &&
+    (input["first_sequence"] as number) > (input["last_sequence"] as number)
+  ) {
+    throw invalidInput();
+  }
+  return input;
+}
+
+function validateEventTimeline(value: JsonValue): JsonObject {
+  const timeline = requireObject(value);
+  assertKeys(timeline, ["event_epoch_id", "events", "reported_gaps"], true);
+  const events = timeline["events"];
+  const gaps = timeline["reported_gaps"];
+  if (
+    (timeline["event_epoch_id"] !== undefined &&
+      (typeof timeline["event_epoch_id"] !== "string" ||
+        !EVENT_EPOCH_ID_PATTERN.test(timeline["event_epoch_id"]))) ||
+    !Array.isArray(events) ||
+    events.length > 100_000 ||
+    !Array.isArray(gaps) ||
+    gaps.length > 100_000
+  ) {
+    throw invalidHostResult();
+  }
+  for (const eventValue of events) {
+    const event = requireObject(eventValue);
+    if (
+      typeof event["event_id"] !== "string" ||
+      !EVENT_ID_PATTERN.test(event["event_id"]) ||
+      !Number.isSafeInteger(event["sequence"]) ||
+      (event["sequence"] as number) < 0 ||
+      typeof event["kind"] !== "string" ||
+      !EVENT_KIND_PATTERN.test(event["kind"])
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  for (const gapValue of gaps) {
+    const gap = requireObject(gapValue);
+    assertKeys(gap, ["first_sequence", "last_sequence"]);
+    if (
+      !Number.isSafeInteger(gap["first_sequence"]) ||
+      (gap["first_sequence"] as number) < 0 ||
+      !Number.isSafeInteger(gap["last_sequence"]) ||
+      (gap["last_sequence"] as number) < (gap["first_sequence"] as number)
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return timeline;
 }
 
 function validateRuntimeSnapshot(value: JsonValue): JsonObject {

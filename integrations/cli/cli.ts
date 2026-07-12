@@ -57,6 +57,7 @@ export async function runVistreaCli(
           "snapshot capture",
           "snapshot list",
           "snapshot get <snapshot_id>",
+          "events list",
         ],
         format: "json",
       });
@@ -148,7 +149,49 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "snapshot" && command[1] === "get" && command.length === 3) {
     return invocation("GetSnapshot", { snapshot_id: command[2] as string }, timeoutMilliseconds);
   }
+  if (command[0] === "events" && command[1] === "list") {
+    return invocation("GetEventTimeline", parseEventOptions(command.slice(2)), timeoutMilliseconds);
+  }
   throw invalidArguments();
+}
+
+function parseEventOptions(arguments_: readonly string[]): JsonObject {
+  let eventEpochId: string | undefined;
+  let kinds: string[] | undefined;
+  let firstSequence: number | undefined;
+  let lastSequence: number | undefined;
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const option = arguments_[index] as string;
+    const value = arguments_[index + 1];
+    if (value === undefined) {
+      throw invalidArguments();
+    }
+    index += 1;
+    if (option === "--epoch" && eventEpochId === undefined) {
+      eventEpochId = value;
+    } else if (option === "--kinds" && kinds === undefined) {
+      kinds = value.split(",");
+    } else if (option === "--first-sequence" && firstSequence === undefined) {
+      firstSequence = parseSequenceOption(value);
+    } else if (option === "--last-sequence" && lastSequence === undefined) {
+      lastSequence = parseSequenceOption(value);
+    } else {
+      throw invalidArguments();
+    }
+  }
+  return {
+    ...(eventEpochId === undefined ? {} : { event_epoch_id: eventEpochId }),
+    ...(kinds === undefined ? {} : { kinds }),
+    ...(firstSequence === undefined ? {} : { first_sequence: firstSequence }),
+    ...(lastSequence === undefined ? {} : { last_sequence: lastSequence }),
+  };
+}
+
+function parseSequenceOption(value: string): number {
+  if (!/^(?:0|[1-9][0-9]{0,14})$/.test(value)) {
+    throw invalidArguments();
+  }
+  return Number(value);
 }
 
 function invocation(

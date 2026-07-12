@@ -10,6 +10,7 @@ import { TextDecoder } from "node:util";
 import {
   DataError,
   type ByteRange,
+  type EventTimelineQuery,
   type ObjectStore,
   type PageRequest,
   type ProtocolValidator,
@@ -17,11 +18,13 @@ import {
 } from "../../data/api/index.js";
 import {
   CaptureSnapshotUseCase,
+  GetEventTimelineQuery,
   GetSnapshotQuery,
   ListSnapshotsQuery,
   LoopbackTransportError,
   type CaptureSnapshotCommand,
   type RuntimeCapturePort,
+  type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
@@ -44,6 +47,8 @@ export interface HostLocalApiDependencies {
   readonly runtime: RuntimeCapturePort;
   /** Reports live Runtime readiness without exposing transport state to API consumers. */
   readonly isRuntimeConnected?: () => boolean;
+  /** Reports the Runtime event pump status when the Host composition runs one. */
+  readonly runtimeEventsStatus?: () => RuntimeEventPumpStatus | undefined;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
   readonly validator: ProtocolValidator;
@@ -134,6 +139,7 @@ export async function startHostLocalApi(
   const capture = new CaptureSnapshotUseCase(options);
   const getSnapshot = new GetSnapshotQuery(options.workspace);
   const listSnapshots = new ListSnapshotsQuery(options.workspace);
+  const getEventTimeline = new GetEventTimelineQuery(options.workspace);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -149,7 +155,9 @@ export async function startHostLocalApi(
         capture,
         getSnapshot,
         listSnapshots,
+        getEventTimeline,
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
+        runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
         workspace: options.workspace,
         objects: options.objects,
       }).catch((error: unknown) => sendError(response, requestId, error));
@@ -207,7 +215,9 @@ interface RequestHandlerContext {
   readonly capture: CaptureSnapshotUseCase;
   readonly getSnapshot: GetSnapshotQuery;
   readonly listSnapshots: ListSnapshotsQuery;
+  readonly getEventTimeline: GetEventTimelineQuery;
   readonly isRuntimeConnected: () => boolean;
+  readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
 }
@@ -224,11 +234,21 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoSearchParameters(url);
     assertNoRequestBody(request);
     const health = context.workspace.checkHealth();
+    const events = context.runtimeEventsStatus();
     writeJson(response, 200, {
       status: health.ok ? "ready" : "degraded",
       runtime_connected: context.isRuntimeConnected(),
+      ...(events === undefined ? {} : { runtime_events: events }),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
+    return;
+  }
+
+  if (pathname === "/v1/events") {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const timeline = context.getEventTimeline.execute(parseEventTimelineQuery(url));
+    writeJson(response, 200, timeline);
     return;
   }
 
@@ -344,6 +364,77 @@ function assertNoSearchParameters(url: URL): void {
   if ([...url.searchParams].length > 0) {
     throw invalidArgument("This route does not accept query parameters.");
   }
+}
+
+const EVENT_EPOCH_ID_PATTERN =
+  /^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+function parseEventTimelineQuery(url: URL): EventTimelineQuery | undefined {
+  const allowed = new Set(["event_epoch_id", "kinds", "first_sequence", "last_sequence"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) {
+      throw invalidArgument(`Unsupported events query parameter: ${key}.`);
+    }
+    if (url.searchParams.getAll(key).length !== 1) {
+      throw invalidArgument(`The ${key} query parameter may appear only once.`);
+    }
+  }
+
+  const eventEpochId = url.searchParams.get("event_epoch_id");
+  if (eventEpochId !== null && !EVENT_EPOCH_ID_PATTERN.test(eventEpochId)) {
+    throw invalidArgument("event_epoch_id must be a typed UUIDv7 identifier.");
+  }
+  const kindsSource = url.searchParams.get("kinds");
+  const kinds = kindsSource === null ? null : kindsSource.split(",");
+  if (
+    kinds !== null &&
+    (kinds.length === 0 ||
+      kinds.length > 16 ||
+      new Set(kinds).size !== kinds.length ||
+      !kinds.every((kind) => EVENT_KIND_QUERY_PATTERN.test(kind)))
+  ) {
+    throw invalidArgument("kinds must be a comma-separated list of unique event kinds.");
+  }
+  const firstSequence = parseSequenceParameter(url, "first_sequence");
+  const lastSequence = parseSequenceParameter(url, "last_sequence");
+  if (
+    firstSequence !== undefined &&
+    lastSequence !== undefined &&
+    firstSequence > lastSequence
+  ) {
+    throw invalidArgument("first_sequence must not exceed last_sequence.");
+  }
+
+  if (
+    eventEpochId === null &&
+    kinds === null &&
+    firstSequence === undefined &&
+    lastSequence === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(eventEpochId === null ? {} : { event_epoch_id: eventEpochId }),
+    ...(kinds === null ? {} : { kinds }),
+    ...(firstSequence === undefined ? {} : { first_sequence: firstSequence }),
+    ...(lastSequence === undefined ? {} : { last_sequence: lastSequence }),
+  };
+}
+
+function parseSequenceParameter(url: URL, name: string): number | undefined {
+  const source = url.searchParams.get(name);
+  if (source === null) {
+    return undefined;
+  }
+  if (!/^(?:0|[1-9][0-9]{0,14})$/.test(source)) {
+    throw invalidArgument(`${name} must be a JSON-safe unsigned integer.`);
+  }
+  const value = Number(source);
+  if (!Number.isSafeInteger(value)) {
+    throw invalidArgument(`${name} must be a JSON-safe unsigned integer.`);
+  }
+  return value;
 }
 
 function parsePageRequest(url: URL): PageRequest | undefined {
@@ -987,6 +1078,13 @@ function toPublicError(error: unknown): PublicError {
           status: 409,
           code: error.code,
           message: "The Runtime capture was cancelled.",
+          retryable: true,
+        };
+      case "conflict":
+        return {
+          status: 409,
+          code: error.code,
+          message: "The Runtime state conflicts with the requested operation.",
           retryable: true,
         };
       case "unauthenticated":

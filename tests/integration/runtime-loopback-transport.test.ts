@@ -12,6 +12,7 @@ import {
   computeLoopbackHostProof,
   LoopbackRuntimeHost,
   LoopbackTransportError,
+  RuntimeEventSubscribeError,
   type CaptureSnapshotCommand,
   type LoopbackAuthorizationToken,
   type LoopbackProtocolVersion,
@@ -137,6 +138,7 @@ async function authenticateRuntime(
   host: LoopbackRuntimeHost,
   token: LoopbackAuthorizationToken = authorizationToken,
   buildConfiguration: RuntimeBuildConfiguration = "debug",
+  eventEpoch?: Readonly<Record<string, unknown>>,
 ): Promise<ReadyRuntime> {
   const peer = await connectPeer(host);
   const challenge = await withTimeout(peer.next());
@@ -166,6 +168,7 @@ async function authenticateRuntime(
       supportedVersions: versions,
       capabilities,
     }),
+    ...(eventEpoch === undefined ? {} : { event_epoch: eventEpoch }),
   });
   const welcome = await withTimeout(peer.next());
   assert.equal(welcome["type"], "host_welcome");
@@ -743,3 +746,178 @@ async function withTimeout<T>(
     }
   }
 }
+
+const testEventEpoch = {
+  event_epoch_id: "epoch_019f0000-0000-7000-8000-000000000001",
+  oldest_retained_sequence: 1,
+  next_sequence: 3,
+} as const;
+
+test("negotiated event sessions subscribe, stream ordered batches, and acknowledge", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+
+  const ready = await authenticateRuntime(host, authorizationToken, "debug", testEventEpoch);
+  peer = ready.peer;
+  assert.deepEqual(ready.session.enabledCapabilities, ["runtime.events", "runtime.snapshot"]);
+  assert.deepEqual(ready.welcome["event_epoch"], testEventEpoch);
+  assert.deepEqual(ready.session.eventEpoch, {
+    eventEpochId: testEventEpoch.event_epoch_id,
+    oldestRetainedSequence: testEventEpoch.oldest_retained_sequence,
+    nextSequence: testEventEpoch.next_sequence,
+  });
+  const hostProof = computeLoopbackHostProof(authorizationToken, {
+    connectionAttemptId: stringField(ready.challenge, "connection_attempt_id"),
+    connectionId: stringField(ready.welcome, "connection_id"),
+    hostNonce: stringField(ready.challenge, "nonce"),
+    clientNonce: ready.clientNonce,
+    runtimeInstanceId: ready.runtimeInstanceId,
+    selectedVersion: versionField(ready.welcome, "selected_version"),
+    enabledCapabilities: stringArrayField(ready.welcome, "enabled_capabilities"),
+  });
+  assert.equal(ready.welcome["host_proof"], hostProof);
+
+  const subscribing = ready.session.subscribeEvents({
+    eventEpochId: testEventEpoch.event_epoch_id,
+    eventKinds: ["transient_presented", "transient_dismissed"],
+    start: { mode: "oldest_retained" },
+  });
+  const subscribeRequest = await withTimeout(ready.peer.next());
+  assert.equal(subscribeRequest["type"], "subscribe_events");
+  assert.equal(subscribeRequest["event_epoch_id"], testEventEpoch.event_epoch_id);
+  assert.deepEqual(subscribeRequest["event_kinds"], [
+    "transient_dismissed",
+    "transient_presented",
+  ]);
+  assert.deepEqual(subscribeRequest["start"], { mode: "oldest_retained" });
+  ready.peer.send({
+    type: "subscribe_result",
+    request_id: subscribeRequest["request_id"],
+    subscription_id: "events-1",
+  });
+  const subscription = await withTimeout(subscribing);
+  assert.equal(subscription.subscriptionId, "events-1");
+  assert.equal(subscription.eventEpochId, testEventEpoch.event_epoch_id);
+
+  const wireBatch = {
+    protocol_version: { major: 1, minor: 0 },
+    event_epoch_id: testEventEpoch.event_epoch_id,
+    first_sequence: 1,
+    last_sequence: 2,
+    events: [],
+    dropped_event_count: 0,
+    extensions: {},
+  };
+  ready.peer.send({ type: "event_batch", subscription_id: "events-1", batch: wireBatch });
+  assert.deepEqual(await withTimeout(subscription.nextBatch()), wireBatch);
+  subscription.acknowledge(2);
+  const acknowledgement = await withTimeout(ready.peer.next());
+  assert.deepEqual(acknowledgement, {
+    type: "acknowledge_events",
+    subscription_id: "events-1",
+    event_epoch_id: testEventEpoch.event_epoch_id,
+    durable_through_sequence: 2,
+  });
+
+  ready.peer.send({ type: "events_closed", subscription_id: "events-1" });
+  assert.equal(await withTimeout(subscription.nextBatch()), undefined);
+});
+
+test("event sessions without an epoch stay snapshot-only and reject subscriptions", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+
+  const ready = await authenticateRuntime(host);
+  peer = ready.peer;
+  assert.deepEqual(ready.session.enabledCapabilities, ["runtime.snapshot"]);
+  assert.equal(ready.welcome["event_epoch"], undefined);
+  assert.equal(ready.session.eventEpoch, undefined);
+  await assert.rejects(
+    ready.session.subscribeEvents({
+      eventEpochId: testEventEpoch.event_epoch_id,
+      eventKinds: ["transient_presented"],
+      start: { mode: "tail" },
+    }),
+    transportError("unsupported"),
+  );
+});
+
+test("epoch conflicts, replaced epochs, and unknown event frames fail explicitly", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+
+  const ready = await authenticateRuntime(host, authorizationToken, "debug", testEventEpoch);
+  peer = ready.peer;
+
+  const subscribing = ready.session.subscribeEvents({
+    eventEpochId: "epoch_019f0000-0000-7000-8000-000000000000",
+    eventKinds: ["transient_presented"],
+    start: { mode: "after_sequence", sequence: 10 },
+  });
+  const subscribeRequest = await withTimeout(ready.peer.next());
+  ready.peer.send({
+    type: "subscribe_error",
+    request_id: subscribeRequest["request_id"],
+    code: "conflict",
+    oldest_available_sequence: 1,
+    next_sequence: 3,
+  });
+  await assert.rejects(subscribing, (error: unknown) => {
+    assert.ok(error instanceof RuntimeEventSubscribeError);
+    assert.equal(error.code, "conflict");
+    assert.equal(error.oldestAvailableSequence, 1);
+    assert.equal(error.nextSequence, 3);
+    return true;
+  });
+
+  // A batch for an unknown subscription is a protocol violation and fails closed.
+  ready.peer.send({
+    type: "event_batch",
+    subscription_id: "unknown-subscription",
+    batch: { events: [] },
+  });
+  const failure = await withTimeout(ready.peer.next());
+  assert.equal(failure["type"], "error");
+  assert.equal(failure["code"], "protocol_error");
+  await ready.peer.waitForClose();
+  assert.notEqual(ready.session.state, "ready");
+});
+
+test("a runtime-initiated conflict close rejects the pending batch wait", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+
+  const ready = await authenticateRuntime(host, authorizationToken, "debug", testEventEpoch);
+  peer = ready.peer;
+  const subscribing = ready.session.subscribeEvents({
+    eventEpochId: testEventEpoch.event_epoch_id,
+    eventKinds: ["transient_presented"],
+    start: { mode: "tail" },
+  });
+  const subscribeRequest = await withTimeout(ready.peer.next());
+  ready.peer.send({
+    type: "subscribe_result",
+    request_id: subscribeRequest["request_id"],
+    subscription_id: "events-2",
+  });
+  const subscription = await withTimeout(subscribing);
+  const waiting = subscription.nextBatch();
+  ready.peer.send({ type: "events_closed", subscription_id: "events-2", code: "conflict" });
+  await assert.rejects(waiting, transportError("conflict"));
+});

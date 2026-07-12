@@ -1,16 +1,18 @@
 import { randomBytes } from "node:crypto";
 
-import type { ProtocolValidator } from "../../data/api/index.js";
+import type { ProtocolValidator, WorkspaceDataSource } from "../../data/api/index.js";
 import { LocalDataWorkspace } from "../../data/workspace/index.js";
 import {
   LoopbackRuntimeHost,
   LoopbackTransportError,
+  RuntimeEventPump,
   type CaptureSnapshotCommand,
   type LoopbackRuntimeEndpoint,
   type LoopbackRuntimeSession,
   type RuntimeCaptureOptions,
   type RuntimeCapturePort,
   type RuntimeCaptureResult,
+  type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
 import {
   startHostLocalApi,
@@ -68,13 +70,14 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
       host,
       ...(options.runtimePort === undefined ? {} : { port: options.runtimePort }),
     });
-    const runtime = new ActiveRuntimeCapturePort();
+    const runtime = new ActiveRuntimeCapturePort(workspace.data, options.validator);
     const acceptance = acceptRuntimeSessions(runtimeHost, runtime);
     api = await startHostLocalApi({
       host,
       ...(options.apiPort === undefined ? {} : { port: options.apiPort }),
       runtime,
       isRuntimeConnected: () => runtime.connected,
+      runtimeEventsStatus: () => runtime.eventsStatus,
       workspace: workspace.data,
       objects: workspace.objects,
       validator: options.validator,
@@ -152,7 +155,10 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
 }
 
 class ActiveRuntimeCapturePort implements RuntimeCapturePort {
+  readonly #workspace: WorkspaceDataSource;
+  readonly #validator: ProtocolValidator;
   #session: LoopbackRuntimeSession | undefined;
+  #eventPump: RuntimeEventPump | undefined;
   #closed = false;
   readonly #waiters = new Set<{
     readonly resolve: () => void;
@@ -160,8 +166,17 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort {
     readonly timer: ReturnType<typeof setTimeout>;
   }>();
 
+  constructor(workspace: WorkspaceDataSource, validator: ProtocolValidator) {
+    this.#workspace = workspace;
+    this.#validator = validator;
+  }
+
   get connected(): boolean {
     return !this.#closed && this.#session?.state === "ready";
+  }
+
+  get eventsStatus(): RuntimeEventPumpStatus | undefined {
+    return this.#eventPump?.status();
   }
 
   attach(session: LoopbackRuntimeSession): void {
@@ -173,11 +188,27 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort {
       this.#session.close();
     }
     this.#session = session;
+    this.#startEventPump(session);
     for (const waiter of this.#waiters) {
       clearTimeout(waiter.timer);
       waiter.resolve();
     }
     this.#waiters.clear();
+  }
+
+  #startEventPump(session: LoopbackRuntimeSession): void {
+    const pump = new RuntimeEventPump({
+      runtime: session,
+      workspace: this.#workspace,
+      validator: this.#validator,
+    });
+    this.#eventPump = pump;
+    // The pump runs for the session lifetime; its status carries any failure
+    // so a broken event stream degrades visibly instead of crashing the Host.
+    void (async () => {
+      await pump.start();
+      await pump.whenSettled();
+    })().catch(() => {});
   }
 
   captureSnapshot(
@@ -231,6 +262,8 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort {
       return;
     }
     this.#closed = true;
+    void this.#eventPump?.stop().catch(() => {});
+    this.#eventPump = undefined;
     this.#session?.close();
     this.#session = undefined;
     const error = new LoopbackTransportError("unavailable", "The local Host is closed.");

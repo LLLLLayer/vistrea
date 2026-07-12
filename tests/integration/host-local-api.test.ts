@@ -139,6 +139,50 @@ test("Host Local API exposes canonical fixture capture, list, object, and error 
     snapshot_version: "memory:1",
   });
 
+  const emptyTimeline = await authorizedFetch(api, "/v1/events");
+  assert.equal(emptyTimeline.status, 200);
+  assert.deepEqual(await emptyTimeline.json(), { events: [], reported_gaps: [] });
+
+  const eventBatch = JSON.parse(
+    await fs.readFile(
+      path.join(
+        repositoryRoot,
+        "protocol/fixtures/v1/runtime-event-batch/valid/ordered-with-filtered-gap.json",
+      ),
+      "utf8",
+    ),
+  ) as { event_epoch_id: string; events: readonly { kind: string }[] };
+  const eventUnit = workspace.beginUnitOfWork("write");
+  eventUnit.runtimeEvents.appendBatch(eventBatch as never);
+  eventUnit.commit();
+  const timelineResponse = await authorizedFetch(
+    api,
+    `/v1/events?event_epoch_id=${encodeURIComponent(eventBatch.event_epoch_id)}`,
+  );
+  assert.equal(timelineResponse.status, 200);
+  const timelineBody = (await timelineResponse.json()) as {
+    events: readonly Record<string, unknown>[];
+  };
+  assert.equal(timelineBody.events.length, eventBatch.events.length);
+
+  const filteredTimeline = await authorizedFetch(
+    api,
+    "/v1/events?kinds=screen_changed&first_sequence=0&last_sequence=99",
+  );
+  assert.equal(filteredTimeline.status, 200);
+  const filteredBody = (await filteredTimeline.json()) as {
+    events: readonly Record<string, unknown>[];
+  };
+  assert.equal(
+    filteredBody.events.every((event) => event["kind"] === "screen_changed"),
+    true,
+  );
+
+  const invalidTimeline = await authorizedFetch(api, "/v1/events?event_epoch_id=not-an-epoch");
+  assert.equal(invalidTimeline.status, 400);
+  const unknownTimelineParameter = await authorizedFetch(api, "/v1/events?foo=1");
+  assert.equal(unknownTimelineParameter.status, 400);
+
   const getResponse = await authorizedFetch(
     api,
     `/v1/snapshots/${encodeURIComponent(fixture.snapshot.snapshot_id)}`,

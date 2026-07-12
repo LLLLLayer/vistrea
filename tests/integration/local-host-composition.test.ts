@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { test, type TestContext } from "node:test";
@@ -9,7 +11,10 @@ import { test, type TestContext } from "node:test";
 import { startLocalHost } from "../../apps/host/index.js";
 import { isDataError } from "../../data/api/index.js";
 import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
-import { LoopbackTransportError } from "../../engine/connection/index.js";
+import {
+  computeLoopbackClientProof,
+  LoopbackTransportError,
+} from "../../engine/connection/index.js";
 
 const repositoryRoot = process.cwd();
 const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
@@ -78,6 +83,155 @@ test("the local Host owns production storage and reports live Runtime availabili
     snapshot_version: "sqlite:0",
   });
   await reopened.close();
+});
+
+test("the composed Host pumps Runtime events into production storage", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  const host = await startLocalHost({ workspaceRoot, validator });
+  t.after(() => host.close());
+
+  const epochId = "epoch_019f0000-0000-7000-8000-0000000000aa";
+  const socket = net.createConnection({ host: host.runtime.host, port: host.runtime.port });
+  t.after(() => socket.destroy());
+  await once(socket, "connect");
+  socket.setNoDelay(true);
+  let buffered = Buffer.alloc(0);
+  const inbox: Record<string, unknown>[] = [];
+  const waiters: ((message: Record<string, unknown>) => void)[] = [];
+  socket.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    for (;;) {
+      const newline = buffered.indexOf(0x0a);
+      if (newline < 0) {
+        return;
+      }
+      const message = JSON.parse(buffered.subarray(0, newline).toString("utf8")) as Record<
+        string,
+        unknown
+      >;
+      buffered = buffered.subarray(newline + 1);
+      const waiter = waiters.shift();
+      if (waiter === undefined) {
+        inbox.push(message);
+      } else {
+        waiter(message);
+      }
+    }
+  });
+  const nextMessage = (): Promise<Record<string, unknown>> => {
+    const queued = inbox.shift();
+    if (queued !== undefined) {
+      return Promise.resolve(queued);
+    }
+    return withTimeout(
+      new Promise<Record<string, unknown>>((resolve) => waiters.push(resolve)),
+      5_000,
+      "Runtime transport message",
+    );
+  };
+  const send = (message: Record<string, unknown>): void => {
+    socket.write(`${JSON.stringify(message)}\n`);
+  };
+
+  const challenge = await nextMessage();
+  assert.equal(challenge["type"], "host_challenge");
+  const clientNonce = randomBytes(24).toString("base64url");
+  const versions = [{ major: 1, minor: 0 }];
+  const capabilities = ["runtime.events", "runtime.snapshot"];
+  send({
+    type: "client_hello",
+    connection_attempt_id: challenge["connection_attempt_id"],
+    runtime_instance_id: "runtime.composition.events",
+    build_configuration: "debug",
+    supported_versions: versions,
+    capabilities,
+    selected_auth_method: "hmac-sha256",
+    client_nonce: clientNonce,
+    challenge_response: computeLoopbackClientProof(host.runtime.authorizationToken, {
+      connectionAttemptId: challenge["connection_attempt_id"] as string,
+      hostNonce: challenge["nonce"] as string,
+      clientNonce,
+      runtimeInstanceId: "runtime.composition.events",
+      buildConfiguration: "debug",
+      supportedVersions: versions,
+      capabilities,
+    }),
+    event_epoch: {
+      event_epoch_id: epochId,
+      oldest_retained_sequence: 1,
+      next_sequence: 2,
+    },
+  });
+  const welcome = await nextMessage();
+  assert.equal(welcome["type"], "host_welcome");
+  assert.deepEqual(welcome["enabled_capabilities"], ["runtime.events", "runtime.snapshot"]);
+  await host.waitForRuntime(5_000);
+
+  // The composed Host subscribes automatically and resumes from the oldest event.
+  const subscribeRequest = await nextMessage();
+  assert.equal(subscribeRequest["type"], "subscribe_events");
+  assert.equal(subscribeRequest["event_epoch_id"], epochId);
+  assert.deepEqual(subscribeRequest["start"], { mode: "oldest_retained" });
+  send({
+    type: "subscribe_result",
+    request_id: subscribeRequest["request_id"],
+    subscription_id: "composition-events",
+  });
+  send({
+    type: "event_batch",
+    subscription_id: "composition-events",
+    batch: {
+      protocol_version: { major: 1, minor: 0 },
+      event_epoch_id: epochId,
+      first_sequence: 1,
+      last_sequence: 1,
+      events: [
+        {
+          event_id: "event_019f0000-0000-7000-8000-0000000000aa",
+          protocol_version: { major: 1, minor: 0 },
+          event_epoch_id: epochId,
+          sequence: 1,
+          time: { wall_time: "2026-07-12T09:00:00.000Z" },
+          kind: "transient_presented",
+          stable_id: "demo.toast.success",
+          payload: { text: "Saved successfully" },
+          extensions: {},
+        },
+      ],
+      dropped_event_count: 0,
+      extensions: {},
+    },
+  });
+
+  const acknowledgement = await nextMessage();
+  assert.deepEqual(acknowledgement, {
+    type: "acknowledge_events",
+    subscription_id: "composition-events",
+    event_epoch_id: epochId,
+    durable_through_sequence: 1,
+  });
+
+  const timeline = await authorizedFetch(
+    host.api.baseUrl,
+    host.api.bearerToken,
+    `/v1/events?event_epoch_id=${encodeURIComponent(epochId)}`,
+  );
+  assert.equal(timeline.status, 200);
+  const timelineBody = (await timeline.json()) as {
+    events: readonly { sequence: number; kind: string }[];
+  };
+  assert.equal(timelineBody.events.length, 1);
+  assert.equal(timelineBody.events[0]?.sequence, 1);
+  assert.equal(timelineBody.events[0]?.kind, "transient_presented");
+
+  const status = await authorizedFetch(host.api.baseUrl, host.api.bearerToken, "/v1/status");
+  const statusBody = (await status.json()) as {
+    runtime_events?: { state: string; event_epoch_id?: string };
+  };
+  assert.equal(statusBody.runtime_events?.state, "running");
+  assert.equal(statusBody.runtime_events?.event_epoch_id, epochId);
+  await host.close();
 });
 
 test("the Host executable writes credentials only to a private ephemeral descriptor", async (t) => {
