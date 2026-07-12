@@ -33,6 +33,10 @@ const ISSUE_ID_PATTERN =
   /^issue_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const VERIFICATION_ID_PATTERN =
   /^verification_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TUNING_PATCH_ID_PATTERN =
+  /^patch_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TUNING_APPLICATION_ID_PATTERN =
+  /^tuningapp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -61,6 +65,12 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "GetReviewIssue",
   "TransitionReviewIssue",
   "VerifyReviewIssue",
+  "CreateTuningPatch",
+  "GetTuningPatch",
+  "ApplyTuningPatch",
+  "RevertTuningApplication",
+  "GetTuningApplication",
+  "ListActiveTuning",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -487,6 +497,125 @@ export class HostLocalApiClient {
         validateIdentifiedResource(record, "verification_record_id", VERIFICATION_ID_PATTERN);
         validateIdentifiedResource(issue, "issue_id", ISSUE_ID_PATTERN);
         return requireObject(value);
+      }
+      case "CreateTuningPatch": {
+        const command = assertExactObject(
+          input,
+          ["title", "description", "target_snapshot_id", "issue_ids", "changes", "status", "created_by"],
+          "Tuning patch input",
+          true,
+        );
+        const value = await this.#request("POST", "/v1/tuning-patches", command, 201, options);
+        return validateIdentifiedResource(value, "patch_id", TUNING_PATCH_ID_PATTERN);
+      }
+      case "GetTuningPatch": {
+        const query = assertExactObject(input, ["patch_id"], "Tuning patch lookup");
+        const patchId = query["patch_id"];
+        if (typeof patchId !== "string" || !TUNING_PATCH_ID_PATTERN.test(patchId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/tuning-patches/${encodeURIComponent(patchId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "patch_id", TUNING_PATCH_ID_PATTERN);
+      }
+      case "ApplyTuningPatch": {
+        const command = assertExactObject(
+          input,
+          ["patch_id", "preview_ttl_ms"],
+          "Tuning application input",
+          true,
+        );
+        const patchId = command["patch_id"];
+        if (typeof patchId !== "string" || !TUNING_PATCH_ID_PATTERN.test(patchId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request("POST", "/v1/tuning-applications", command, 201, options);
+        return validateIdentifiedResource(
+          value,
+          "tuning_application_id",
+          TUNING_APPLICATION_ID_PATTERN,
+        );
+      }
+      case "RevertTuningApplication": {
+        const command = assertExactObject(
+          input,
+          ["tuning_application_id"],
+          "Tuning reversion input",
+        );
+        const applicationId = command["tuning_application_id"];
+        if (
+          typeof applicationId !== "string" ||
+          !TUNING_APPLICATION_ID_PATTERN.test(applicationId)
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          `/v1/tuning-applications/${encodeURIComponent(applicationId)}/revert`,
+          {},
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "tuning_application_id",
+          TUNING_APPLICATION_ID_PATTERN,
+        );
+      }
+      case "GetTuningApplication": {
+        const query = assertExactObject(
+          input,
+          ["tuning_application_id"],
+          "Tuning application lookup",
+        );
+        const applicationId = query["tuning_application_id"];
+        if (
+          typeof applicationId !== "string" ||
+          !TUNING_APPLICATION_ID_PATTERN.test(applicationId)
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/tuning-applications/${encodeURIComponent(applicationId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "tuning_application_id",
+          TUNING_APPLICATION_ID_PATTERN,
+        );
+      }
+      case "ListActiveTuning": {
+        assertExactObject(input, [], "Active tuning query");
+        const value = await this.#request(
+          "GET",
+          "/v1/tuning-applications/active",
+          undefined,
+          200,
+          options,
+        );
+        const page = requireObject(value);
+        assertKeys(page, ["items"]);
+        const items = page["items"];
+        if (!Array.isArray(items) || items.length > 500) {
+          throw invalidHostResult();
+        }
+        for (const itemValue of items) {
+          validateIdentifiedResource(
+            itemValue as JsonValue,
+            "tuning_application_id",
+            TUNING_APPLICATION_ID_PATTERN,
+          );
+        }
+        return page;
       }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);

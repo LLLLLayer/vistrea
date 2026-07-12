@@ -73,6 +73,12 @@ export async function runVistreaCli(
           "issue get <issue_id>",
           "issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]",
           "issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]",
+          "tuning create-patch --json <command>",
+          "tuning get-patch <patch_id>",
+          "tuning apply --patch <patch_id> [--ttl <ms>]",
+          "tuning revert <tuning_application_id>",
+          "tuning get-application <tuning_application_id>",
+          "tuning list-active",
         ],
         format: "json",
       });
@@ -218,7 +224,50 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       timeoutMilliseconds,
     );
   }
+  if (command[0] === "tuning" && command[1] === "create-patch") {
+    return invocation("CreateTuningPatch", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "tuning" && command[1] === "get-patch" && command.length === 3) {
+    return invocation("GetTuningPatch", { patch_id: command[2] as string }, timeoutMilliseconds);
+  }
+  if (command[0] === "tuning" && command[1] === "apply") {
+    return invocation("ApplyTuningPatch", parseTuningApplyOptions(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "tuning" && command[1] === "revert" && command.length === 3) {
+    return invocation(
+      "RevertTuningApplication",
+      { tuning_application_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "tuning" && command[1] === "get-application" && command.length === 3) {
+    return invocation(
+      "GetTuningApplication",
+      { tuning_application_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "tuning" && command[1] === "list-active" && command.length === 2) {
+    return invocation("ListActiveTuning", {}, timeoutMilliseconds);
+  }
   throw invalidArguments();
+}
+
+function parseTuningApplyOptions(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--patch", "--ttl"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  const ttl = values.get("--ttl");
+  if (ttl !== undefined && !/^[1-9][0-9]{0,6}$/.test(ttl)) {
+    throw invalidArguments();
+  }
+  return {
+    patch_id: requireOption(values, "--patch"),
+    ...(ttl === undefined ? {} : { preview_ttl_ms: Number(ttl) }),
+  };
 }
 
 function cliActor(id: string | undefined): JsonObject {

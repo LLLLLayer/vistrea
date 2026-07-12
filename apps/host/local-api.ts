@@ -27,7 +27,11 @@ import {
   type RuntimeCapturePort,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
-import { DesignReviewEngine } from "../../engine/design/index.js";
+import {
+  DesignReviewEngine,
+  TuningEngine,
+  type RuntimeTuningPort,
+} from "../../engine/design/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -47,6 +51,8 @@ export type HostLocalApiBindAddress = "127.0.0.1" | "::1";
 
 export interface HostLocalApiDependencies {
   readonly runtime: RuntimeCapturePort;
+  /** The live tuning boundary; absent when the composition is Snapshot-only. */
+  readonly runtimeTuning?: RuntimeTuningPort;
   /** Reports live Runtime readiness without exposing transport state to API consumers. */
   readonly isRuntimeConnected?: () => boolean;
   /** Reports the Runtime event pump status when the Host composition runs one. */
@@ -143,6 +149,7 @@ export async function startHostLocalApi(
   const listSnapshots = new ListSnapshotsQuery(options.workspace);
   const getEventTimeline = new GetEventTimelineQuery(options.workspace);
   const design = new DesignReviewEngine(options);
+  const tuning = new TuningEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -160,6 +167,8 @@ export async function startHostLocalApi(
         listSnapshots,
         getEventTimeline,
         design,
+        tuning,
+        ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
         workspace: options.workspace,
@@ -221,6 +230,8 @@ interface RequestHandlerContext {
   readonly listSnapshots: ListSnapshotsQuery;
   readonly getEventTimeline: GetEventTimelineQuery;
   readonly design: DesignReviewEngine;
+  readonly tuning: TuningEngine;
+  readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
   readonly workspace: WorkspaceDataSource;
@@ -483,6 +494,93 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     return;
   }
 
+  if (pathname === "/v1/tuning-patches") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["title", "description", "target_snapshot_id", "issue_ids", "changes", "status", "created_by"],
+      ["title", "target_snapshot_id", "changes", "created_by"],
+    );
+    const patch = context.tuning.createTuningPatch(
+      command as unknown as Parameters<TuningEngine["createTuningPatch"]>[0],
+    );
+    writeJson(response, 201, patch as unknown as JsonObject);
+    return;
+  }
+
+  const tuningPatchMatch = /^\/v1\/tuning-patches\/([^/]+)$/.exec(pathname);
+  if (tuningPatchMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const patchId = decodeResourceSegment(tuningPatchMatch[1] as string, "tuning patch ID");
+    writeJson(response, 200, context.tuning.getTuningPatch(patchId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/tuning-applications") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["patch_id", "preview_ttl_ms"],
+      ["patch_id"],
+    );
+    const application = await context.tuning.applyTuningPatch(
+      requireRuntimeTuning(context),
+      command as unknown as Parameters<TuningEngine["applyTuningPatch"]>[1],
+    );
+    writeJson(response, 201, application as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/tuning-applications/active") {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const applications = context.tuning.listActiveTuning(
+      requireRuntimeTuning(context).connectionId,
+    );
+    writeJson(response, 200, { items: applications } as unknown as JsonObject);
+    return;
+  }
+
+  const tuningRevertMatch = /^\/v1\/tuning-applications\/([^/]+)\/revert$/.exec(pathname);
+  if (tuningRevertMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const applicationId = decodeResourceSegment(
+      tuningRevertMatch[1] as string,
+      "tuning application ID",
+    );
+    const application = await context.tuning.revertTuningApplication(
+      requireRuntimeTuning(context),
+      { tuning_application_id: applicationId },
+    );
+    writeJson(response, 200, application as unknown as JsonObject);
+    return;
+  }
+
+  const tuningApplicationMatch = /^\/v1\/tuning-applications\/([^/]+)$/.exec(pathname);
+  if (tuningApplicationMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const applicationId = decodeResourceSegment(
+      tuningApplicationMatch[1] as string,
+      "tuning application ID",
+    );
+    writeJson(
+      response,
+      200,
+      context.tuning.getTuningApplication(applicationId) as unknown as JsonObject,
+    );
+    return;
+  }
+
   const objectMatch = /^\/v1\/objects\/([^/]+)$/.exec(pathname);
   if (objectMatch !== null) {
     assertMethod(request, "GET");
@@ -566,6 +664,18 @@ const EVENT_EPOCH_ID_PATTERN =
 const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAXIMUM_DESIGN_ASSET_BYTES = 64 * 1024 * 1024;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+
+function requireRuntimeTuning(context: RequestHandlerContext): RuntimeTuningPort {
+  if (context.runtimeTuning === undefined) {
+    throw new RequestError({
+      status: 503,
+      code: "unavailable",
+      message: "An authorized Runtime connection is not available.",
+      retryable: true,
+    });
+  }
+  return context.runtimeTuning;
+}
 
 /** Structural command parsing; protocol-value validation stays in the Engine. */
 function parseCommandObject(

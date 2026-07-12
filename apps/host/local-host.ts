@@ -6,6 +6,7 @@ import {
   LoopbackRuntimeHost,
   LoopbackTransportError,
   RuntimeEventPump,
+  type ApplyTuningWireCommand,
   type CaptureSnapshotCommand,
   type LoopbackRuntimeEndpoint,
   type LoopbackRuntimeSession,
@@ -14,6 +15,7 @@ import {
   type RuntimeCaptureResult,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
+import { TuningEngine, type RuntimeTuningPort } from "../../engine/design/index.js";
 import {
   startHostLocalApi,
   type HostLocalApiBindAddress,
@@ -76,6 +78,7 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
       host,
       ...(options.apiPort === undefined ? {} : { port: options.apiPort }),
       runtime,
+      runtimeTuning: runtime,
       isRuntimeConnected: () => runtime.connected,
       runtimeEventsStatus: () => runtime.eventsStatus,
       workspace: workspace.data,
@@ -154,9 +157,10 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
   }
 }
 
-class ActiveRuntimeCapturePort implements RuntimeCapturePort {
+class ActiveRuntimeCapturePort implements RuntimeCapturePort, RuntimeTuningPort {
   readonly #workspace: WorkspaceDataSource;
   readonly #validator: ProtocolValidator;
+  readonly #tuning: TuningEngine;
   #session: LoopbackRuntimeSession | undefined;
   #eventPump: RuntimeEventPump | undefined;
   #closed = false;
@@ -169,10 +173,48 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort {
   constructor(workspace: WorkspaceDataSource, validator: ProtocolValidator) {
     this.#workspace = workspace;
     this.#validator = validator;
+    this.#tuning = new TuningEngine({ workspace, validator });
   }
 
   get connected(): boolean {
     return !this.#closed && this.#session?.state === "ready";
+  }
+
+  get connectionId(): string {
+    const session = this.#session;
+    if (this.#closed || session?.state !== "ready") {
+      throw new LoopbackTransportError(
+        "unavailable",
+        "An authorized Runtime connection is not available.",
+      );
+    }
+    return session.connectionId;
+  }
+
+  applyTuning(command: ApplyTuningWireCommand): Promise<unknown> {
+    const session = this.#session;
+    if (this.#closed || session?.state !== "ready") {
+      return Promise.reject(
+        new LoopbackTransportError(
+          "unavailable",
+          "An authorized Runtime connection is not available.",
+        ),
+      );
+    }
+    return session.applyTuning(command);
+  }
+
+  revertTuning(tuningApplicationId: string): Promise<unknown> {
+    const session = this.#session;
+    if (this.#closed || session?.state !== "ready") {
+      return Promise.reject(
+        new LoopbackTransportError(
+          "unavailable",
+          "An authorized Runtime connection is not available.",
+        ),
+      );
+    }
+    return session.revertTuning(tuningApplicationId);
   }
 
   get eventsStatus(): RuntimeEventPumpStatus | undefined {
@@ -189,11 +231,26 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort {
     }
     this.#session = session;
     this.#startEventPump(session);
+    this.#drainRuntimeReversions(session);
     for (const waiter of this.#waiters) {
       clearTimeout(waiter.timer);
       waiter.resolve();
     }
     this.#waiters.clear();
+  }
+
+  #drainRuntimeReversions(session: LoopbackRuntimeSession): void {
+    // Self-reverted previews (for example TTL expiry) stay auditable even when
+    // no caller is waiting; a broken report fails the drain, not the Host.
+    void (async () => {
+      for (;;) {
+        const candidate = await session.nextRevertedTuning();
+        if (candidate === undefined) {
+          return;
+        }
+        this.#tuning.recordRuntimeReversion(candidate, session.connectionId);
+      }
+    })().catch(() => {});
   }
 
   #startEventPump(session: LoopbackRuntimeSession): void {

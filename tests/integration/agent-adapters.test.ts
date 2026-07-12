@@ -124,17 +124,23 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     tools.tools.map((tool) => tool.name).sort(),
     [
       "vistrea_add_design_reference",
+      "vistrea_apply_tuning_patch",
       "vistrea_capture_snapshot",
       "vistrea_create_review_issue",
+      "vistrea_create_tuning_patch",
       "vistrea_get_design_comparison",
       "vistrea_get_design_reference",
       "vistrea_get_event_timeline",
       "vistrea_get_review_issue",
       "vistrea_get_snapshot",
+      "vistrea_get_tuning_application",
+      "vistrea_get_tuning_patch",
       "vistrea_get_workspace_status",
+      "vistrea_list_active_tuning",
       "vistrea_list_review_issues",
       "vistrea_list_snapshots",
       "vistrea_map_design_region",
+      "vistrea_revert_tuning_application",
       "vistrea_run_design_comparison",
       "vistrea_transition_review_issue",
       "vistrea_upload_design_asset",
@@ -369,6 +375,44 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     ),
     [issueId],
   );
+
+  // Tuning: patch descriptions persist; applying without a Runtime is unavailable.
+  const patchCreate = await runCli(
+    [
+      "tuning",
+      "create-patch",
+      "--json",
+      JSON.stringify({
+        title: "Preview node opacity",
+        target_snapshot_id: capturedSnapshot["snapshot_id"],
+        status: "approved",
+        changes: [
+          {
+            runtime_target: runtimeTarget,
+            property: "alpha",
+            original_value: { kind: "number", value: 1, unit: "ratio", extensions: {} },
+            preview_value: { kind: "number", value: 0.7, unit: "ratio", extensions: {} },
+          },
+        ],
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(patchCreate.exitCode, 0, patchCreate.stdout);
+  const patchEnvelope = parseCliEnvelope(patchCreate.stdout).data as JsonObject;
+  const mcpPatch = await mcp.callTool({
+    name: "vistrea_get_tuning_patch",
+    arguments: { patch_id: patchEnvelope["patch_id"] },
+  });
+  assert.equal(mcpPatch.isError, undefined);
+  assert.deepEqual(mcpPatch.structuredContent, patchEnvelope);
+  const applyWithoutRuntime = await runCli(
+    ["tuning", "apply", "--patch", patchEnvelope["patch_id"] as string],
+    environment,
+  );
+  assert.equal(applyWithoutRuntime.exitCode, 7);
+  assert.equal(parseCliEnvelope(applyWithoutRuntime.stdout).error?.["code"], "unavailable");
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);

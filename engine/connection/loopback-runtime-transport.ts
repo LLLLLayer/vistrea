@@ -22,6 +22,7 @@ import type {
 
 const SNAPSHOT_CAPABILITY = "runtime.snapshot";
 const EVENTS_CAPABILITY = "runtime.events";
+const TUNING_CAPABILITY = "design.tuning";
 const AUTH_METHOD = "hmac-sha256";
 const HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const CAPABILITY_PATTERN = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$/;
@@ -97,6 +98,13 @@ export interface SubscribeRuntimeEventsCommand {
   readonly eventKinds: readonly string[];
   readonly start: RuntimeEventStart;
   readonly maxBatchSize?: number;
+}
+
+export interface ApplyTuningWireCommand {
+  /** A canonical TuningPatch value; the transport relays it untouched. */
+  readonly patch: Readonly<Record<string, unknown>>;
+  readonly expectedSnapshotId: string;
+  readonly previewTtlMs?: number;
 }
 
 /** One ordered Runtime event stream negotiated over an authenticated session. */
@@ -501,12 +509,14 @@ class HostRuntimeConnection {
     const eventEpoch = capabilities.includes(EVENTS_CAPABILITY)
       ? parseEventEpoch(message["event_epoch"])
       : undefined;
+    const tuningEnabled = capabilities.includes(TUNING_CAPABILITY);
 
     const connectionId = randomUUID();
-    const enabledCapabilities =
-      eventEpoch === undefined
-        ? ([SNAPSHOT_CAPABILITY] as const)
-        : ([EVENTS_CAPABILITY, SNAPSHOT_CAPABILITY] as const);
+    const enabledCapabilities = [
+      ...(tuningEnabled ? [TUNING_CAPABILITY] : []),
+      ...(eventEpoch === undefined ? [] : [EVENTS_CAPABILITY]),
+      SNAPSHOT_CAPABILITY,
+    ] as const;
     const selectedVersion = { major: 1, minor: 0 } as const;
     const hostProof = computeLoopbackHostProof(this.#secret, {
       connectionAttemptId,
@@ -617,6 +627,13 @@ interface PendingSubscribe {
   readonly requestId: string;
   readonly command: SubscribeRuntimeEventsCommand;
   readonly resolve: (subscription: RuntimeEventSubscription) => void;
+  readonly reject: (error: LoopbackTransportError) => void;
+  readonly timer: ReturnType<typeof setTimeout>;
+}
+
+interface PendingTuning {
+  readonly requestId: string;
+  readonly resolve: (application: unknown) => void;
   readonly reject: (error: LoopbackTransportError) => void;
   readonly timer: ReturnType<typeof setTimeout>;
 }
@@ -781,6 +798,9 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
   readonly #cancelled = new Set<string>();
   readonly #pendingSubscribes = new Map<string, PendingSubscribe>();
   readonly #subscriptions = new Map<string, ActiveEventSubscription>();
+  readonly #pendingTuning = new Map<string, PendingTuning>();
+  readonly #revertedTuning: unknown[] = [];
+  readonly #revertedTuningWaiters: EventBatchWaiter[] = [];
   #state: LoopbackRuntimeSessionState = "ready";
 
   constructor(options: LoopbackRuntimeSessionOptions) {
@@ -797,6 +817,96 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
 
   get state(): LoopbackRuntimeSessionState {
     return this.#state;
+  }
+
+  /** Sends one apply command and resolves the canonical TuningApplication candidate. */
+  applyTuning(command: ApplyTuningWireCommand): Promise<unknown> {
+    return this.#tuningRequest((requestId) => ({
+      type: "apply_tuning",
+      request_id: requestId,
+      command: {
+        patch: structuredClone(command.patch),
+        expected_snapshot_id: command.expectedSnapshotId,
+        ...(command.previewTtlMs === undefined
+          ? {}
+          : { preview_ttl_ms: command.previewTtlMs }),
+      },
+    }));
+  }
+
+  /** Requests precise reversion of one active application. */
+  revertTuning(tuningApplicationId: string): Promise<unknown> {
+    if (
+      typeof tuningApplicationId !== "string" ||
+      tuningApplicationId.length === 0 ||
+      tuningApplicationId.length > 128
+    ) {
+      return Promise.reject(
+        new LoopbackTransportError("protocol_error", "The tuning application ID is invalid."),
+      );
+    }
+    return this.#tuningRequest((requestId) => ({
+      type: "revert_tuning",
+      request_id: requestId,
+      tuning_application_id: tuningApplicationId,
+    }));
+  }
+
+  /**
+   * Resolves the next application the Runtime reverted on its own (for
+   * example TTL expiry), or undefined when the session ends.
+   */
+  nextRevertedTuning(): Promise<unknown | undefined> {
+    if (this.#revertedTuning.length > 0) {
+      return Promise.resolve(this.#revertedTuning.shift());
+    }
+    if (this.#state !== "ready") {
+      return Promise.resolve(undefined);
+    }
+    return new Promise<unknown | undefined>((resolve, reject) => {
+      this.#revertedTuningWaiters.push({ resolve, reject });
+    });
+  }
+
+  #tuningRequest(
+    frame: (requestId: string) => Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    if (this.#state !== "ready") {
+      return Promise.reject(
+        new LoopbackTransportError("unavailable", "The Runtime session is not ready."),
+      );
+    }
+    if (!this.enabledCapabilities.includes(TUNING_CAPABILITY)) {
+      return Promise.reject(
+        new LoopbackTransportError(
+          "unsupported",
+          "The Runtime session did not negotiate the tuning capability.",
+        ),
+      );
+    }
+    const requestId = randomUUID();
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const pending = this.#pendingTuning.get(requestId);
+        if (pending !== undefined) {
+          this.#pendingTuning.delete(requestId);
+          pending.reject(
+            new LoopbackTransportError("timeout", "The Runtime tuning request timed out."),
+          );
+        }
+      }, this.#limits.captureTimeoutMs);
+      timer.unref();
+      this.#pendingTuning.set(requestId, { requestId, resolve, reject, timer });
+      try {
+        this.#channel.send(frame(requestId));
+      } catch {
+        this.#pendingTuning.delete(requestId);
+        clearTimeout(timer);
+        reject(
+          new LoopbackTransportError("unavailable", "The Runtime connection is unavailable."),
+        );
+      }
+    });
   }
 
   subscribeEvents(command: SubscribeRuntimeEventsCommand): Promise<RuntimeEventSubscription> {
@@ -950,6 +1060,18 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
       }
       if (type === "events_closed") {
         this.#eventsClosed(message);
+        return;
+      }
+      if (type === "tuning_result" || type === "revert_result") {
+        this.#tuningResult(message);
+        return;
+      }
+      if (type === "tuning_error") {
+        this.#tuningError(message);
+        return;
+      }
+      if (type === "tuning_reverted") {
+        this.#tuningReverted(message);
         return;
       }
       if (this.#drainCancelledCapture(message, type)) {
@@ -1372,6 +1494,66 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
     );
   }
 
+  #tuningResult(message: Readonly<Record<string, unknown>>): void {
+    const requestId = requireString(message, "request_id", 128);
+    const pending = this.#pendingTuning.get(requestId);
+    if (pending === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime answered an unknown tuning request.",
+      );
+    }
+    const application = requireRecord(message["application"], "Tuning application");
+    this.#pendingTuning.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(structuredClone(application));
+  }
+
+  #tuningError(message: Readonly<Record<string, unknown>>): void {
+    const requestId = requireString(message, "request_id", 128);
+    const pending = this.#pendingTuning.get(requestId);
+    if (pending === undefined) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime rejected an unknown tuning request.",
+      );
+    }
+    this.#pendingTuning.delete(requestId);
+    clearTimeout(pending.timer);
+    const code = message["code"];
+    pending.reject(
+      new LoopbackTransportError(
+        code === "conflict" ? "conflict" : "remote_error",
+        code === "conflict"
+          ? "The Runtime tuning state conflicts with the request."
+          : "The Runtime rejected the tuning request.",
+      ),
+    );
+  }
+
+  #tuningReverted(message: Readonly<Record<string, unknown>>): void {
+    if (!this.enabledCapabilities.includes(TUNING_CAPABILITY)) {
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The Runtime reported tuning reversion without the capability.",
+      );
+    }
+    const application = requireRecord(message["application"], "Tuning application");
+    if (this.#revertedTuning.length >= MAXIMUM_BUFFERED_EVENT_BATCHES) {
+      throw new LoopbackTransportError(
+        "resource_exhausted",
+        "The Host tuning-reversion buffer is full; the consumer is not draining.",
+      );
+    }
+    const cloned = structuredClone(application);
+    const waiter = this.#revertedTuningWaiters.shift();
+    if (waiter === undefined) {
+      this.#revertedTuning.push(cloned);
+    } else {
+      waiter.resolve(cloned);
+    }
+  }
+
   #captureError(message: Readonly<Record<string, unknown>>): void {
     const requestId = requireString(message, "request_id", 128);
     if (this.#cancelled.delete(requestId)) {
@@ -1466,6 +1648,14 @@ export class LoopbackRuntimeSession implements RuntimeCapturePort {
     for (const subscription of [...this.#subscriptions.values()]) {
       this.#subscriptions.delete(subscription.subscriptionId);
       subscription.settle(error.code === "cancelled" ? undefined : error);
+    }
+    for (const pending of [...this.#pendingTuning.values()]) {
+      this.#pendingTuning.delete(pending.requestId);
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    for (const waiter of this.#revertedTuningWaiters.splice(0)) {
+      waiter.resolve(undefined);
     }
   }
 }

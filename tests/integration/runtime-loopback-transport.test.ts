@@ -139,6 +139,7 @@ async function authenticateRuntime(
   token: LoopbackAuthorizationToken = authorizationToken,
   buildConfiguration: RuntimeBuildConfiguration = "debug",
   eventEpoch?: Readonly<Record<string, unknown>>,
+  offeredCapabilities: readonly string[] = ["runtime.snapshot", "runtime.events"],
 ): Promise<ReadyRuntime> {
   const peer = await connectPeer(host);
   const challenge = await withTimeout(peer.next());
@@ -148,7 +149,7 @@ async function authenticateRuntime(
   const clientNonce = randomBytes(24).toString("base64url");
   const runtimeInstanceId = "runtime.test.instance";
   const versions = [{ major: 1, minor: 0 }] as const;
-  const capabilities = ["runtime.snapshot", "runtime.events"] as const;
+  const capabilities = offeredCapabilities;
   const sessionPromise = host.acceptSession();
   peer.send({
     type: "client_hello",
@@ -920,4 +921,100 @@ test("a runtime-initiated conflict close rejects the pending batch wait", async 
   const waiting = subscription.nextBatch();
   ready.peer.send({ type: "events_closed", subscription_id: "events-2", code: "conflict" });
   await assert.rejects(waiting, transportError("conflict"));
+});
+
+test("negotiated tuning sessions apply, revert, and report self-reversions", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+
+  const ready = await authenticateRuntime(host, authorizationToken, "debug", undefined, [
+    "design.tuning",
+    "runtime.snapshot",
+  ]);
+  peer = ready.peer;
+  assert.deepEqual(ready.session.enabledCapabilities, ["design.tuning", "runtime.snapshot"]);
+
+  const patch = { patch_id: "patch_019f0000-0000-7000-8000-000000000001", changes: [] };
+  const applying = ready.session.applyTuning({
+    patch,
+    expectedSnapshotId: "snapshot_019f0000-0000-7000-8000-000000000001",
+    previewTtlMs: 2_000,
+  });
+  const applyFrame = await withTimeout(ready.peer.next());
+  assert.equal(applyFrame["type"], "apply_tuning");
+  const applyCommand = applyFrame["command"] as Readonly<Record<string, unknown>>;
+  assert.deepEqual(applyCommand["patch"], patch);
+  assert.equal(applyCommand["expected_snapshot_id"], "snapshot_019f0000-0000-7000-8000-000000000001");
+  assert.equal(applyCommand["preview_ttl_ms"], 2_000);
+  const wireApplication = {
+    tuning_application_id: "tuningapp_019f0000-0000-7000-8000-000000000001",
+    status: "active",
+  };
+  ready.peer.send({
+    type: "tuning_result",
+    request_id: applyFrame["request_id"],
+    application: wireApplication,
+  });
+  assert.deepEqual(await withTimeout(applying), wireApplication);
+
+  const reverting = ready.session.revertTuning(
+    "tuningapp_019f0000-0000-7000-8000-000000000001",
+  );
+  const revertFrame = await withTimeout(ready.peer.next());
+  assert.equal(revertFrame["type"], "revert_tuning");
+  assert.equal(
+    revertFrame["tuning_application_id"],
+    "tuningapp_019f0000-0000-7000-8000-000000000001",
+  );
+  ready.peer.send({
+    type: "revert_result",
+    request_id: revertFrame["request_id"],
+    application: { ...wireApplication, status: "reverted" },
+  });
+  assert.deepEqual(await withTimeout(reverting), { ...wireApplication, status: "reverted" });
+
+  const selfReverted = ready.session.nextRevertedTuning();
+  ready.peer.send({
+    type: "tuning_reverted",
+    application: { ...wireApplication, status: "expired" },
+  });
+  assert.deepEqual(await withTimeout(selfReverted), { ...wireApplication, status: "expired" });
+
+  const failing = ready.session.applyTuning({
+    patch,
+    expectedSnapshotId: "snapshot_019f0000-0000-7000-8000-000000000001",
+  });
+  const failingFrame = await withTimeout(ready.peer.next());
+  ready.peer.send({
+    type: "tuning_error",
+    request_id: failingFrame["request_id"],
+    code: "conflict",
+  });
+  await assert.rejects(failing, transportError("conflict"));
+});
+
+test("snapshot-only sessions reject tuning commands locally", async (t) => {
+  const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });
+  let peer: TestJsonLinePeer | undefined;
+  t.after(async () => {
+    peer?.destroy();
+    await host.close();
+  });
+  const ready = await authenticateRuntime(host);
+  peer = ready.peer;
+  await assert.rejects(
+    ready.session.applyTuning({
+      patch: {},
+      expectedSnapshotId: "snapshot_019f0000-0000-7000-8000-000000000001",
+    }),
+    transportError("unsupported"),
+  );
+  await assert.rejects(
+    ready.session.revertTuning("tuningapp_019f0000-0000-7000-8000-000000000001"),
+    transportError("unsupported"),
+  );
 });

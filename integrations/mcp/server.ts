@@ -325,6 +325,85 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
+  {
+    name: "vistrea_create_tuning_patch",
+    title: "Create Tuning Patch",
+    description: "Persist one reversible allowlisted visual-property patch description.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "target_snapshot_id", "changes", "created_by"],
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 512 },
+        description: { type: "string", maxLength: 8192 },
+        target_snapshot_id: { type: "string", maxLength: 128 },
+        issue_ids: { type: "array", maxItems: 32, items: { type: "string", maxLength: 128 } },
+        changes: { type: "array", minItems: 1, maxItems: 32, items: { type: "object" } },
+        status: { type: "string", enum: ["draft", "approved"] },
+        created_by: { type: "object" },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_tuning_patch",
+    title: "Get Tuning Patch",
+    description: "Load one Tuning Patch description by ID.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["patch_id"],
+      properties: { patch_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_apply_tuning_patch",
+    title: "Apply Tuning Patch",
+    description:
+      "Apply one patch as a reversible preview over the live authenticated Runtime connection.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["patch_id"],
+      properties: {
+        patch_id: { type: "string", maxLength: 128 },
+        preview_ttl_ms: { type: "integer", minimum: 100, maximum: 3_600_000 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_revert_tuning_application",
+    title: "Revert Tuning Application",
+    description: "Precisely revert one active runtime tuning preview.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tuning_application_id"],
+      properties: { tuning_application_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_tuning_application",
+    title: "Get Tuning Application",
+    description: "Load one Tuning Application lifecycle record by ID.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tuning_application_id"],
+      properties: { tuning_application_id: { type: "string", maxLength: 128 } },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_list_active_tuning",
+    title: "List Active Tuning",
+    description: "List active tuning previews on the current Runtime connection.",
+    inputSchema: emptyInputSchema(),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -344,6 +423,12 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_get_review_issue", "GetReviewIssue"],
   ["vistrea_transition_review_issue", "TransitionReviewIssue"],
   ["vistrea_verify_review_issue", "VerifyReviewIssue"],
+  ["vistrea_create_tuning_patch", "CreateTuningPatch"],
+  ["vistrea_get_tuning_patch", "GetTuningPatch"],
+  ["vistrea_apply_tuning_patch", "ApplyTuningPatch"],
+  ["vistrea_revert_tuning_application", "RevertTuningApplication"],
+  ["vistrea_get_tuning_application", "GetTuningApplication"],
+  ["vistrea_list_active_tuning", "ListActiveTuning"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {
