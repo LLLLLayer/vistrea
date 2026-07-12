@@ -637,6 +637,11 @@ export interface EventTimeline {
   readonly reported_gaps: readonly Readonly<{ first_sequence: number; last_sequence: number }>[];
 }
 
+export interface DesignComparisonQuery {
+  readonly design_reference_id?: string;
+  readonly target_snapshot_id?: string;
+}
+
 export interface PathQuery {
   readonly graph_id?: string;
   readonly source_state_id: string;

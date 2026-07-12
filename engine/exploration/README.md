@@ -18,6 +18,8 @@ Screen State identity, deduplication, and Screen Graph materialization over pers
 - stops on the explicit action budget, an exhausted frontier, or a stuck back gesture, and never generates dangerous or forbidden actions;
 - freezes the current materialized graph under `tag` version selectors (`tagGraphVersion`) and diffs two frozen materializations (`compareGraphVersions`) so partial and complete coverage runs compare precisely.
 
+Manual identity curation corrects structural misjudgments: `mergeScreenStates` collapses states into one survivor (absorbed digests become dedup aliases, transitions re-point, tombstones keep history) and `splitScreenState` separates observations into a `manual`-identity state that only grows through explicit curation. Both require the expected graph revision and record auditable `StateIdentityDecision`s; the shared semantic rules resolve observation ownership through those decisions and supersession chains.
+
 `ExplorationOperationEngine` runs one walk as a canonical background Operation: created/started/progressed events persist per executed step, the succeeded result is the inline `ExplorationReport`, cancellation terminates honestly as `cancelled`, and one Host drives at most one run at a time.
 
 The identity and exploration design is recorded in [ADR-0007](../../docs/decisions/0007-screen-state-identity-and-device-automation.md). AI-assisted planning and state restoration remain later slices.

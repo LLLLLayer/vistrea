@@ -89,9 +89,11 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "AddDesignAsset",
   "AddDesignReference",
   "GetDesignReference",
+  "ListDesignReferences",
   "MapDesignRegion",
   "RunDesignComparison",
   "GetDesignComparison",
+  "ListDesignComparisons",
   "CreateReviewIssue",
   "ListReviewIssues",
   "GetReviewIssue",
@@ -107,6 +109,8 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "RecordTransitionObservation",
   "GetScreenGraph",
   "GetScreenState",
+  "MergeScreenStates",
+  "SplitScreenState",
   "FindScreenPath",
   "CreateWikiNode",
   "UpdateWikiNode",
@@ -389,6 +393,19 @@ export class HostLocalApiClient {
         );
         return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
       }
+      case "ListDesignReferences": {
+        const query = normalizeListInput(input);
+        const parameters = pageParameters(query);
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/design-references${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResourcePage(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
+      }
       case "MapDesignRegion": {
         const command = assertExactObject(
           input,
@@ -430,6 +447,40 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "comparison_id", COMPARISON_ID_PATTERN);
+      }
+      case "ListDesignComparisons": {
+        const query = assertExactObject(
+          input,
+          ["design_reference_id", "target_snapshot_id", "limit", "cursor"],
+          "Design comparison listing",
+          true,
+        );
+        if (
+          (query["design_reference_id"] !== undefined &&
+            (typeof query["design_reference_id"] !== "string" ||
+              !DESIGN_REFERENCE_ID_PATTERN.test(query["design_reference_id"]))) ||
+          (query["target_snapshot_id"] !== undefined &&
+            (typeof query["target_snapshot_id"] !== "string" ||
+              !SNAPSHOT_ID_PATTERN.test(query["target_snapshot_id"])))
+        ) {
+          throw invalidInput();
+        }
+        const parameters = pageParameters(query);
+        if (query["design_reference_id"] !== undefined) {
+          parameters.set("design_reference_id", query["design_reference_id"] as string);
+        }
+        if (query["target_snapshot_id"] !== undefined) {
+          parameters.set("target_snapshot_id", query["target_snapshot_id"] as string);
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/design-comparisons${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResourcePage(value, "comparison_id", COMPARISON_ID_PATTERN);
       }
       case "CreateReviewIssue": {
         const command = assertExactObject(
@@ -769,6 +820,102 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "screen_state_id", SCREEN_STATE_ID_PATTERN);
+      }
+      case "MergeScreenStates": {
+        const command = assertExactObject(
+          input,
+          [
+            "project_id",
+            "application_id",
+            "state_ids",
+            "into_state_id",
+            "expected_graph_revision",
+            "merged_by",
+            "justification",
+          ],
+          "State merge input",
+          true,
+        );
+        const stateIds = command["state_ids"];
+        if (
+          command["project_id"] === undefined ||
+          command["application_id"] === undefined ||
+          command["merged_by"] === undefined ||
+          !Array.isArray(stateIds) ||
+          stateIds.length < 2 ||
+          stateIds.length > 64 ||
+          stateIds.some(
+            (value) => typeof value !== "string" || !SCREEN_STATE_ID_PATTERN.test(value),
+          ) ||
+          (command["into_state_id"] !== undefined &&
+            (typeof command["into_state_id"] !== "string" ||
+              !SCREEN_STATE_ID_PATTERN.test(command["into_state_id"]))) ||
+          !Number.isSafeInteger(command["expected_graph_revision"]) ||
+          (command["expected_graph_revision"] as number) < 1 ||
+          (command["justification"] !== undefined &&
+            (typeof command["justification"] !== "string" ||
+              command["justification"].length === 0 ||
+              command["justification"].length > 1024))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/state-merges",
+          command,
+          201,
+          options,
+        );
+        return validateIdentityCuration(value);
+      }
+      case "SplitScreenState": {
+        const command = assertExactObject(
+          input,
+          [
+            "project_id",
+            "application_id",
+            "state_id",
+            "observation_ids",
+            "title",
+            "expected_graph_revision",
+            "split_by",
+            "justification",
+          ],
+          "State split input",
+          true,
+        );
+        const observationIds = command["observation_ids"];
+        if (
+          command["project_id"] === undefined ||
+          command["application_id"] === undefined ||
+          command["split_by"] === undefined ||
+          typeof command["state_id"] !== "string" ||
+          !SCREEN_STATE_ID_PATTERN.test(command["state_id"]) ||
+          !Array.isArray(observationIds) ||
+          observationIds.length === 0 ||
+          observationIds.length > 256 ||
+          observationIds.some((value) => typeof value !== "string" || value.length > 128) ||
+          !Number.isSafeInteger(command["expected_graph_revision"]) ||
+          (command["expected_graph_revision"] as number) < 1 ||
+          (command["title"] !== undefined &&
+            (typeof command["title"] !== "string" ||
+              command["title"].length === 0 ||
+              command["title"].length > 512)) ||
+          (command["justification"] !== undefined &&
+            (typeof command["justification"] !== "string" ||
+              command["justification"].length === 0 ||
+              command["justification"].length > 1024))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/state-splits",
+          command,
+          201,
+          options,
+        );
+        return validateIdentityCuration(value);
       }
       case "FindScreenPath": {
         const query = assertExactObject(
@@ -1866,6 +2013,24 @@ function validateValidationConfigurationInput(value: unknown): void {
   }
 }
 
+function validateIdentityCuration(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["screen_graph_id", "graph_revision", "decision", "state"]);
+  const graphId = result["screen_graph_id"];
+  const revision = result["graph_revision"];
+  if (
+    typeof graphId !== "string" ||
+    !SCREEN_GRAPH_ID_PATTERN.test(graphId) ||
+    !Number.isSafeInteger(revision) ||
+    (revision as number) < 1
+  ) {
+    throw invalidHostResult();
+  }
+  requireObject(result["decision"]);
+  requireObject(result["state"]);
+  return result;
+}
+
 function validateOperationRef(value: JsonValue): JsonObject {
   const ref = requireObject(value);
   assertKeys(
@@ -2180,6 +2345,23 @@ function validateFindingPage(value: JsonValue): JsonObject {
   }
   for (const item of items) {
     validateIdentifiedResource(item as JsonValue, "finding_id", VALIDATION_FINDING_ID_PATTERN);
+  }
+  return page;
+}
+
+function validateIdentifiedResourcePage(
+  value: JsonValue,
+  key: string,
+  pattern: RegExp,
+): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor", "snapshot_version"], true);
+  const items = page["items"];
+  if (!Array.isArray(items) || items.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const item of items) {
+    validateIdentifiedResource(item as JsonValue, key, pattern);
   }
   return page;
 }

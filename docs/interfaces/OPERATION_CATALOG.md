@@ -17,7 +17,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 49 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
+All 53 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -36,9 +36,11 @@ All 49 operations below are implemented end to end through the Host Local API, t
 | `AddDesignAsset` | C | `POST /v1/design-assets` | `design upload-asset` | `vistrea_upload_design_asset` |
 | `AddDesignReference` | C | `POST /v1/design-references` | `design add-reference` | `vistrea_add_design_reference` |
 | `GetDesignReference` | Q | `GET /v1/design-references/<id>` | `design get-reference` | `vistrea_get_design_reference` |
+| `ListDesignReferences` | Q | `GET /v1/design-references` | `design list-references` | `vistrea_list_design_references` |
 | `MapDesignRegion` | C | `POST /v1/design-mappings` | `design map` | `vistrea_map_design_region` |
 | `RunDesignComparison` | C | `POST /v1/design-comparisons` | `design compare` | `vistrea_run_design_comparison` |
 | `GetDesignComparison` | Q | `GET /v1/design-comparisons/<id>` | `design get-comparison` | `vistrea_get_design_comparison` |
+| `ListDesignComparisons` | Q | `GET /v1/design-comparisons` | `design list-comparisons` | `vistrea_list_design_comparisons` |
 | `CreateReviewIssue` | C | `POST /v1/review-issues` | `issue create` | `vistrea_create_review_issue` |
 | `ListReviewIssues` | Q | `GET /v1/review-issues` | `issue list` | `vistrea_list_review_issues` |
 | `GetReviewIssue` | Q | `GET /v1/review-issues/<id>` | `issue get` | `vistrea_get_review_issue` |
@@ -64,6 +66,8 @@ All 49 operations below are implemented end to end through the Host Local API, t
 | `RecordTransitionObservation` | C | `POST /v1/screen-graph/transition-observations` | `graph observe-transition` | `vistrea_observe_transition` |
 | `GetScreenGraph` | Q | `GET /v1/screen-graph` | `graph show` | `vistrea_get_screen_graph` |
 | `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` | `vistrea_get_screen_state` |
+| `MergeScreenStates` | C | `POST /v1/screen-graph/state-merges` | `screen merge` | `vistrea_merge_screen_states` |
+| `SplitScreenState` | C | `POST /v1/screen-graph/state-splits` | `screen split` | `vistrea_split_screen_state` |
 | `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` | `vistrea_find_screen_path` |
 | `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` | `vistrea_run_exploration` |
 | `GetExplorationOperation` | Q | `GET /v1/exploration/operations/<id>` | `explore get` | `vistrea_get_exploration_operation` |
@@ -168,8 +172,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 |---|---|---|---|---|---|---|---|
 | `PauseExploration` | C | `PauseExplorationCommand -> OperationRef` | sync | Exploration / Op | running operation | `explore pause` / — | 3 |
 | `ResumeExploration` | C | `ResumeExplorationCommand -> OperationRef` | sync | Exploration / Op | paused operation | `explore resume` / — | 3 |
-| `MergeScreenStates` | C | `MergeScreenStatesCommand -> StateIdentityDecision` | sync | Exploration / G,Vr | expected graph revision | `screen merge` / — | 3 |
-| `SplitScreenState` | C | `SplitScreenStateCommand -> StateIdentityDecision` | sync | Exploration / G,Vr | expected graph revision | `screen split` / — | 3 |
 | `MarkTransitionStatus` | C | `MarkTransitionStatusCommand -> Transition` | sync | Exploration / G,Vr | expected revision | `screen transition-mark` / — | 3 |
 | `GetExplorationOperation` | Q | `GetOperationQuery -> ExplorationOperation` | sync | Operations / Op | operation visible | `explore status` / — | 3 |
 | `CompareScreenGraphs` | Q | `CompareGraphsQuery -> GraphDiff` | sync | Validation / G | both versions visible | `screen compare` / — | 4 |

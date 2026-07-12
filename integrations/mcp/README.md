@@ -14,6 +14,8 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_upload_design_asset` | `AddDesignAsset` | Store one design asset in the content-addressed Object Store |
 | `vistrea_add_design_reference` | `AddDesignReference` | Register a design baseline over a stored asset |
 | `vistrea_get_design_reference` | `GetDesignReference` | Load one design reference |
+| `vistrea_list_design_references` | `ListDesignReferences` | List registered design baselines |
+| `vistrea_list_design_comparisons` | `ListDesignComparisons` | List persisted design comparisons |
 | `vistrea_map_design_region` | `MapDesignRegion` | Map a design region onto a Runtime node target |
 | `vistrea_run_design_comparison` | `RunDesignComparison` | Compare confirmed mappings against a persisted Snapshot |
 | `vistrea_get_design_comparison` | `GetDesignComparison` | Load one persisted comparison |
@@ -32,6 +34,8 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_observe_transition` | `RecordTransitionObservation` | Record one executed action as a deduplicated Transition |
 | `vistrea_get_screen_graph` | `GetScreenGraph` | Read the materialized Screen Graph for a project and application |
 | `vistrea_get_screen_state` | `GetScreenState` | Read one Screen State with its representative Snapshot reference |
+| `vistrea_merge_screen_states` | `MergeScreenStates` | Manually collapse states that are one product screen |
+| `vistrea_split_screen_state` | `SplitScreenState` | Manually separate wrongly deduplicated observations |
 | `vistrea_find_screen_path` | `FindScreenPath` | Find acyclic transition paths between two Screen States |
 | `vistrea_create_wiki_node` | `CreateWikiNode` | Create one Deep Wiki knowledge node |
 | `vistrea_update_wiki_node` | `UpdateWikiNode` | Revise one Deep Wiki node with optimistic concurrency |

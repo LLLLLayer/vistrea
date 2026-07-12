@@ -12,6 +12,7 @@ import type {
   CommitWorkingSetCommand,
   CreateWorkspaceData,
   DesignComparison,
+  DesignComparisonQuery,
   DesignReference,
   DesignRegionMapping,
   DesignRegionMappingQuery,
@@ -158,6 +159,7 @@ export interface DesignReviewRepository extends UnitOfWorkBound {
     precondition: RevisionPrecondition,
   ): DesignReference;
   getReference(id: string, at?: VersionSelector): DesignReference;
+  listReferences(page?: PageRequest): Page<DesignReference>;
   createRegionMapping(mapping: DesignRegionMapping): DesignRegionMapping;
   updateRegionMapping(
     mapping: DesignRegionMapping,
@@ -169,6 +171,7 @@ export interface DesignReviewRepository extends UnitOfWorkBound {
   ): Page<DesignRegionMapping>;
   appendComparison(comparison: DesignComparison): void;
   getComparison(id: string): DesignComparison;
+  listComparisons(query?: DesignComparisonQuery, page?: PageRequest): Page<DesignComparison>;
   createIssue(issue: ReviewIssue): ReviewIssue;
   updateIssue(issue: ReviewIssue, precondition: RevisionPrecondition): ReviewIssue;
   listIssues(query?: ReviewIssueQuery, page?: PageRequest): Page<ReviewIssue>;

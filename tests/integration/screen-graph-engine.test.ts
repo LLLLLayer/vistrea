@@ -288,3 +288,183 @@ test("the persisted Screen Graph survives production Workspace reopen", async (t
     await workspace.close();
   }
 });
+
+const CURATOR = { kind: "human", id: "curator-1", extensions: {} };
+
+test("manual merge collapses states, re-points transitions, and aliases dedup", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const home = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000c1");
+  const variant = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000c2",
+  );
+  const homeAgain = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000c3");
+  const variantAgain = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000c4",
+  );
+  persistSnapshots(workspace, [home, variant, homeAgain, variantAgain]);
+  const runtimeContext = home["runtime_context"] as JsonObject;
+  const graphQuery = {
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+  };
+
+  const homeState = engine.recordStateObservation({
+    snapshot_id: home["snapshot_id"] as string,
+    title: "Home",
+    entry: true,
+  });
+  const variantState = engine.recordStateObservation({
+    snapshot_id: variant["snapshot_id"] as string,
+    title: "Home with banner",
+  });
+  assert.notEqual(
+    homeState.screen_state.screen_state_id,
+    variantState.screen_state.screen_state_id,
+  );
+  const transition = engine.recordTransitionObservation({
+    before_snapshot_id: home["snapshot_id"] as string,
+    after_snapshot_id: variant["snapshot_id"] as string,
+    action: {
+      kind: "tap",
+      requested_effect: "Show the banner",
+      target: { stable_id: "demo.home.open_catalog" },
+    },
+  });
+  const graphBefore = engine.getGraph(graphQuery);
+
+  // Wrong revision conflicts before anything mutates.
+  await assert.rejects(
+    Promise.resolve().then(() =>
+      engine.mergeScreenStates({
+        ...graphQuery,
+        state_ids: [
+          homeState.screen_state.screen_state_id,
+          variantState.screen_state.screen_state_id,
+        ],
+        expected_graph_revision: graphBefore.revision + 5,
+        merged_by: CURATOR,
+      }),
+    ),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+
+  const merged = engine.mergeScreenStates({
+    ...graphQuery,
+    state_ids: [
+      homeState.screen_state.screen_state_id,
+      variantState.screen_state.screen_state_id,
+    ],
+    expected_graph_revision: graphBefore.revision,
+    merged_by: CURATOR,
+    justification: "The banner is a rotating decoration of one Home screen.",
+  });
+  assert.equal(merged.state.screen_state_id, homeState.screen_state.screen_state_id);
+  assert.equal(merged.decision["kind"], "merge");
+
+  const graph = engine.getGraph(graphQuery);
+  const survivor = graph.states.find(
+    (state) => state.screen_state_id === homeState.screen_state.screen_state_id,
+  ) as unknown as JsonObject;
+  const tombstone = graph.states.find(
+    (state) => state.screen_state_id === variantState.screen_state.screen_state_id,
+  ) as unknown as JsonObject;
+  assert.equal(tombstone["status"], "merged");
+  assert.deepEqual(tombstone["superseded_by_state_ids"], [
+    homeState.screen_state.screen_state_id,
+  ]);
+  // Each endpoint also records a state observation during the transition,
+  // so the survivor absorbs two moved observations on top of its own two.
+  assert.equal((survivor["observation_ids"] as readonly string[]).length, 4);
+  const mergedTransition = graph.transitions.find(
+    (candidate) => candidate.transition_id === transition.transition.transition_id,
+  ) as unknown as JsonObject;
+  assert.equal(mergedTransition["source_state_id"], homeState.screen_state.screen_state_id);
+  assert.equal(mergedTransition["target_state_id"], homeState.screen_state.screen_state_id);
+  assert.equal(graph.identity_decisions.length >= 1, true);
+
+  // Future captures of BOTH structures deduplicate into the survivor.
+  const homeRepeat = engine.recordStateObservation({
+    snapshot_id: homeAgain["snapshot_id"] as string,
+  });
+  assert.equal(homeRepeat.created, false);
+  assert.equal(
+    homeRepeat.screen_state.screen_state_id,
+    homeState.screen_state.screen_state_id,
+  );
+  const variantRepeat = engine.recordStateObservation({
+    snapshot_id: variantAgain["snapshot_id"] as string,
+  });
+  assert.equal(variantRepeat.created, false);
+  assert.equal(
+    variantRepeat.screen_state.screen_state_id,
+    homeState.screen_state.screen_state_id,
+  );
+});
+
+test("manual split separates observations into a manual-identity state", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const first = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000d1");
+  const second = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000d2");
+  const third = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000d3");
+  persistSnapshots(workspace, [first, second, third]);
+  const runtimeContext = first["runtime_context"] as JsonObject;
+  const graphQuery = {
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+  };
+
+  const observedFirst = engine.recordStateObservation({
+    snapshot_id: first["snapshot_id"] as string,
+    title: "Home",
+    entry: true,
+  });
+  const observedSecond = engine.recordStateObservation({
+    snapshot_id: second["snapshot_id"] as string,
+  });
+  assert.equal(observedSecond.created, false);
+  const sourceStateId = observedFirst.screen_state.screen_state_id;
+  const graphBefore = engine.getGraph(graphQuery);
+
+  // The whole membership cannot move; a strict subset must remain.
+  await assert.rejects(
+    Promise.resolve().then(() =>
+      engine.splitScreenState({
+        ...graphQuery,
+        state_id: sourceStateId,
+        observation_ids: [observedFirst.observation_id, observedSecond.observation_id],
+        expected_graph_revision: graphBefore.revision,
+        split_by: CURATOR,
+      }),
+    ),
+    (error: unknown) => isDataError(error, "invalid_argument"),
+  );
+
+  const split = engine.splitScreenState({
+    ...graphQuery,
+    state_id: sourceStateId,
+    observation_ids: [observedSecond.observation_id],
+    title: "Home (empty account)",
+    expected_graph_revision: graphBefore.revision,
+    split_by: CURATOR,
+  });
+  assert.equal(split.decision["kind"], "split");
+  assert.equal(split.state["title"], "Home (empty account)");
+  assert.equal((split.state["identity"] as JsonObject)["strategy"], "manual");
+
+  const graph = engine.getGraph(graphQuery);
+  assert.equal(graph.states.length, 2);
+  const source = graph.states.find(
+    (state) => state.screen_state_id === sourceStateId,
+  ) as unknown as JsonObject;
+  assert.deepEqual(source["observation_ids"], [observedFirst.observation_id]);
+
+  // Structurally identical future captures still deduplicate into the
+  // digest-bearing source, never the manual split.
+  const repeat = engine.recordStateObservation({
+    snapshot_id: third["snapshot_id"] as string,
+  });
+  assert.equal(repeat.created, false);
+  assert.equal(repeat.screen_state.screen_state_id, sourceStateId);
+});

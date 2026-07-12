@@ -104,6 +104,37 @@ export interface RecordTransitionObservationResult {
   readonly created: boolean;
 }
 
+export interface MergeScreenStatesCommand {
+  readonly project_id: string;
+  readonly application_id: string;
+  /** All states collapsing into one identity; at least two, all active. */
+  readonly state_ids: readonly string[];
+  /** The surviving state; must be one of state_ids, defaults to the first. */
+  readonly into_state_id?: string;
+  readonly expected_graph_revision: number;
+  readonly merged_by: JsonObject;
+  readonly justification?: string;
+}
+
+export interface SplitScreenStateCommand {
+  readonly project_id: string;
+  readonly application_id: string;
+  readonly state_id: string;
+  /** The observations moving into the new state; a strict non-empty subset. */
+  readonly observation_ids: readonly string[];
+  readonly title?: string;
+  readonly expected_graph_revision: number;
+  readonly split_by: JsonObject;
+  readonly justification?: string;
+}
+
+export interface IdentityCurationResult {
+  readonly screen_graph_id: string;
+  readonly graph_revision: number;
+  readonly decision: JsonObject;
+  readonly state: ScreenState;
+}
+
 export interface GetScreenGraphQuery {
   readonly project_id: string;
   readonly application_id: string;
@@ -331,6 +362,357 @@ export class ScreenGraphEngine {
     });
   }
 
+  /**
+   * Collapses structurally distinct states that are one product screen into
+   * a single identity. The surviving state absorbs observation membership,
+   * seen builds, and the merged layout digests as dedup aliases; absorbed
+   * states become `merged` tombstones superseded by the survivor; every
+   * transition endpoint re-points to the survivor. The manual decision is
+   * recorded in the graph, and future observations of any merged structure
+   * deduplicate into the survivor.
+   */
+  mergeScreenStates(command: MergeScreenStatesCommand): IdentityCurationResult {
+    this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.merged_by);
+    const stateIds = [...new Set(command.state_ids)];
+    if (stateIds.length < 2 || stateIds.length !== command.state_ids.length) {
+      throw new DataError("invalid_argument", "A merge names at least two distinct states.");
+    }
+    const targetId = command.into_state_id ?? (stateIds[0] as string);
+    if (!stateIds.includes(targetId)) {
+      throw new DataError("invalid_argument", "into_state_id must be one of state_ids.");
+    }
+    return this.#write((unit) => {
+      const graph = this.#loadCurationGraph(unit, command);
+      const states = stateIds.map((stateId) => this.#requireActiveState(graph, stateId));
+      const target = states.find(
+        (state) => (state["screen_state_id"] as string) === targetId,
+      ) as JsonObject;
+      const absorbed = states.filter((state) => state !== target);
+      const now = this.#workspace.clock.now();
+
+      const movedObservationIds = uniqueStrings(
+        absorbed.flatMap((state) => (state["observation_ids"] as readonly string[]) ?? []),
+      );
+      const decision = this.#curationDecision({
+        decisionId: this.#ids.next("identitydecision"),
+        kind: "merge",
+        inputStateIds: stateIds,
+        outputStateIds: [targetId],
+        observationIds: movedObservationIds,
+        actor: command.merged_by,
+        justification:
+          command.justification ??
+          "Manually merged structurally distinct captures of one product screen.",
+        now,
+      });
+
+      const targetDigest = (target["identity"] as JsonObject)["layout_digest"];
+      const aliasDigests = uniqueStrings(
+        [
+          ...(((target["identity"] as JsonObject)["extensions"] as JsonObject)[
+            "vistrea.alias_layout_digests"
+          ] as readonly string[] | undefined ?? []),
+          ...absorbed.flatMap((state) => {
+            const identity = state["identity"] as JsonObject;
+            const extensions = identity["extensions"] as JsonObject;
+            return [
+              ...(identity["layout_digest"] === undefined
+                ? []
+                : [identity["layout_digest"] as string]),
+              ...((extensions["vistrea.alias_layout_digests"] as readonly string[] | undefined) ??
+                []),
+            ];
+          }),
+        ].filter((digest) => digest !== targetDigest),
+      );
+      const seenBuilds = uniqueStrings(
+        states.flatMap((state) => (state["seen_in_build_ids"] as readonly string[]) ?? []),
+      );
+      const updatedTarget: JsonObject = {
+        ...target,
+        revision: (target["revision"] as number) + 1,
+        observation_ids: uniqueStrings([
+          ...(target["observation_ids"] as readonly string[]),
+          ...movedObservationIds,
+        ]),
+        identity: {
+          ...(target["identity"] as JsonObject),
+          extensions: {
+            ...((target["identity"] as JsonObject)["extensions"] as JsonObject),
+            ...(aliasDigests.length === 0
+              ? {}
+              : { "vistrea.alias_layout_digests": aliasDigests }),
+          },
+        },
+        first_seen: minimumTimestamp(states.map((state) => state["first_seen"] as string)),
+        last_seen: maximumTimestamp(states.map((state) => state["last_seen"] as string)),
+        ...(seenBuilds.length === 0 ? {} : { seen_in_build_ids: seenBuilds }),
+        ...(target["missing_in_build_ids"] === undefined
+          ? {}
+          : {
+              missing_in_build_ids: (
+                target["missing_in_build_ids"] as readonly string[]
+              ).filter((buildId) => !seenBuilds.includes(buildId)),
+            }),
+      };
+      this.#replaceState(graph, updatedTarget);
+      for (const state of absorbed) {
+        this.#replaceState(graph, {
+          ...state,
+          revision: (state["revision"] as number) + 1,
+          status: "merged",
+          superseded_by_state_ids: [targetId],
+        });
+      }
+
+      const absorbedIds = new Set(
+        absorbed.map((state) => state["screen_state_id"] as string),
+      );
+      graph.transitions = graph.transitions.map((transition) => {
+        const sourceId = transition["source_state_id"] as string;
+        const endpointId = transition["target_state_id"] as string;
+        if (!absorbedIds.has(sourceId) && !absorbedIds.has(endpointId)) {
+          return transition;
+        }
+        const nextSource = absorbedIds.has(sourceId) ? targetId : sourceId;
+        const nextTarget = absorbedIds.has(endpointId) ? targetId : endpointId;
+        const extensions = transition["extensions"] as JsonObject;
+        const storedKey = extensions["vistrea.transition_key"] as string | undefined;
+        const keyTail = storedKey?.split("\n").slice(2).join("\n");
+        return {
+          ...transition,
+          revision: (transition["revision"] as number) + 1,
+          source_state_id: nextSource,
+          target_state_id: nextTarget,
+          extensions: {
+            ...extensions,
+            ...(keyTail === undefined
+              ? {}
+              : { "vistrea.transition_key": `${nextSource}\n${nextTarget}\n${keyTail}` }),
+          },
+        };
+      });
+      graph.entry_state_ids = uniqueStrings(
+        graph.entry_state_ids.map((stateId) => (absorbedIds.has(stateId) ? targetId : stateId)),
+      );
+
+      graph.identity_decisions.push(decision);
+      unit.screenGraph.storeIdentityDecision(decision as never);
+      const persisted = this.#persistGraph(unit, graph);
+      return {
+        screen_graph_id: persisted.screen_graph_id,
+        graph_revision: persisted.revision,
+        decision,
+        state: persisted.states.find(
+          (state) => state.screen_state_id === targetId,
+        ) as ScreenState,
+      };
+    });
+  }
+
+  /**
+   * Separates wrongly deduplicated observations out of one state. The source
+   * state keeps its structural identity, so future structurally identical
+   * captures still deduplicate into it; the new state carries a `manual`
+   * identity without a layout digest and only grows through explicit
+   * curation. The manual decision is recorded in the graph.
+   */
+  splitScreenState(command: SplitScreenStateCommand): IdentityCurationResult {
+    this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.split_by);
+    const movedIds = [...new Set(command.observation_ids)];
+    if (movedIds.length === 0 || movedIds.length !== command.observation_ids.length) {
+      throw new DataError("invalid_argument", "A split names at least one observation once.");
+    }
+    if (
+      command.title !== undefined &&
+      (command.title.length === 0 || command.title.length > 512)
+    ) {
+      throw new DataError("invalid_argument", "The split title is out of bounds.");
+    }
+    return this.#write((unit) => {
+      const graph = this.#loadCurationGraph(unit, command);
+      const source = this.#requireActiveState(graph, command.state_id);
+      const sourceObservationIds = source["observation_ids"] as readonly string[];
+      if (!movedIds.every((observationId) => sourceObservationIds.includes(observationId))) {
+        throw new DataError("invalid_argument", "Every split observation must belong to the state.");
+      }
+      const remainingIds = sourceObservationIds.filter(
+        (observationId) => !movedIds.includes(observationId),
+      );
+      if (remainingIds.length === 0) {
+        throw new DataError(
+          "invalid_argument",
+          "A split must leave at least one observation behind.",
+        );
+      }
+      const observationsById = new Map(
+        graph.observations.map((observation) => [
+          observation["observation_id"] as string,
+          observation,
+        ]),
+      );
+      const movedObservations = movedIds.map(
+        (observationId) => observationsById.get(observationId) as JsonObject,
+      );
+      const remainingObservations = remainingIds.map(
+        (observationId) => observationsById.get(observationId) as JsonObject,
+      );
+      const now = this.#workspace.clock.now();
+      const newStateId = this.#ids.next("screenstate");
+      const decisionId = this.#ids.next("identitydecision");
+      const decision = this.#curationDecision({
+        decisionId,
+        kind: "split",
+        inputStateIds: [command.state_id],
+        outputStateIds: [command.state_id, newStateId],
+        observationIds: movedIds,
+        actor: command.split_by,
+        justification:
+          command.justification ??
+          "Manually separated observations that are not the same product screen.",
+        now,
+      });
+
+      const movedTimes = movedObservations.map(observationWallTime);
+      const newState: JsonObject = {
+        screen_state_id: newStateId,
+        protocol_version: PROTOCOL_VERSION,
+        revision: 1,
+        title: command.title ?? `${source["title"] as string} (split)`.slice(0, 512),
+        kind: source["kind"] as string,
+        status: "active",
+        canonical_snapshot_id: firstSnapshotId(movedObservations),
+        observation_ids: movedIds,
+        identity: { strategy: "manual", manual_key: decisionId, extensions: {} },
+        first_seen: minimumTimestamp(movedTimes),
+        last_seen: maximumTimestamp(movedTimes),
+        ...(observationBuilds(movedObservations).length === 0
+          ? {}
+          : { seen_in_build_ids: observationBuilds(movedObservations) }),
+        extensions: {},
+      };
+      graph.states.push(newState);
+
+      const remainingTimes = remainingObservations.map(observationWallTime);
+      const remainingSnapshots = new Set(
+        remainingObservations.flatMap(
+          (observation) => observation["snapshot_ids"] as readonly string[],
+        ),
+      );
+      this.#replaceState(graph, {
+        ...source,
+        revision: (source["revision"] as number) + 1,
+        observation_ids: remainingIds,
+        canonical_snapshot_id: remainingSnapshots.has(
+          source["canonical_snapshot_id"] as string,
+        )
+          ? (source["canonical_snapshot_id"] as string)
+          : firstSnapshotId(remainingObservations),
+        first_seen: minimumTimestamp(remainingTimes),
+        last_seen: maximumTimestamp(remainingTimes),
+        ...(observationBuilds(remainingObservations).length === 0
+          ? {}
+          : { seen_in_build_ids: observationBuilds(remainingObservations) }),
+      });
+
+      graph.identity_decisions.push(decision);
+      unit.screenGraph.storeIdentityDecision(decision as never);
+      const persisted = this.#persistGraph(unit, graph);
+      return {
+        screen_graph_id: persisted.screen_graph_id,
+        graph_revision: persisted.revision,
+        decision,
+        state: persisted.states.find(
+          (state) => state.screen_state_id === newStateId,
+        ) as ScreenState,
+      };
+    });
+  }
+
+  #loadCurationGraph(
+    unit: DataUnitOfWork,
+    command: {
+      readonly project_id: string;
+      readonly application_id: string;
+      readonly expected_graph_revision: number;
+    },
+  ): MutableGraph {
+    const graph = this.#loadOrCreateGraph(unit, command.project_id, command.application_id);
+    if (graph.created) {
+      throw new DataError("not_found", "The Screen Graph does not exist yet.");
+    }
+    if (graph.revision !== command.expected_graph_revision) {
+      throw new DataError("conflict", "The Screen Graph revision does not match.", {
+        retryable: true,
+        details: {
+          expected_revision: command.expected_graph_revision,
+          current_revision: graph.revision,
+        },
+      });
+    }
+    return graph;
+  }
+
+  #requireActiveState(graph: MutableGraph, stateId: string): JsonObject {
+    const state = graph.states.find(
+      (candidate) => (candidate["screen_state_id"] as string) === stateId,
+    );
+    if (state === undefined) {
+      throw new DataError("not_found", "The Screen State does not exist in the graph.", {
+        details: { screen_state_id: stateId },
+      });
+    }
+    if ((state["status"] as string) !== "active") {
+      throw new DataError("conflict", "Only active Screen States can be curated.", {
+        details: { screen_state_id: stateId, status: state["status"] as string },
+      });
+    }
+    return state;
+  }
+
+  #replaceState(graph: MutableGraph, state: JsonObject): void {
+    const index = graph.states.findIndex(
+      (candidate) => candidate["screen_state_id"] === state["screen_state_id"],
+    );
+    graph.states[index] = state;
+  }
+
+  #curationDecision(input: {
+    readonly decisionId: string;
+    readonly kind: "merge" | "split";
+    readonly inputStateIds: readonly string[];
+    readonly outputStateIds: readonly string[];
+    readonly observationIds: readonly string[];
+    readonly actor: JsonObject;
+    readonly justification: string;
+    readonly now: string;
+  }): JsonObject {
+    return {
+      state_identity_decision_id: input.decisionId,
+      protocol_version: PROTOCOL_VERSION,
+      revision: 1,
+      created_at: input.now,
+      created_by: input.actor,
+      source: "manual",
+      kind: input.kind,
+      input_state_ids: input.inputStateIds,
+      output_state_ids: input.outputStateIds,
+      observation_ids: input.observationIds,
+      confidence: 1,
+      evidence: [
+        {
+          factor: "manual",
+          score: 1,
+          weight: 1,
+          explanation: input.justification.slice(0, 1024),
+          resource_refs: [],
+          extensions: {},
+        },
+      ],
+      extensions: {},
+    };
+  }
+
   getGraph(query: GetScreenGraphQuery): ScreenGraph {
     return this.#read((unit) =>
       unit.screenGraph.getGraph(deterministicGraphId(query.project_id, query.application_id)),
@@ -370,12 +752,21 @@ export class ScreenGraphEngine {
 
     const identity = ScreenGraphEngine.computeStructuralIdentity(snapshot);
     const now = this.#workspace.clock.now();
-    const existing = graph.states.find(
-      (candidate) =>
-        (candidate["status"] as string) === "active" &&
-        ((candidate["identity"] as JsonObject)["layout_digest"] as string) ===
-          identity.layout_digest,
-    );
+    // Manual merges alias absorbed layout digests onto the surviving state,
+    // so future captures of any merged structure deduplicate into it.
+    const existing = graph.states.find((candidate) => {
+      if ((candidate["status"] as string) !== "active") {
+        return false;
+      }
+      const candidateIdentity = candidate["identity"] as JsonObject;
+      if ((candidateIdentity["layout_digest"] as string | undefined) === identity.layout_digest) {
+        return true;
+      }
+      const aliases = (candidateIdentity["extensions"] as JsonObject)[
+        "vistrea.alias_layout_digests"
+      ] as readonly string[] | undefined;
+      return aliases?.includes(identity.layout_digest) === true;
+    });
 
     const observationId = this.#ids.next("observation");
     const stateId =
@@ -623,6 +1014,30 @@ function defaultStateTitle(identity: StructuralIdentity): string {
     return root;
   }
   return `Screen ${identity.layout_digest.slice("sha256:".length, "sha256:".length + 8)}`;
+}
+
+function observationWallTime(observation: JsonObject): string {
+  return (observation["observed_at"] as JsonObject)["wall_time"] as string;
+}
+
+function firstSnapshotId(observations: readonly JsonObject[]): string {
+  return ((observations[0] as JsonObject)["snapshot_ids"] as readonly string[])[0] as string;
+}
+
+function observationBuilds(observations: readonly JsonObject[]): string[] {
+  return uniqueStrings(
+    observations.map(
+      (observation) => (observation["runtime_context"] as JsonObject)["build_id"] as string,
+    ),
+  );
+}
+
+function minimumTimestamp(values: readonly string[]): string {
+  return [...values].sort()[0] as string;
+}
+
+function maximumTimestamp(values: readonly string[]): string {
+  return [...values].sort().at(-1) as string;
 }
 
 function actionSignature(command: RecordTransitionObservationCommand): string {

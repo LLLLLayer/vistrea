@@ -9,6 +9,7 @@ import {
   type CommitQuery,
   type CommitWorkingSetCommand,
   type DesignComparison,
+  type DesignComparisonQuery,
   type DesignReference,
   type DesignRegionMapping,
   type DesignRegionMappingQuery,
@@ -892,6 +893,38 @@ class StateDesignReviewRepository
     assertRevisionUpdate(current.revision, value.revision, precondition, value.issue_id);
     this.unit.state.reviewIssues.set(value.issue_id, value);
     return cloneFrozen(value);
+  }
+
+  listReferences(page?: PageRequest): Page<DesignReference> {
+    this.read();
+    const values = [...this.unit.state.designReferences.values()].sort((left, right) =>
+      (left["design_reference_id"] as string).localeCompare(
+        right["design_reference_id"] as string,
+      ),
+    );
+    return paginate(values, page, this.unit.snapshotVersion);
+  }
+
+  listComparisons(
+    query: DesignComparisonQuery = {},
+    page?: PageRequest,
+  ): Page<DesignComparison> {
+    this.read();
+    const values = [...this.unit.state.designComparisons.values()]
+      .filter(
+        (comparison) =>
+          query.design_reference_id === undefined ||
+          comparison["design_reference_id"] === query.design_reference_id,
+      )
+      .filter(
+        (comparison) =>
+          query.target_snapshot_id === undefined ||
+          comparison["target_snapshot_id"] === query.target_snapshot_id,
+      )
+      .sort((left, right) =>
+        (left["comparison_id"] as string).localeCompare(right["comparison_id"] as string),
+      );
+    return paginate(values, page, this.unit.snapshotVersion);
   }
 
   listIssues(query: ReviewIssueQuery = {}, page?: PageRequest): Page<ReviewIssue> {

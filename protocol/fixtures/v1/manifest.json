@@ -1,5 +1,8 @@
 {
-  "protocol_version": { "major": 1, "minor": 0 },
+  "protocol_version": {
+    "major": 1,
+    "minor": 0
+  },
   "fixtures": [
     {
       "path": "runtime-snapshot/valid/minimal.json",
@@ -87,26 +90,35 @@
       "path": "json/invalid/duplicate-key.json",
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
       "expectation": "json-invalid",
-      "expected_json_codes": ["duplicate_json_key"]
+      "expected_json_codes": [
+        "duplicate_json_key"
+      ]
     },
     {
       "path": "json/invalid/unsafe-integer.json",
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
       "expectation": "json-invalid",
-      "expected_json_codes": ["unsafe_json_integer"]
+      "expected_json_codes": [
+        "unsafe_json_integer"
+      ]
     },
     {
       "path": "json/invalid/lone-surrogate.json",
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet",
       "expectation": "json-invalid",
-      "expected_json_codes": ["invalid_unicode_scalar"]
+      "expected_json_codes": [
+        "invalid_unicode_scalar"
+      ]
     },
     {
       "path": "ref/invalid/empty-segment.json",
       "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/Ref",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "pattern", "instance_path": "/name" }
+        {
+          "keyword": "pattern",
+          "instance_path": "/name"
+        }
       ]
     },
     {
@@ -115,7 +127,11 @@
       "expectation": "schema-invalid",
       "semantic_kind": "runtime-snapshot",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "protocol_version" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "protocol_version"
+        }
       ]
     },
     {
@@ -124,7 +140,11 @@
       "expectation": "schema-invalid",
       "semantic_kind": "runtime-snapshot",
       "expected_schema_errors": [
-        { "keyword": "additionalProperties", "instance_path": "", "additional_property": "unexpected" }
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "",
+          "additional_property": "unexpected"
+        }
       ]
     },
     {
@@ -133,7 +153,11 @@
       "expectation": "schema-invalid",
       "semantic_kind": "runtime-event-batch",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "extensions" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "extensions"
+        }
       ]
     },
     {
@@ -141,91 +165,117 @@
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["duplicate_node_id"]
+      "expected_semantic_codes": [
+        "duplicate_node_id"
+      ]
     },
     {
       "path": "runtime-snapshot/invalid/dangling-child-reference.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["dangling_child_reference"]
+      "expected_semantic_codes": [
+        "dangling_child_reference"
+      ]
     },
     {
       "path": "runtime-snapshot/invalid/tree-cycle.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["tree_cycle"]
+      "expected_semantic_codes": [
+        "tree_cycle"
+      ]
     },
     {
       "path": "runtime-snapshot/invalid/display-scale-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["display_scale_mismatch"]
+      "expected_semantic_codes": [
+        "display_scale_mismatch"
+      ]
     },
     {
       "path": "runtime-snapshot/invalid/screenshot-pixel-size-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["screenshot_pixel_size_mismatch"]
+      "expected_semantic_codes": [
+        "screenshot_pixel_size_mismatch"
+      ]
     },
     {
       "path": "runtime-snapshot/invalid/object-tree-unresolved.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-snapshot.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-snapshot",
-      "expected_semantic_codes": ["tree_payload_unresolved"]
+      "expected_semantic_codes": [
+        "tree_payload_unresolved"
+      ]
     },
     {
       "path": "runtime-event-batch/invalid/reversed-range.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-event-batch",
-      "expected_semantic_codes": ["event_batch_range_invalid"]
+      "expected_semantic_codes": [
+        "event_batch_range_invalid"
+      ]
     },
     {
       "path": "runtime-event-batch/invalid/epoch-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-event-batch",
-      "expected_semantic_codes": ["event_batch_epoch_mismatch"]
+      "expected_semantic_codes": [
+        "event_batch_epoch_mismatch"
+      ]
     },
     {
       "path": "runtime-event-batch/invalid/non-increasing.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-event-batch",
-      "expected_semantic_codes": ["event_batch_order_invalid"]
+      "expected_semantic_codes": [
+        "event_batch_order_invalid"
+      ]
     },
     {
       "path": "runtime-event-batch/invalid/out-of-range.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-event-batch",
-      "expected_semantic_codes": ["event_batch_sequence_out_of_range"]
+      "expected_semantic_codes": [
+        "event_batch_sequence_out_of_range"
+      ]
     },
     {
       "path": "runtime-event-batch/invalid/dropped-count-overflow.json",
       "schema_id": "https://vistrea.dev/schema/v1/runtime-event-batch.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "runtime-event-batch",
-      "expected_semantic_codes": ["event_batch_drop_count_exceeds_range"]
+      "expected_semantic_codes": [
+        "event_batch_drop_count_exceeds_range"
+      ]
     },
     {
       "path": "object/invalid/hash-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "object-fixture",
-      "expected_semantic_codes": ["object_hash_mismatch"]
+      "expected_semantic_codes": [
+        "object_hash_mismatch"
+      ]
     },
     {
       "path": "object/invalid/noncanonical-base64.json",
       "schema_id": "https://vistrea.dev/schema/v1/object-fixture.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "object-fixture",
-      "expected_semantic_codes": ["object_payload_invalid_base64"]
+      "expected_semantic_codes": [
+        "object_payload_invalid_base64"
+      ]
     },
     {
       "path": "artifact/valid/screenshot.json",
@@ -237,7 +287,11 @@
       "schema_id": "https://vistrea.dev/schema/v1/artifact.schema.json",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "object" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "object"
+        }
       ]
     },
     {
@@ -255,7 +309,11 @@
       "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingChange",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "payload" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "payload"
+        }
       ]
     },
     {
@@ -265,32 +323,62 @@
       "semantic_kind": "screen-graph"
     },
     {
+      "path": "graph/valid/merged-states.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "screen-graph"
+    },
+    {
+      "path": "graph/valid/split-state.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "schema-valid",
+      "semantic_kind": "screen-graph"
+    },
+    {
+      "path": "graph/invalid/claimed-observation-without-decision.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": [
+        "graph_state_canonical_snapshot_unobserved"
+      ]
+    },
+    {
       "path": "graph/invalid/dangling-state-reference.json",
       "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "screen-graph",
-      "expected_semantic_codes": ["graph_dangling_state_reference"]
+      "expected_semantic_codes": [
+        "graph_dangling_state_reference"
+      ]
     },
     {
       "path": "graph/invalid/dangling-observation-reference.json",
       "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "screen-graph",
-      "expected_semantic_codes": ["graph_dangling_observation_reference"]
+      "expected_semantic_codes": [
+        "graph_dangling_observation_reference"
+      ]
     },
     {
       "path": "graph/invalid/reversed-time-range.json",
       "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "screen-graph",
-      "expected_semantic_codes": ["graph_context_time_range_invalid"]
+      "expected_semantic_codes": [
+        "graph_context_time_range_invalid"
+      ]
     },
     {
       "path": "graph/invalid/confidence-out-of-range.json",
       "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json#/$defs/StateIdentityDecision",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "maximum", "instance_path": "/confidence" }
+        {
+          "keyword": "maximum",
+          "instance_path": "/confidence"
+        }
       ]
     },
     {
@@ -316,7 +404,9 @@
       "schema_id": "https://vistrea.dev/schema/v1/knowledge.schema.json#/$defs/KnowledgeGraph",
       "expectation": "semantic-invalid",
       "semantic_kind": "knowledge-graph",
-      "expected_semantic_codes": ["wiki_link_target_missing"]
+      "expected_semantic_codes": [
+        "wiki_link_target_missing"
+      ]
     },
     {
       "path": "design/valid/review-bundle.json",
@@ -342,14 +432,18 @@
       "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
       "expectation": "semantic-invalid",
       "semantic_kind": "design-review-bundle",
-      "expected_semantic_codes": ["review_issue_transition_invalid"]
+      "expected_semantic_codes": [
+        "review_issue_transition_invalid"
+      ]
     },
     {
       "path": "design/invalid/terminal-tuning-not-reverted.json",
       "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/DesignReviewBundle",
       "expectation": "semantic-invalid",
       "semantic_kind": "design-review-bundle",
-      "expected_semantic_codes": ["tuning_application_reversion_incomplete"]
+      "expected_semantic_codes": [
+        "tuning_application_reversion_incomplete"
+      ]
     },
     {
       "path": "validation/valid/run-succeeded.json",
@@ -386,7 +480,9 @@
       "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "validation-run",
-      "expected_semantic_codes": ["validation_run_time_order_invalid"]
+      "expected_semantic_codes": [
+        "validation_run_time_order_invalid"
+      ]
     },
     {
       "path": "validation/invalid/succeeded-run-missing-completed-at.json",
@@ -394,7 +490,11 @@
       "expectation": "schema-invalid",
       "semantic_kind": "validation-run",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "completed_at" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "completed_at"
+        }
       ]
     },
     {
@@ -402,21 +502,27 @@
       "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationSuppression",
       "expectation": "semantic-invalid",
       "semantic_kind": "validation-suppression",
-      "expected_semantic_codes": ["validation_suppression_expiry_invalid"]
+      "expected_semantic_codes": [
+        "validation_suppression_expiry_invalid"
+      ]
     },
     {
       "path": "validation/invalid/build-diff-summary-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/BuildDiff",
       "expectation": "semantic-invalid",
       "semantic_kind": "build-diff",
-      "expected_semantic_codes": ["build_diff_summary_mismatch"]
+      "expected_semantic_codes": [
+        "build_diff_summary_mismatch"
+      ]
     },
     {
       "path": "validation/invalid/bundle-mismatched-run.json",
       "schema_id": "https://vistrea.dev/schema/v1/validation.schema.json#/$defs/ValidationBundle",
       "expectation": "semantic-invalid",
       "semantic_kind": "validation-bundle",
-      "expected_semantic_codes": ["validation_finding_run_mismatch"]
+      "expected_semantic_codes": [
+        "validation_finding_run_mismatch"
+      ]
     },
     {
       "path": "operation/valid/succeeded-inline.json",
@@ -442,7 +548,11 @@
       "expectation": "schema-invalid",
       "semantic_kind": "operation-record",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "result" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "result"
+        }
       ]
     },
     {
@@ -450,49 +560,64 @@
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_result_operation_mismatch"]
+      "expected_semantic_codes": [
+        "operation_result_operation_mismatch"
+      ]
     },
     {
       "path": "operation/invalid/event-after-terminal.json",
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_event_after_terminal"]
+      "expected_semantic_codes": [
+        "operation_event_after_terminal"
+      ]
     },
     {
       "path": "operation/invalid/progress-units-over-total.json",
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_progress_units_invalid"]
+      "expected_semantic_codes": [
+        "operation_progress_units_invalid"
+      ]
     },
     {
       "path": "operation/invalid/inline-result-schema-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_result_value_invalid"]
+      "expected_semantic_codes": [
+        "operation_result_value_invalid"
+      ]
     },
     {
       "path": "operation/invalid/duplicate-created-event.json",
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_created_event_invalid"]
+      "expected_semantic_codes": [
+        "operation_created_event_invalid"
+      ]
     },
     {
       "path": "operation/invalid/progress-without-started.json",
       "schema_id": "https://vistrea.dev/schema/v1/operation.schema.json",
       "expectation": "semantic-invalid",
       "semantic_kind": "operation-record",
-      "expected_semantic_codes": ["operation_started_event_missing"]
+      "expected_semantic_codes": [
+        "operation_started_event_missing"
+      ]
     },
     {
       "path": "timestamp/invalid/non-utc-offset.json",
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "pattern", "instance_path": "" }
+        {
+          "keyword": "pattern",
+          "instance_path": ""
+        }
       ]
     },
     {
@@ -500,14 +625,18 @@
       "schema_id": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/WorkingSet",
       "expectation": "semantic-invalid",
       "semantic_kind": "working-set",
-      "expected_semantic_codes": ["duplicate_working_change_id"]
+      "expected_semantic_codes": [
+        "duplicate_working_change_id"
+      ]
     },
     {
       "path": "design/invalid/tuning-patch-property-value-mismatch.json",
       "schema_id": "https://vistrea.dev/schema/v1/design.schema.json#/$defs/TuningPatch",
       "expectation": "semantic-invalid",
       "semantic_kind": "tuning-patch",
-      "expected_semantic_codes": ["tuning_change_property_value_mismatch"]
+      "expected_semantic_codes": [
+        "tuning_change_property_value_mismatch"
+      ]
     },
     {
       "path": "ref-update-precondition/valid/must-match.json",
@@ -524,7 +653,11 @@
       "schema_id": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/RevisionPrecondition",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "expected_revision" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "expected_revision"
+        }
       ]
     },
     {
@@ -557,7 +690,10 @@
       "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "const", "instance_path": "/format_version" }
+        {
+          "keyword": "const",
+          "instance_path": "/format_version"
+        }
       ]
     },
     {
@@ -565,7 +701,11 @@
       "schema_id": "https://vistrea.dev/schema/v1/exchange-pack.schema.json",
       "expectation": "schema-invalid",
       "expected_schema_errors": [
-        { "keyword": "required", "instance_path": "", "missing_property": "objects" }
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "missing_property": "objects"
+        }
       ]
     }
   ]

@@ -16,6 +16,8 @@ vistrea design get-reference <design_reference_id>
 vistrea design map --json <command>
 vistrea design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]
 vistrea design get-comparison <comparison_id>
+vistrea design list-references [--limit <n>] [--cursor <cursor>]
+vistrea design list-comparisons [--reference <id>] [--snapshot <id>] [--limit <n>] [--cursor <cursor>]
 vistrea issue create --json <command>
 vistrea issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]
 vistrea issue get <issue_id>
@@ -31,6 +33,8 @@ vistrea graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <s
 vistrea graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]
 vistrea graph show --project <project_id> --application <application_id>
 vistrea graph get-state <screen_state_id>
+vistrea screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]
+vistrea screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]
 vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]
 vistrea wiki create --json <command>
 vistrea wiki update <wiki_node_id> --json <command>

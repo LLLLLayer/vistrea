@@ -175,6 +175,47 @@ export function checkScreenGraph(graph) {
     issues,
   );
 
+  // Manual identity curation moves observation membership and re-points
+  // transition endpoints. A decision in the graph grants an output state the
+  // observations it names, and a superseded tombstone resolves to its
+  // surviving states for endpoint comparisons.
+  const decisionGrants = new Map();
+  for (const decision of graph.identity_decisions) {
+    for (const observationId of decision.observation_ids) {
+      let granted = decisionGrants.get(observationId);
+      if (!granted) {
+        granted = new Set();
+        decisionGrants.set(observationId, granted);
+      }
+      for (const stateId of decision.output_state_ids) {
+        granted.add(stateId);
+      }
+    }
+  }
+  const supersededBy = new Map(
+    graph.states.map((state) => [
+      state.screen_state_id,
+      state.superseded_by_state_ids ?? [],
+    ]),
+  );
+  const resolvesToState = (fromStateId, toStateId, seen = new Set()) => {
+    if (fromStateId === toStateId) {
+      return true;
+    }
+    if (seen.has(fromStateId)) {
+      return false;
+    }
+    seen.add(fromStateId);
+    return (supersededBy.get(fromStateId) ?? []).some((nextId) =>
+      resolvesToState(nextId, toStateId, seen),
+    );
+  };
+  const observationReferencesState = (observation, stateId) =>
+    observation.screen_state_id === stateId ||
+    observation.source_state_id === stateId ||
+    observation.target_state_id === stateId ||
+    decisionGrants.get(observation.observation_id)?.has(stateId) === true;
+
   if (graph.context.observation_time_range) {
     checkTimeOrder(
       graph.context.observation_time_range.started_at,
@@ -229,9 +270,8 @@ export function checkScreenGraph(graph) {
       .map((observationId) => observations.get(observationId))
       .find(
         (observation) =>
-          (observation?.screen_state_id === state.screen_state_id ||
-            observation?.source_state_id === state.screen_state_id ||
-            observation?.target_state_id === state.screen_state_id) &&
+          observation !== undefined &&
+          observationReferencesState(observation, state.screen_state_id) &&
           observation.snapshot_ids.includes(state.canonical_snapshot_id),
       );
     if (!canonicalObservation) {
@@ -332,8 +372,8 @@ export function checkScreenGraph(graph) {
         observation.kind !== "transition" ||
         observation.transition_id !== transition.transition_id ||
         observation.action_id !== transition.action_id ||
-        observation.source_state_id !== transition.source_state_id ||
-        observation.target_state_id !== transition.target_state_id
+        !resolvesToState(observation.source_state_id, transition.source_state_id) ||
+        !resolvesToState(observation.target_state_id, transition.target_state_id)
       ) {
         issues.push(
           issue(
@@ -541,7 +581,16 @@ export function checkScreenGraph(graph) {
     }
     if (observation.kind === "state") {
       const state = states.get(observation.screen_state_id);
-      if (state && !state.observation_ids.includes(observation.observation_id)) {
+      const movedToReferencingState = [
+        ...(decisionGrants.get(observation.observation_id) ?? []),
+      ].some((grantedStateId) =>
+        states.get(grantedStateId)?.observation_ids.includes(observation.observation_id),
+      );
+      if (
+        state &&
+        !state.observation_ids.includes(observation.observation_id) &&
+        !movedToReferencingState
+      ) {
         issues.push(
           issue(
             "graph_state_observation_mismatch",

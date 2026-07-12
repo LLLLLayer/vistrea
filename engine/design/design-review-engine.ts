@@ -3,6 +3,7 @@ import {
   isDataError,
   PROTOCOL_SCHEMA_IDS,
   type DesignComparison,
+  type DesignComparisonQuery,
   type DesignReference,
   type DesignRegionMapping,
   type IdGenerator,
@@ -659,6 +660,17 @@ export class DesignReviewEngine {
 
   getDesignComparison(id: string): DesignComparison {
     return this.#read((unit) => unit.designReviews.getComparison(id));
+  }
+
+  listDesignReferences(page?: PageRequest): Page<DesignReference> {
+    return this.#read((unit) => unit.designReviews.listReferences(page));
+  }
+
+  listDesignComparisons(
+    query?: DesignComparisonQuery,
+    page?: PageRequest,
+  ): Page<DesignComparison> {
+    return this.#read((unit) => unit.designReviews.listComparisons(query, page));
   }
 
   getReviewIssue(id: string): ReviewIssue {

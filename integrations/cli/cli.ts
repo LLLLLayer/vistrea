@@ -70,6 +70,8 @@ export async function runVistreaCli(
           "design map --json <command>",
           "design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]",
           "design get-comparison <comparison_id>",
+          "design list-references [--limit n] [--cursor c]",
+          "design list-comparisons [--reference <id>] [--snapshot <id>] [--limit n] [--cursor c]",
           "issue create --json <command>",
           "issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]",
           "issue get <issue_id>",
@@ -105,6 +107,8 @@ export async function runVistreaCli(
           "pack export --json <command>",
           "pack import --file <path>",
           "object get --hash <sha256:...> --output <path>",
+          "screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]",
+          "screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]",
           "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
@@ -226,6 +230,34 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   }
   if (command[0] === "design" && command[1] === "compare") {
     return invocation("RunDesignComparison", parseCompareOptions(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "list-references") {
+    return invocation("ListDesignReferences", parseListOptions(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "list-comparisons") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--reference", "--snapshot", "--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const reference = values.get("--reference");
+    const snapshot = values.get("--snapshot");
+    const cursor = values.get("--cursor");
+    return invocation(
+      "ListDesignComparisons",
+      {
+        ...(reference === undefined ? {} : { design_reference_id: reference }),
+        ...(snapshot === undefined ? {} : { target_snapshot_id: snapshot }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
   }
   if (command[0] === "design" && command[1] === "get-comparison" && command.length === 3) {
     return invocation(
@@ -584,6 +616,65 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
         ...(graphId === undefined ? {} : { graph_id: graphId }),
         ...(depth === undefined ? {} : { maximum_depth: Number(depth) }),
         ...(maxPaths === undefined ? {} : { maximum_paths: Number(maxPaths) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "screen" && command[1] === "merge") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (
+        !["--project", "--application", "--states", "--into", "--revision", "--actor", "--justification"].includes(key)
+      ) {
+        throw invalidArguments();
+      }
+    }
+    const revision = requireOption(values, "--revision");
+    if (!/^[1-9][0-9]{0,8}$/.test(revision)) {
+      throw invalidArguments();
+    }
+    const into = values.get("--into");
+    const justification = values.get("--justification");
+    return invocation(
+      "MergeScreenStates",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+        state_ids: requireOption(values, "--states").split(","),
+        ...(into === undefined ? {} : { into_state_id: into }),
+        expected_graph_revision: Number(revision),
+        merged_by: cliActor(values.get("--actor")),
+        ...(justification === undefined ? {} : { justification }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "screen" && command[1] === "split") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (
+        !["--project", "--application", "--state", "--observations", "--title", "--revision", "--actor", "--justification"].includes(key)
+      ) {
+        throw invalidArguments();
+      }
+    }
+    const revision = requireOption(values, "--revision");
+    if (!/^[1-9][0-9]{0,8}$/.test(revision)) {
+      throw invalidArguments();
+    }
+    const title = values.get("--title");
+    const justification = values.get("--justification");
+    return invocation(
+      "SplitScreenState",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+        state_id: requireOption(values, "--state"),
+        observation_ids: requireOption(values, "--observations").split(","),
+        ...(title === undefined ? {} : { title }),
+        expected_graph_revision: Number(revision),
+        split_by: cliActor(values.get("--actor")),
+        ...(justification === undefined ? {} : { justification }),
       },
       timeoutMilliseconds,
     );

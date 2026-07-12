@@ -387,6 +387,16 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   }
 
   if (pathname === "/v1/design-references") {
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      readSingleValueParameters(url, ["limit", "cursor"]);
+      writeJson(
+        response,
+        200,
+        context.design.listDesignReferences(readPageValues(url)) as unknown as JsonObject,
+      );
+      return;
+    }
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
@@ -433,6 +443,31 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   }
 
   if (pathname === "/v1/design-comparisons") {
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      const values = readSingleValueParameters(url, [
+        "design_reference_id",
+        "target_snapshot_id",
+        "limit",
+        "cursor",
+      ]);
+      writeJson(
+        response,
+        200,
+        context.design.listDesignComparisons(
+          {
+            ...(values["design_reference_id"] === undefined
+              ? {}
+              : { design_reference_id: values["design_reference_id"] }),
+            ...(values["target_snapshot_id"] === undefined
+              ? {}
+              : { target_snapshot_id: values["target_snapshot_id"] }),
+          },
+          readPageValues(url),
+        ) as unknown as JsonObject,
+      );
+      return;
+    }
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
@@ -739,6 +774,55 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       ...(pathsValue === undefined ? {} : { maximum_paths: Number(pathsValue) }),
     });
     writeJson(response, 200, { paths } as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph/state-merges") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "project_id",
+        "application_id",
+        "state_ids",
+        "into_state_id",
+        "expected_graph_revision",
+        "merged_by",
+        "justification",
+      ],
+      ["project_id", "application_id", "state_ids", "expected_graph_revision", "merged_by"],
+    );
+    const result = context.graph.mergeScreenStates(
+      command as unknown as Parameters<ScreenGraphEngine["mergeScreenStates"]>[0],
+    );
+    writeJson(response, 201, result as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph/state-splits") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "project_id",
+        "application_id",
+        "state_id",
+        "observation_ids",
+        "title",
+        "expected_graph_revision",
+        "split_by",
+        "justification",
+      ],
+      ["project_id", "application_id", "state_id", "observation_ids", "expected_graph_revision", "split_by"],
+    );
+    const result = context.graph.splitScreenState(
+      command as unknown as Parameters<ScreenGraphEngine["splitScreenState"]>[0],
+    );
+    writeJson(response, 201, result as unknown as JsonObject);
     return;
   }
 
