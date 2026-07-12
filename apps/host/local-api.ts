@@ -990,12 +990,24 @@ function toPublicError(error: unknown): PublicError {
           retryable: true,
         };
       case "unauthenticated":
-      case "protocol_error":
-      case "remote_error":
         return {
           status: 502,
           code: error.code,
-          message: "The Runtime connection rejected or failed the capture.",
+          message: "The Runtime connection rejected the capture.",
+          retryable: false,
+        };
+      case "protocol_error":
+        return {
+          status: 502,
+          code: "integrity_error",
+          message: "The Runtime capture failed transport integrity verification.",
+          retryable: false,
+        };
+      case "remote_error":
+        return {
+          status: 502,
+          code: "internal",
+          message: "The Runtime could not complete the capture.",
           retryable: false,
         };
     }

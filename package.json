@@ -16,6 +16,8 @@
     "test:contract": "node --test tests/contract/*.test.mjs",
     "test:host-contract": "pnpm build:host && node --test .build/typescript/tests/contract/*.test.js",
     "test:host-integration": "pnpm build:host && node --test .build/typescript/tests/integration/*.test.js",
+    "test:agent-adapters": "pnpm build:host && node --test .build/typescript/tests/integration/agent-adapters.test.js",
+    "test:e2e:ios-real-vertical": "pnpm build:host && VISTREA_RUN_IOS_REAL_VERTICAL=1 node --test .build/typescript/tests/e2e/ios-real-vertical-loop.test.js",
     "test:scenarios": "node --test examples/scenarios/tests/*.test.mjs",
     "check": "pnpm protocol:validate && pnpm scenarios:validate && pnpm typecheck && pnpm test:contract && pnpm test:host-contract && pnpm test:host-integration && pnpm test:scenarios"
   },
@@ -27,6 +29,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "better-sqlite3": "12.11.1"
   }
 }
