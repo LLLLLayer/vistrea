@@ -9,6 +9,29 @@ vistrea workspace status
 vistrea snapshot capture [--include <field>]... [--screenshot none|reference] [--reason <reason>]
 vistrea snapshot list [--limit <1..500>] [--cursor <opaque>]
 vistrea snapshot get <snapshot_id>
+vistrea events list [--epoch <event_epoch_id>] [--kinds a,b] [--first-sequence <n>] [--last-sequence <n>]
+vistrea design upload-asset --file <path> --media-type <type> [--name <logical>]
+vistrea design add-reference --json <command>
+vistrea design get-reference <design_reference_id>
+vistrea design map --json <command>
+vistrea design compare --reference <id> --snapshot <id> [--actor <id>]
+vistrea design get-comparison <comparison_id>
+vistrea issue create --json <command>
+vistrea issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]
+vistrea issue get <issue_id>
+vistrea issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]
+vistrea issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]
+vistrea tuning create-patch --json <command>
+vistrea tuning get-patch <patch_id>
+vistrea tuning apply --patch <patch_id> [--ttl <ms>]
+vistrea tuning revert <tuning_application_id>
+vistrea tuning get-application <tuning_application_id>
+vistrea tuning list-active
+vistrea graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <state_kind>] [--entry true|false] [--source <capture_source>] [--session <session_id>]
+vistrea graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]
+vistrea graph show --project <project_id> --application <application_id>
+vistrea graph get-state <screen_state_id>
+vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>]
 ```
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.

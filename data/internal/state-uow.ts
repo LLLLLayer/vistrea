@@ -413,6 +413,46 @@ class StateRuntimeEventRepository extends BoundStateRepository implements Runtim
 }
 
 class StateScreenGraphRepository extends BoundStateRepository implements ScreenGraphRepository {
+  createGraph(graph: ScreenGraph): ScreenGraph {
+    this.write();
+    const value = this.unit.validate(PROTOCOL_SCHEMA_IDS.screenGraph, graph);
+    assertCreateRevision(value.revision, value.screen_graph_id);
+    if (this.unit.state.screenGraphs.has(value.screen_graph_id)) {
+      this.duplicate("screen_graph", value.screen_graph_id);
+    }
+    this.unit.state.screenGraphs.set(value.screen_graph_id, value);
+    return cloneFrozen(value);
+  }
+
+  updateGraph(graph: ScreenGraph, precondition: RevisionPrecondition): ScreenGraph {
+    this.write();
+    const value = this.unit.validate(PROTOCOL_SCHEMA_IDS.screenGraph, graph);
+    const current = this.unit.state.screenGraphs.get(value.screen_graph_id);
+    if (current === undefined) {
+      return this.missing("screen_graph", value.screen_graph_id);
+    }
+    assertRevisionUpdate(current.revision, value.revision, precondition, value.screen_graph_id);
+    this.unit.state.screenGraphs.set(value.screen_graph_id, value);
+    return cloneFrozen(value);
+  }
+
+  getGraph(screenGraphId: string): ScreenGraph {
+    this.read();
+    const value = this.unit.state.screenGraphs.get(screenGraphId);
+    return value === undefined
+      ? this.missing("screen_graph", screenGraphId)
+      : cloneFrozen(value);
+  }
+
+  tagGraphVersion(selector: VersionSelector, screenGraphId: string): void {
+    this.write();
+    this.unit.validate(PROTOCOL_SCHEMA_IDS.versionSelector, selector);
+    if (!this.unit.state.screenGraphs.has(screenGraphId)) {
+      this.missing("screen_graph", screenGraphId);
+    }
+    this.unit.state.screenGraphsByVersion.set(versionSelectorKey(selector), screenGraphId);
+  }
+
   materialize(query: GraphContext): ScreenGraph {
     this.read();
     this.unit.validate(PROTOCOL_SCHEMA_IDS.graphContext, query);

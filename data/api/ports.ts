@@ -118,6 +118,10 @@ export interface RuntimeEventRepository extends UnitOfWorkBound {
 }
 
 export interface ScreenGraphRepository extends UnitOfWorkBound {
+  createGraph(graph: ScreenGraph): ScreenGraph;
+  updateGraph(graph: ScreenGraph, precondition: RevisionPrecondition): ScreenGraph;
+  getGraph(screenGraphId: string): ScreenGraph;
+  tagGraphVersion(selector: VersionSelector, screenGraphId: string): void;
   materialize(query: GraphContext): ScreenGraph;
   getState(screenStateId: string, at?: VersionSelector): ScreenState;
   findPath(query: PathQuery): readonly PathResult[];

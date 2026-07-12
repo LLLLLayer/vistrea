@@ -596,6 +596,184 @@ test("Host Local API drives the design review flow from asset to verified issue"
   assert.equal(emptyAsset.status, 400);
 });
 
+test("Host Local API records deduplicated Screen States, Transitions, and paths", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-graph-");
+  const fixture = await captureFixture(validator);
+  const workspace = new MemoryDataStore({ validator });
+  const objects = await FileObjectStore.open({ workspaceRoot });
+  const runtime = new FixtureRuntimeCapturePort({
+    snapshot: fixture.snapshot,
+    objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+  });
+  const api = await startHostLocalApi({
+    host: "127.0.0.1",
+    runtime,
+    workspace,
+    objects,
+    validator,
+  });
+  t.after(() => api.close());
+
+  // Capture the Home structure, then persist a structurally different target.
+  const capture = await authorizedFetch(api, "/v1/captures", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(capture.status, 201);
+  const homeSnapshot = (await capture.json()) as Record<string, unknown> & {
+    snapshot_id: string;
+    runtime_context: { project_id: string; application_id: string };
+  };
+  const detailSnapshot = structuredClone(homeSnapshot) as unknown as Record<string, unknown> & {
+    snapshot_id: string;
+    trees: readonly {
+      payload: {
+        inline_nodes: {
+          node_id: string;
+          child_ids: string[];
+          parent_id?: string;
+        }[];
+      };
+    }[];
+  };
+  detailSnapshot["snapshot_id"] = "snapshot_019f0000-0000-7000-8000-00000000d0d0";
+  delete detailSnapshot["screenshot"];
+  const detailTree = detailSnapshot.trees[0];
+  assert.ok(detailTree !== undefined);
+  const detailRoot = detailTree.payload.inline_nodes[0];
+  assert.ok(detailRoot !== undefined);
+  const addedNodeId = "node_019f0000-0000-7000-8000-00000000fff0";
+  detailRoot.child_ids = [...detailRoot.child_ids, addedNodeId];
+  detailTree.payload.inline_nodes.push({
+    node_id: addedNodeId,
+    parent_id: detailRoot.node_id,
+    child_ids: [],
+    stable_id: "demo.detail.banner",
+    native_type: "UILabel",
+    role: "text",
+    content: {},
+    state: { visible: true, enabled: true },
+    actions: [],
+    capture_limitations: [],
+    related_nodes: [],
+    extensions: {},
+  } as never);
+  {
+    const unit = workspace.beginUnitOfWork("write");
+    unit.snapshots.put(detailSnapshot as never);
+    unit.commit();
+  }
+
+  const observed = await authorizedFetch(api, "/v1/screen-graph/state-observations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      snapshot_id: homeSnapshot.snapshot_id,
+      title: "Home",
+      entry: true,
+    }),
+  });
+  assert.equal(observed.status, 201);
+  const observedBody = (await observed.json()) as {
+    created: boolean;
+    graph_revision: number;
+    screen_graph_id: string;
+    screen_state: { screen_state_id: string; revision: number };
+  };
+  assert.equal(observedBody.created, true);
+  assert.equal(observedBody.graph_revision, 1);
+
+  const repeated = await authorizedFetch(api, "/v1/screen-graph/state-observations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ snapshot_id: homeSnapshot.snapshot_id }),
+  });
+  assert.equal(repeated.status, 201);
+  const repeatedBody = (await repeated.json()) as {
+    created: boolean;
+    screen_state: { screen_state_id: string; revision: number };
+  };
+  assert.equal(repeatedBody.created, false);
+  assert.equal(
+    repeatedBody.screen_state.screen_state_id,
+    observedBody.screen_state.screen_state_id,
+  );
+  assert.equal(repeatedBody.screen_state.revision, 2);
+
+  const transition = await authorizedFetch(api, "/v1/screen-graph/transition-observations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      before_snapshot_id: homeSnapshot.snapshot_id,
+      after_snapshot_id: detailSnapshot.snapshot_id,
+      action: {
+        kind: "tap",
+        requested_effect: "Open the detail screen",
+        target: { stable_id: "demo.home.open_catalog" },
+      },
+    }),
+  });
+  assert.equal(transition.status, 201);
+  const transitionBody = (await transition.json()) as {
+    created: boolean;
+    source_state_id: string;
+    target_state_id: string;
+    transition: { transition_id: string; occurrence_count: number };
+  };
+  assert.equal(transitionBody.created, true);
+  assert.equal(transitionBody.source_state_id, observedBody.screen_state.screen_state_id);
+  assert.equal(transitionBody.transition.occurrence_count, 1);
+
+  const graphResponse = await authorizedFetch(
+    api,
+    `/v1/screen-graph?project_id=${encodeURIComponent(homeSnapshot.runtime_context.project_id)}` +
+      `&application_id=${encodeURIComponent(homeSnapshot.runtime_context.application_id)}`,
+  );
+  assert.equal(graphResponse.status, 200);
+  const graph = (await graphResponse.json()) as {
+    screen_graph_id: string;
+    states: readonly unknown[];
+    transitions: readonly unknown[];
+    observations: readonly unknown[];
+  };
+  assert.equal(graph.screen_graph_id, observedBody.screen_graph_id);
+  assert.equal(graph.states.length, 2);
+  assert.equal(graph.transitions.length, 1);
+  // Two direct state observations, plus the transition resolving both
+  // endpoint states (two more state observations) and its own evidence.
+  assert.equal(graph.observations.length, 5);
+
+  const stateResponse = await authorizedFetch(
+    api,
+    `/v1/screen-states/${encodeURIComponent(transitionBody.target_state_id)}`,
+  );
+  assert.equal(stateResponse.status, 200);
+
+  const pathResponse = await authorizedFetch(
+    api,
+    `/v1/screen-graph/paths?source_state_id=${encodeURIComponent(transitionBody.source_state_id)}` +
+      `&target_state_id=${encodeURIComponent(transitionBody.target_state_id)}`,
+  );
+  assert.equal(pathResponse.status, 200);
+  const paths = (await pathResponse.json()) as {
+    paths: readonly { state_ids: readonly string[] }[];
+  };
+  assert.equal(paths.paths.length, 1);
+  assert.deepEqual(paths.paths[0]?.state_ids, [
+    transitionBody.source_state_id,
+    transitionBody.target_state_id,
+  ]);
+
+  const missingSnapshot = await authorizedFetch(api, "/v1/screen-graph/state-observations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ snapshot_id: "snapshot_019f0000-0000-7000-8000-00000000dead" }),
+  });
+  assert.equal(missingSnapshot.status, 400);
+});
+
 test("Host Local API reopens production LocalDataWorkspace without persisting its token", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-production-");

@@ -32,6 +32,7 @@ import {
   TuningEngine,
   type RuntimeTuningPort,
 } from "../../engine/design/index.js";
+import { ScreenGraphEngine } from "../../engine/exploration/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -150,6 +151,7 @@ export async function startHostLocalApi(
   const getEventTimeline = new GetEventTimelineQuery(options.workspace);
   const design = new DesignReviewEngine(options);
   const tuning = new TuningEngine(options);
+  const graph = new ScreenGraphEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -168,6 +170,7 @@ export async function startHostLocalApi(
         getEventTimeline,
         design,
         tuning,
+        graph,
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -231,6 +234,7 @@ interface RequestHandlerContext {
   readonly getEventTimeline: GetEventTimelineQuery;
   readonly design: DesignReviewEngine;
   readonly tuning: TuningEngine;
+  readonly graph: ScreenGraphEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -581,6 +585,98 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     return;
   }
 
+  if (pathname === "/v1/screen-graph/state-observations") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["snapshot_id", "title", "state_kind", "entry", "capture_source", "session_id"],
+      ["snapshot_id"],
+    );
+    const result = context.graph.recordStateObservation(
+      command as unknown as Parameters<ScreenGraphEngine["recordStateObservation"]>[0],
+    );
+    writeJson(response, 201, result as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph/transition-observations") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["before_snapshot_id", "after_snapshot_id", "action", "capture_source", "session_id"],
+      ["before_snapshot_id", "after_snapshot_id", "action"],
+    );
+    const result = context.graph.recordTransitionObservation(
+      command as unknown as Parameters<ScreenGraphEngine["recordTransitionObservation"]>[0],
+    );
+    writeJson(response, 201, result as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph") {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const values = readSingleValueParameters(url, ["project_id", "application_id"]);
+    const projectId = values["project_id"];
+    const applicationId = values["application_id"];
+    if (projectId === undefined || applicationId === undefined) {
+      throw invalidArgument("project_id and application_id are required.");
+    }
+    writeJson(
+      response,
+      200,
+      context.graph.getGraph({
+        project_id: projectId,
+        application_id: applicationId,
+      }) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph/paths") {
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const values = readSingleValueParameters(url, [
+      "source_state_id",
+      "target_state_id",
+      "graph_id",
+      "maximum_depth",
+    ]);
+    const sourceStateId = values["source_state_id"];
+    const targetStateId = values["target_state_id"];
+    if (sourceStateId === undefined || targetStateId === undefined) {
+      throw invalidArgument("source_state_id and target_state_id are required.");
+    }
+    const graphId = values["graph_id"];
+    const depthValue = values["maximum_depth"];
+    const maximumDepth = depthValue === undefined ? undefined : Number(depthValue);
+    if (maximumDepth !== undefined && !Number.isSafeInteger(maximumDepth)) {
+      throw invalidArgument("maximum_depth must be a safe integer.");
+    }
+    const paths = context.graph.findPath({
+      source_state_id: sourceStateId,
+      target_state_id: targetStateId,
+      ...(graphId === undefined ? {} : { graph_id: graphId }),
+      ...(maximumDepth === undefined ? {} : { maximum_depth: maximumDepth }),
+    });
+    writeJson(response, 200, { paths } as unknown as JsonObject);
+    return;
+  }
+
+  const screenStateMatch = /^\/v1\/screen-states\/([^/]+)$/.exec(pathname);
+  if (screenStateMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const stateId = decodeResourceSegment(screenStateMatch[1] as string, "screen state ID");
+    writeJson(response, 200, context.graph.getState(stateId) as unknown as JsonObject);
+    return;
+  }
+
   const objectMatch = /^\/v1\/objects\/([^/]+)$/.exec(pathname);
   if (objectMatch !== null) {
     assertMethod(request, "GET");
@@ -765,6 +861,25 @@ async function storeDesignAsset(
     throw invalidArgument("The design asset body must not be empty.");
   }
   return object;
+}
+
+function readSingleValueParameters(
+  url: URL,
+  allowedKeys: readonly string[],
+): Readonly<Record<string, string>> {
+  const allowed = new Set(allowedKeys);
+  const values: Record<string, string> = {};
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) {
+      throw invalidArgument(`Unsupported query parameter: ${key}.`);
+    }
+    const all = url.searchParams.getAll(key);
+    if (all.length !== 1) {
+      throw invalidArgument(`The ${key} query parameter may appear only once.`);
+    }
+    values[key] = all[0] as string;
+  }
+  return values;
 }
 
 function parseEventTimelineQuery(url: URL): EventTimelineQuery | undefined {

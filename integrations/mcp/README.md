@@ -10,6 +10,28 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_capture_snapshot` | `CaptureSnapshot` | Capture and persist a canonical Runtime Snapshot |
 | `vistrea_list_snapshots` | `ListSnapshots` | Page persisted Snapshot summaries |
 | `vistrea_get_snapshot` | `GetSnapshot` | Load a canonical Runtime Snapshot |
+| `vistrea_get_event_timeline` | `GetEventTimeline` | Read the persisted Runtime event timeline with gap evidence |
+| `vistrea_upload_design_asset` | `AddDesignAsset` | Store one design asset in the content-addressed Object Store |
+| `vistrea_add_design_reference` | `AddDesignReference` | Register a design baseline over a stored asset |
+| `vistrea_get_design_reference` | `GetDesignReference` | Load one design reference |
+| `vistrea_map_design_region` | `MapDesignRegion` | Map a design region onto a Runtime node target |
+| `vistrea_run_design_comparison` | `RunDesignComparison` | Compare confirmed mappings against a persisted Snapshot |
+| `vistrea_get_design_comparison` | `GetDesignComparison` | Load one persisted comparison |
+| `vistrea_create_review_issue` | `CreateReviewIssue` | Create a Review Issue |
+| `vistrea_list_review_issues` | `ListReviewIssues` | Page Review Issues by state or reference |
+| `vistrea_get_review_issue` | `GetReviewIssue` | Load one Review Issue |
+| `vistrea_transition_review_issue` | `TransitionReviewIssue` | Apply one legal Review Issue state transition |
+| `vistrea_verify_review_issue` | `VerifyReviewIssue` | Atomically record verification evidence and resolve |
+| `vistrea_create_tuning_patch` | `CreateTuningPatch` | Persist an allowlisted Tuning Patch description |
+| `vistrea_get_tuning_patch` | `GetTuningPatch` | Load one Tuning Patch |
+| `vistrea_apply_tuning_patch` | `ApplyTuningPatch` | Apply a reversible preview over the live Runtime connection |
+| `vistrea_revert_tuning_application` | `RevertTuningApplication` | Revert one active tuning preview |
+| `vistrea_get_tuning_application` | `GetTuningApplication` | Load one Tuning Application |
+| `vistrea_list_active_tuning` | `ListActiveTuning` | List active previews on the current connection |
+| `vistrea_observe_screen_state` | `RecordStateObservation` | Record a persisted Snapshot as a deduplicated Screen State observation |
+| `vistrea_observe_transition` | `RecordTransitionObservation` | Record one executed action as a deduplicated Transition |
+| `vistrea_get_screen_graph` | `GetScreenGraph` | Read the materialized Screen Graph for a project and application |
+| `vistrea_find_screen_path` | `FindScreenPath` | Find acyclic transition paths between two Screen States |
 
 Successful synchronous tools return the domain result in `structuredContent` and as JSON text. Errors set `isError: true` and return `{ request_id, trace_id, error: { code, message, retryable } }` without exposing headers, configuration, fetch URLs, or credentials.
 

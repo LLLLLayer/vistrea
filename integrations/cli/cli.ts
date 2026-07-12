@@ -79,6 +79,11 @@ export async function runVistreaCli(
           "tuning revert <tuning_application_id>",
           "tuning get-application <tuning_application_id>",
           "tuning list-active",
+          "graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <state_kind>] [--entry true|false] [--source <capture_source>] [--session <session_id>]",
+          "graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]",
+          "graph show --project <project_id> --application <application_id>",
+          "graph get-state <screen_state_id>",
+          "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>]",
         ],
         format: "json",
       });
@@ -250,7 +255,120 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "tuning" && command[1] === "list-active" && command.length === 2) {
     return invocation("ListActiveTuning", {}, timeoutMilliseconds);
   }
+  if (command[0] === "graph" && command[1] === "observe-state") {
+    return invocation(
+      "RecordStateObservation",
+      parseStateObservationOptions(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "graph" && command[1] === "observe-transition") {
+    return invocation(
+      "RecordTransitionObservation",
+      parseTransitionObservationOptions(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "graph" && command[1] === "show") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--project", "--application"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    return invocation(
+      "GetScreenGraph",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "graph" && command[1] === "get-state" && command.length === 3) {
+    return invocation(
+      "GetScreenState",
+      { screen_state_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "graph" && command[1] === "find-path") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--from", "--to", "--graph", "--max-depth"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const graphId = values.get("--graph");
+    const depth = values.get("--max-depth");
+    if (depth !== undefined && !/^[0-9]{1,4}$/.test(depth)) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "FindScreenPath",
+      {
+        source_state_id: requireOption(values, "--from"),
+        target_state_id: requireOption(values, "--to"),
+        ...(graphId === undefined ? {} : { graph_id: graphId }),
+        ...(depth === undefined ? {} : { maximum_depth: Number(depth) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
   throw invalidArguments();
+}
+
+function parseStateObservationOptions(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--snapshot", "--title", "--kind", "--entry", "--source", "--session"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  const entry = values.get("--entry");
+  if (entry !== undefined && entry !== "true" && entry !== "false") {
+    throw invalidArguments();
+  }
+  const title = values.get("--title");
+  const kind = values.get("--kind");
+  const source = values.get("--source");
+  const session = values.get("--session");
+  return {
+    snapshot_id: requireOption(values, "--snapshot"),
+    ...(title === undefined ? {} : { title }),
+    ...(kind === undefined ? {} : { state_kind: kind }),
+    ...(entry === undefined ? {} : { entry: entry === "true" }),
+    ...(source === undefined ? {} : { capture_source: source }),
+    ...(session === undefined ? {} : { session_id: session }),
+  };
+}
+
+function parseTransitionObservationOptions(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--before", "--after", "--action", "--source", "--session"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  const actionSource = requireOption(values, "--action");
+  let action: unknown;
+  try {
+    action = JSON.parse(actionSource);
+  } catch {
+    throw invalidArguments();
+  }
+  if (action === null || typeof action !== "object" || Array.isArray(action)) {
+    throw invalidArguments();
+  }
+  const source = values.get("--source");
+  const session = values.get("--session");
+  return {
+    before_snapshot_id: requireOption(values, "--before"),
+    after_snapshot_id: requireOption(values, "--after"),
+    action: action as JsonObject,
+    ...(source === undefined ? {} : { capture_source: source }),
+    ...(session === undefined ? {} : { session_id: session }),
+  };
 }
 
 function parseTuningApplyOptions(arguments_: readonly string[]): JsonObject {

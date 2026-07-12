@@ -404,6 +404,115 @@ export const VISTREA_MCP_TOOLS = [
     inputSchema: emptyInputSchema(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "vistrea_observe_screen_state",
+    title: "Observe Screen State",
+    description:
+      "Record one persisted Snapshot as a Screen State observation with deterministic structural identity and deduplication.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["snapshot_id"],
+      properties: {
+        snapshot_id: { type: "string", maxLength: 128 },
+        title: { type: "string", minLength: 1, maxLength: 512 },
+        state_kind: { type: "string", enum: ["screen", "modal", "overlay", "transient"] },
+        entry: { type: "boolean" },
+        capture_source: {
+          type: "string",
+          enum: ["sdk", "automation", "manual", "import", "validation"],
+        },
+        session_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_observe_transition",
+    title: "Observe Transition",
+    description:
+      "Record one executed action between two persisted Snapshots as a deduplicated Screen Graph Transition.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["before_snapshot_id", "after_snapshot_id", "action"],
+      properties: {
+        before_snapshot_id: { type: "string", maxLength: 128 },
+        after_snapshot_id: { type: "string", maxLength: 128 },
+        action: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "requested_effect"],
+          properties: {
+            kind: {
+              type: "string",
+              enum: [
+                "tap",
+                "long_press",
+                "type_text",
+                "clear_text",
+                "swipe",
+                "scroll",
+                "back",
+                "launch",
+                "dismiss",
+              ],
+            },
+            requested_effect: { type: "string", minLength: 1, maxLength: 1024 },
+            risk: { type: "string", enum: ["safe", "sensitive", "dangerous", "forbidden"] },
+            target: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                stable_id: { type: "string", maxLength: 256 },
+                node_id: { type: "string", maxLength: 128 },
+                tree_id: { type: "string", maxLength: 128 },
+              },
+            },
+            parameters: { type: "object" },
+          },
+        },
+        capture_source: {
+          type: "string",
+          enum: ["sdk", "automation", "manual", "import", "validation"],
+        },
+        session_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_get_screen_graph",
+    title: "Get Screen Graph",
+    description: "Read the materialized Screen Graph for one project and application.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project_id", "application_id"],
+      properties: {
+        project_id: { type: "string", maxLength: 128 },
+        application_id: { type: "string", maxLength: 256 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "vistrea_find_screen_path",
+    title: "Find Screen Path",
+    description: "Find acyclic transition paths between two known Screen States.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["source_state_id", "target_state_id"],
+      properties: {
+        source_state_id: { type: "string", maxLength: 128 },
+        target_state_id: { type: "string", maxLength: 128 },
+        graph_id: { type: "string", maxLength: 128 },
+        maximum_depth: { type: "integer", minimum: 0, maximum: 10000 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -429,6 +538,10 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_revert_tuning_application", "RevertTuningApplication"],
   ["vistrea_get_tuning_application", "GetTuningApplication"],
   ["vistrea_list_active_tuning", "ListActiveTuning"],
+  ["vistrea_observe_screen_state", "RecordStateObservation"],
+  ["vistrea_observe_transition", "RecordTransitionObservation"],
+  ["vistrea_get_screen_graph", "GetScreenGraph"],
+  ["vistrea_find_screen_path", "FindScreenPath"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

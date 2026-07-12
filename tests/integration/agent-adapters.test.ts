@@ -128,10 +128,12 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_capture_snapshot",
       "vistrea_create_review_issue",
       "vistrea_create_tuning_patch",
+      "vistrea_find_screen_path",
       "vistrea_get_design_comparison",
       "vistrea_get_design_reference",
       "vistrea_get_event_timeline",
       "vistrea_get_review_issue",
+      "vistrea_get_screen_graph",
       "vistrea_get_snapshot",
       "vistrea_get_tuning_application",
       "vistrea_get_tuning_patch",
@@ -140,6 +142,8 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_list_review_issues",
       "vistrea_list_snapshots",
       "vistrea_map_design_region",
+      "vistrea_observe_screen_state",
+      "vistrea_observe_transition",
       "vistrea_revert_tuning_application",
       "vistrea_run_design_comparison",
       "vistrea_transition_review_issue",
@@ -413,6 +417,73 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   );
   assert.equal(applyWithoutRuntime.exitCode, 7);
   assert.equal(parseCliEnvelope(applyWithoutRuntime.stdout).error?.["code"], "unavailable");
+
+  // Screen Graph: state observation dedup and graph reads round trip.
+  const observeState = await runCli(
+    [
+      "graph",
+      "observe-state",
+      "--snapshot",
+      capturedSnapshot["snapshot_id"] as string,
+      "--title",
+      "Home",
+      "--entry",
+      "true",
+    ],
+    environment,
+  );
+  assert.equal(observeState.exitCode, 0, observeState.stdout);
+  const observedState = parseCliEnvelope(observeState.stdout).data as JsonObject;
+  assert.equal(observedState["created"], true);
+  const observedScreenState = observedState["screen_state"] as JsonObject;
+
+  const mcpObserveAgain = await mcp.callTool({
+    name: "vistrea_observe_screen_state",
+    arguments: { snapshot_id: capturedSnapshot["snapshot_id"] },
+  });
+  assert.equal(mcpObserveAgain.isError, undefined);
+  const mcpObserved = mcpObserveAgain.structuredContent as JsonObject;
+  assert.equal(mcpObserved["created"], false);
+  assert.equal(
+    (mcpObserved["screen_state"] as JsonObject)["screen_state_id"],
+    observedScreenState["screen_state_id"],
+  );
+
+  const runtimeContext = capturedSnapshot["runtime_context"] as JsonObject;
+  const mcpGraph = await mcp.callTool({
+    name: "vistrea_get_screen_graph",
+    arguments: {
+      project_id: runtimeContext["project_id"],
+      application_id: runtimeContext["application_id"],
+    },
+  });
+  assert.equal(mcpGraph.isError, undefined);
+  const graphDocument = mcpGraph.structuredContent as JsonObject;
+  assert.equal((graphDocument["states"] as readonly JsonObject[]).length, 1);
+
+  const cliGraph = await runCli(
+    [
+      "graph",
+      "show",
+      "--project",
+      runtimeContext["project_id"] as string,
+      "--application",
+      runtimeContext["application_id"] as string,
+    ],
+    environment,
+  );
+  assert.equal(cliGraph.exitCode, 0, cliGraph.stdout);
+  assert.deepEqual(parseCliEnvelope(cliGraph.stdout).data, graphDocument);
+
+  const cliGraphState = await runCli(
+    ["graph", "get-state", observedScreenState["screen_state_id"] as string],
+    environment,
+  );
+  assert.equal(cliGraphState.exitCode, 0, cliGraphState.stdout);
+  assert.equal(
+    (parseCliEnvelope(cliGraphState.stdout).data as JsonObject)["revision"],
+    2,
+  );
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);

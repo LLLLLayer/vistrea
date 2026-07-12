@@ -37,6 +37,15 @@ const TUNING_PATCH_ID_PATTERN =
   /^patch_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TUNING_APPLICATION_ID_PATTERN =
   /^tuningapp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SCREEN_GRAPH_ID_PATTERN =
+  /^graph_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SCREEN_STATE_ID_PATTERN =
+  /^screenstate_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TRANSITION_ID_PATTERN =
+  /^transition_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const PROJECT_ID_PATTERN =
+  /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const APPLICATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -71,6 +80,11 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "RevertTuningApplication",
   "GetTuningApplication",
   "ListActiveTuning",
+  "RecordStateObservation",
+  "RecordTransitionObservation",
+  "GetScreenGraph",
+  "GetScreenState",
+  "FindScreenPath",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -617,6 +631,133 @@ export class HostLocalApiClient {
         }
         return page;
       }
+      case "RecordStateObservation": {
+        const command = assertExactObject(
+          input,
+          ["snapshot_id", "title", "state_kind", "entry", "capture_source", "session_id"],
+          "State observation input",
+          true,
+        );
+        const snapshotId = command["snapshot_id"];
+        if (typeof snapshotId !== "string" || !SNAPSHOT_ID_PATTERN.test(snapshotId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/state-observations",
+          command,
+          201,
+          options,
+        );
+        return validateStateObservationResult(value);
+      }
+      case "RecordTransitionObservation": {
+        const command = assertExactObject(
+          input,
+          ["before_snapshot_id", "after_snapshot_id", "action", "capture_source", "session_id"],
+          "Transition observation input",
+          true,
+        );
+        for (const key of ["before_snapshot_id", "after_snapshot_id"]) {
+          const snapshotId = command[key];
+          if (typeof snapshotId !== "string" || !SNAPSHOT_ID_PATTERN.test(snapshotId)) {
+            throw invalidInput();
+          }
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/transition-observations",
+          command,
+          201,
+          options,
+        );
+        return validateTransitionObservationResult(value);
+      }
+      case "GetScreenGraph": {
+        const query = assertExactObject(
+          input,
+          ["project_id", "application_id"],
+          "Screen graph lookup",
+        );
+        const projectId = query["project_id"];
+        const applicationId = query["application_id"];
+        if (
+          typeof projectId !== "string" ||
+          !PROJECT_ID_PATTERN.test(projectId) ||
+          typeof applicationId !== "string" ||
+          !APPLICATION_ID_PATTERN.test(applicationId)
+        ) {
+          throw invalidInput();
+        }
+        const parameters = new URLSearchParams();
+        parameters.set("project_id", projectId);
+        parameters.set("application_id", applicationId);
+        const value = await this.#request(
+          "GET",
+          `/v1/screen-graph?${parameters.toString()}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "screen_graph_id", SCREEN_GRAPH_ID_PATTERN);
+      }
+      case "GetScreenState": {
+        const query = assertExactObject(input, ["screen_state_id"], "Screen state lookup");
+        const stateId = query["screen_state_id"];
+        if (typeof stateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(stateId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/screen-states/${encodeURIComponent(stateId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "screen_state_id", SCREEN_STATE_ID_PATTERN);
+      }
+      case "FindScreenPath": {
+        const query = assertExactObject(
+          input,
+          ["source_state_id", "target_state_id", "graph_id", "maximum_depth"],
+          "Screen path query",
+          true,
+        );
+        for (const key of ["source_state_id", "target_state_id"]) {
+          const stateId = query[key];
+          if (typeof stateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(stateId)) {
+            throw invalidInput();
+          }
+        }
+        const graphId = query["graph_id"];
+        if (
+          graphId !== undefined &&
+          (typeof graphId !== "string" || !SCREEN_GRAPH_ID_PATTERN.test(graphId))
+        ) {
+          throw invalidInput();
+        }
+        const depth = query["maximum_depth"];
+        if (depth !== undefined && (!Number.isSafeInteger(depth) || (depth as number) < 0)) {
+          throw invalidInput();
+        }
+        const parameters = new URLSearchParams();
+        parameters.set("source_state_id", query["source_state_id"] as string);
+        parameters.set("target_state_id", query["target_state_id"] as string);
+        if (graphId !== undefined) {
+          parameters.set("graph_id", graphId as string);
+        }
+        if (depth !== undefined) {
+          parameters.set("maximum_depth", String(depth));
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/screen-graph/paths?${parameters.toString()}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateScreenPathResult(value);
+      }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
         const parameters = new URLSearchParams();
@@ -1126,6 +1267,90 @@ function validateIdentifiedResource(
     throw invalidHostResult();
   }
   return resource;
+}
+
+function validateStateObservationResult(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, [
+    "screen_graph_id",
+    "graph_revision",
+    "screen_state",
+    "observation_id",
+    "created",
+  ]);
+  if (
+    typeof result["screen_graph_id"] !== "string" ||
+    !SCREEN_GRAPH_ID_PATTERN.test(result["screen_graph_id"]) ||
+    typeof result["created"] !== "boolean" ||
+    !Number.isSafeInteger(result["graph_revision"])
+  ) {
+    throw invalidHostResult();
+  }
+  validateIdentifiedResource(
+    result["screen_state"] as JsonValue,
+    "screen_state_id",
+    SCREEN_STATE_ID_PATTERN,
+  );
+  return result;
+}
+
+function validateTransitionObservationResult(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, [
+    "screen_graph_id",
+    "graph_revision",
+    "transition",
+    "action_id",
+    "source_state_id",
+    "target_state_id",
+    "observation_id",
+    "created",
+  ]);
+  if (
+    typeof result["screen_graph_id"] !== "string" ||
+    !SCREEN_GRAPH_ID_PATTERN.test(result["screen_graph_id"]) ||
+    typeof result["created"] !== "boolean" ||
+    typeof result["source_state_id"] !== "string" ||
+    !SCREEN_STATE_ID_PATTERN.test(result["source_state_id"]) ||
+    typeof result["target_state_id"] !== "string" ||
+    !SCREEN_STATE_ID_PATTERN.test(result["target_state_id"])
+  ) {
+    throw invalidHostResult();
+  }
+  validateIdentifiedResource(
+    result["transition"] as JsonValue,
+    "transition_id",
+    TRANSITION_ID_PATTERN,
+  );
+  return result;
+}
+
+function validateScreenPathResult(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["paths"]);
+  const paths = result["paths"];
+  if (!Array.isArray(paths) || paths.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const pathValue of paths) {
+    const path = requireObject(pathValue as JsonValue);
+    assertKeys(path, ["state_ids", "transition_ids"]);
+    const stateIds = path["state_ids"];
+    const transitionIds = path["transition_ids"];
+    if (
+      !Array.isArray(stateIds) ||
+      !Array.isArray(transitionIds) ||
+      !stateIds.every(
+        (id) => typeof id === "string" && SCREEN_STATE_ID_PATTERN.test(id),
+      ) ||
+      !transitionIds.every(
+        (id) => typeof id === "string" && TRANSITION_ID_PATTERN.test(id),
+      )
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return result;
 }
 
 function validateReviewIssuePage(value: JsonValue): JsonObject {
