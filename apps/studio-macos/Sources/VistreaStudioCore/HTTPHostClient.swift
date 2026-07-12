@@ -1,0 +1,361 @@
+import CryptoKit
+import Foundation
+import VistreaRuntimeModels
+
+public struct HostHTTPResponse: Sendable {
+    public let statusCode: Int
+    public let headers: [String: String]
+    public let body: Data
+
+    public init(statusCode: Int, headers: [String: String] = [:], body: Data) {
+        self.statusCode = statusCode
+        self.headers = headers.reduce(into: [:]) { result, item in
+            result[item.key.lowercased()] = item.value
+        }
+        self.body = body
+    }
+
+    func header(_ name: String) -> String? {
+        headers[name.lowercased()]
+    }
+}
+
+public protocol HostHTTPTransport: Sendable {
+    func execute(_ request: URLRequest, maximumResponseBytes: Int) async throws -> HostHTTPResponse
+}
+
+public final class URLSessionHostHTTPTransport: HostHTTPTransport, @unchecked Sendable {
+    private let session: URLSession
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    public func execute(_ request: URLRequest, maximumResponseBytes: Int) async throws -> HostHTTPResponse {
+        guard maximumResponseBytes >= 0 else {
+            throw HostClientError.invalidConfiguration("The response byte limit must be non-negative.")
+        }
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let response = response as? HTTPURLResponse else {
+                throw HostClientError.invalidResponse
+            }
+            let effectiveLimit = (200..<300).contains(response.statusCode)
+                ? maximumResponseBytes
+                : min(maximumResponseBytes, HTTPHostClient.maximumJSONResponseBytes)
+            if response.expectedContentLength > Int64(effectiveLimit) {
+                throw HostClientError.responseTooLarge(limit: effectiveLimit)
+            }
+
+            var data = Data()
+            if response.expectedContentLength > 0 {
+                data.reserveCapacity(min(effectiveLimit, Int(response.expectedContentLength)))
+            }
+            for try await byte in bytes {
+                guard data.count < effectiveLimit else {
+                    throw HostClientError.responseTooLarge(limit: effectiveLimit)
+                }
+                data.append(byte)
+            }
+            let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, item in
+                result[String(describing: item.key).lowercased()] = String(describing: item.value)
+            }
+            return HostHTTPResponse(statusCode: response.statusCode, headers: headers, body: data)
+        } catch let error as HostClientError {
+            throw error
+        } catch {
+            throw HostClientError.transport(error.localizedDescription)
+        }
+    }
+}
+
+public struct HTTPHostClient: HostClient, Sendable {
+    static let maximumJSONResponseBytes = 64 * 1_024 * 1_024
+    static let maximumObjectResponseBytes = 256 * 1_024 * 1_024
+
+    private let baseURL: URL
+    private let bearerToken: String
+    private let transport: any HostHTTPTransport
+
+    public init(
+        baseURL: URL,
+        bearerToken: String,
+        transport: any HostHTTPTransport = URLSessionHostHTTPTransport()
+    ) throws {
+        let components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        guard components?.scheme == "http",
+              let encodedHost = components?.percentEncodedHost,
+              ["127.0.0.1", "[::1]"].contains(encodedHost),
+              let host = baseURL.host?.lowercased(),
+              ["127.0.0.1", "::1"].contains(host),
+              baseURL.user == nil,
+              baseURL.password == nil,
+              baseURL.query == nil,
+              baseURL.fragment == nil,
+              baseURL.path.isEmpty || baseURL.path == "/"
+        else {
+            throw HostClientError.invalidConfiguration(
+                "The Host base URL must use literal http://127.0.0.1 or http://[::1] without credentials, path, query, or fragment."
+            )
+        }
+        guard Self.isHostBearerToken(bearerToken) else {
+            throw HostClientError.invalidConfiguration(
+                "The Host bearer token must be the 43-character base64url token generated for this server start."
+            )
+        }
+
+        self.baseURL = baseURL
+        self.bearerToken = bearerToken
+        self.transport = transport
+    }
+
+    public func getStatus() async throws -> HostStatus {
+        try await requestJSON(HostStatus.self, method: "GET", path: ["v1", "status"])
+    }
+
+    public func listSnapshots() async throws -> SnapshotPage {
+        try await requestJSON(SnapshotPage.self, method: "GET", path: ["v1", "snapshots"])
+    }
+
+    public func getSnapshot(id: String) async throws -> RuntimeSnapshot {
+        guard (try? SnapshotID(validating: id)) != nil else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        let response = try await request(method: "GET", path: ["v1", "snapshots", id])
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            let snapshot = try RuntimeSnapshotCodec.decode(response.body)
+            guard snapshot.snapshotID.rawValue == id else {
+                throw HostClientError.decoding(
+                    "GET /v1/snapshots/:id returned \(snapshot.snapshotID.rawValue) for requested Snapshot \(id)."
+                )
+            }
+            return snapshot
+        } catch let error as HostClientError {
+            throw error
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
+    public func getObject(hash: String, range: ObjectByteRange? = nil) async throws -> Data {
+        guard Self.isCanonicalSHA256Reference(hash) else {
+            throw HostClientError.invalidIdentifier(hash)
+        }
+        var headers: [String: String] = [:]
+        if let range {
+            headers["Range"] = range.headerValue
+        }
+        let response = try await request(
+            method: "GET",
+            path: ["v1", "objects", hash],
+            headers: headers,
+            accept: "*/*",
+            maximumResponseBytes: Self.maximumObjectResponseBytes
+        )
+        try requireStatus(response, expected: [range == nil ? 200 : 206])
+        if let range {
+            try validateRangeObjectResponse(response, hash: hash, requestedRange: range)
+        } else {
+            try validateFullObjectResponse(response, hash: hash)
+        }
+        return response.body
+    }
+
+    public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(requestValue)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+        let response = try await request(
+            method: "POST",
+            path: ["v1", "captures"],
+            headers: ["Content-Type": "application/json"],
+            body: body
+        )
+        try requireStatus(response, expected: [201])
+        try requireJSONSize(response.body)
+        do {
+            return try RuntimeSnapshotCodec.decode(response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
+    private func requestJSON<Value: Decodable>(
+        _ type: Value.Type,
+        method: String,
+        path: [String]
+    ) async throws -> Value {
+        let response = try await request(method: method, path: path)
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(type, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
+    private func request(
+        method: String,
+        path: [String],
+        headers: [String: String] = [:],
+        body: Data? = nil,
+        accept: String = "application/json",
+        maximumResponseBytes: Int = Self.maximumJSONResponseBytes
+    ) async throws -> HostHTTPResponse {
+        var url = baseURL
+        for component in path {
+            url.append(path: component)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(accept, forHTTPHeaderField: "Accept")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let response = try await transport.execute(request, maximumResponseBytes: maximumResponseBytes)
+        let effectiveLimit = (200..<300).contains(response.statusCode)
+            ? maximumResponseBytes
+            : min(maximumResponseBytes, Self.maximumJSONResponseBytes)
+        guard response.body.count <= effectiveLimit else {
+            throw HostClientError.responseTooLarge(limit: effectiveLimit)
+        }
+        return response
+    }
+
+    private func requireStatus(_ response: HostHTTPResponse, expected: Set<Int>) throws {
+        guard expected.contains(response.statusCode) else {
+            if let envelope = try? JSONDecoder().decode(HostErrorEnvelope.self, from: response.body) {
+                throw HostClientError.server(
+                    statusCode: response.statusCode,
+                    requestID: envelope.requestID,
+                    code: envelope.error.code,
+                    message: envelope.error.message,
+                    retryable: envelope.error.retryable
+                )
+            }
+            throw HostClientError.server(
+                statusCode: response.statusCode,
+                requestID: nil,
+                code: "host.unexpected_status",
+                message: "The Host returned HTTP \(response.statusCode); expected \(expected.sorted().map(String.init).joined(separator: " or ")).",
+                retryable: response.statusCode >= 500
+            )
+        }
+    }
+
+    private func requireJSONSize(_ data: Data) throws {
+        guard data.count <= Self.maximumJSONResponseBytes else {
+            throw HostClientError.responseTooLarge(limit: Self.maximumJSONResponseBytes)
+        }
+    }
+
+    private static func isCanonicalSHA256Reference(_ value: String) -> Bool {
+        guard value.hasPrefix("sha256:") else {
+            return false
+        }
+        let digest = value.dropFirst("sha256:".count).utf8
+        return digest.count == 64 && digest.allSatisfy { byte in
+            (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+        }
+    }
+
+    private static func isHostBearerToken(_ value: String) -> Bool {
+        let bytes = value.utf8
+        return bytes.count == 43 && bytes.allSatisfy { byte in
+            (0x41...0x5A).contains(byte)
+                || (0x61...0x7A).contains(byte)
+                || (0x30...0x39).contains(byte)
+                || byte == 0x2D
+                || byte == 0x5F
+        }
+    }
+
+    private func validateFullObjectResponse(_ response: HostHTTPResponse, hash: String) throws {
+        try validateETag(response, hash: hash)
+        try validateContentLength(response)
+        let digest = SHA256.hash(data: response.body)
+        let actual = "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
+        guard actual == hash else {
+            throw HostClientError.integrity("SHA-256 was \(actual), expected \(hash).")
+        }
+    }
+
+    private func validateRangeObjectResponse(
+        _ response: HostHTTPResponse,
+        hash: String,
+        requestedRange: ObjectByteRange
+    ) throws {
+        try validateETag(response, hash: hash)
+        try validateContentLength(response)
+        guard let header = response.header("content-range"),
+              let parsed = Self.parseCanonicalContentRange(header)
+        else {
+            throw HostClientError.integrity("The Range response is missing a canonical Content-Range header.")
+        }
+        guard parsed.start == requestedRange.lowerBound, parsed.total > 0 else {
+            throw HostClientError.integrity("Content-Range does not begin at the requested byte.")
+        }
+        let requestedEnd = requestedRange.upperBound.map { min($0, parsed.total - 1) }
+            ?? (parsed.total - 1)
+        guard parsed.end == requestedEnd else {
+            throw HostClientError.integrity("Content-Range does not end at the expected byte.")
+        }
+        let expectedLength = parsed.end - parsed.start + 1
+        guard expectedLength == UInt64(response.body.count) else {
+            throw HostClientError.integrity("Content-Range length does not match the response body.")
+        }
+    }
+
+    private func validateETag(_ response: HostHTTPResponse, hash: String) throws {
+        guard response.header("etag") == "\"\(hash)\"" else {
+            throw HostClientError.integrity("ETag is missing or does not identify the requested Object.")
+        }
+    }
+
+    private func validateContentLength(_ response: HostHTTPResponse) throws {
+        guard let value = response.header("content-length"),
+              let length = Self.parseCanonicalUInt(value),
+              length == UInt64(response.body.count)
+        else {
+            throw HostClientError.integrity("Content-Length is missing, non-canonical, or does not match the response body.")
+        }
+    }
+
+    private static func parseCanonicalContentRange(
+        _ value: String
+    ) -> (start: UInt64, end: UInt64, total: UInt64)? {
+        guard value.hasPrefix("bytes ") else { return nil }
+        let components = value.dropFirst("bytes ".count).split(separator: "/", omittingEmptySubsequences: false)
+        guard components.count == 2,
+              let total = parseCanonicalUInt(String(components[1])),
+              total > 0
+        else { return nil }
+        let bounds = components[0].split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2,
+              let start = parseCanonicalUInt(String(bounds[0])),
+              let end = parseCanonicalUInt(String(bounds[1])),
+              start <= end,
+              end < total,
+              value == "bytes \(start)-\(end)/\(total)"
+        else { return nil }
+        return (start, end, total)
+    }
+
+    private static func parseCanonicalUInt(_ value: String) -> UInt64? {
+        guard !value.isEmpty,
+              value.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+              let parsed = UInt64(value),
+              value == String(parsed)
+        else { return nil }
+        return parsed
+    }
+}
