@@ -25,3 +25,8 @@ export {
   AdbAutomationProvider,
   type AdbAutomationProviderOptions,
 } from "./adb-provider.js";
+export {
+  WdaAutomationProvider,
+  WdaRequestError,
+  type WdaAutomationProviderOptions,
+} from "./wda-provider.js";
