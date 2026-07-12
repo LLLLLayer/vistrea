@@ -774,6 +774,115 @@ test("Host Local API records deduplicated Screen States, Transitions, and paths"
   assert.equal(missingSnapshot.status, 400);
 });
 
+test("Host Local API moves a portable pack between two Workspaces", async (t) => {
+  const validator = await validatorPromise;
+  const fixture = await captureFixture(validator);
+  const actor = { kind: "agent", id: "vistrea-pack-test", extensions: {} };
+  const refName = "teams/exchange/main";
+
+  const makeHost = async (
+    label: string,
+  ): Promise<{ api: HostLocalApiHandle; workspace: MemoryDataStore; objects: FileObjectStore }> => {
+    const workspaceRoot = await temporaryWorkspace(t, `vistrea-host-api-pack-${label}-`);
+    const workspace = new MemoryDataStore({ validator });
+    const objects = await FileObjectStore.open({ workspaceRoot });
+    const api = await startHostLocalApi({
+      host: "127.0.0.1",
+      runtime: new FixtureRuntimeCapturePort({
+        snapshot: fixture.snapshot,
+        objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+      }),
+      workspace,
+      objects,
+      validator,
+    });
+    t.after(() => api.close());
+    return { api, workspace, objects };
+  };
+
+  const source = await makeHost("source");
+  const graphBytes = Buffer.from('{"screens":["demo.home"]}', "utf8");
+  const graphObject = await source.objects.put(
+    (async function* () {
+      yield graphBytes;
+    })(),
+    { media_type: "application/json", compression: "none", logical_name: "graph-v1.json" },
+  );
+  source.workspace.registerVerifiedObjects([graphObject]);
+  {
+    const unit = source.workspace.beginUnitOfWork("write");
+    const commit = unit.versions.createCommit({
+      protocol_version: { major: 1, minor: 0 },
+      parents: [],
+      created_at: "2026-07-12T05:00:00.000Z",
+      author: actor,
+      message: "Record the exchange graph.",
+      roots: { runtime_graph: graphObject },
+      object_hashes: [graphObject.hash],
+      extensions: {},
+    } as never);
+    unit.versions.updateRef(refName, commit.commit_id, {
+      mode: "must_not_exist",
+    } as never);
+    unit.commit();
+  }
+
+  const exportResponse = await authorizedFetch(source.api, "/v1/exchange/exports", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ref_names: [refName],
+      created_by: actor,
+      message: "Portable exchange over the Host API.",
+    }),
+  });
+  assert.equal(exportResponse.status, 201);
+  const pack = (await exportResponse.json()) as { hash: string; media_type: string };
+  assert.equal(pack.media_type, "application/vnd.vistrea-pack");
+
+  const packDownload = await authorizedFetch(
+    source.api,
+    `/v1/objects/${encodeURIComponent(pack.hash)}`,
+  );
+  assert.equal(packDownload.status, 200);
+  const packBytes = Buffer.from(await packDownload.arrayBuffer());
+  assert.ok(packBytes.byteLength > 0);
+
+  const target = await makeHost("target");
+  const importResponse = await authorizedFetch(target.api, "/v1/exchange/imports", {
+    method: "POST",
+    headers: { "content-type": "application/vnd.vistrea-pack" },
+    body: packBytes,
+  });
+  assert.equal(importResponse.status, 201);
+  const result = (await importResponse.json()) as {
+    mode: string;
+    imported_commit_ids: readonly string[];
+    imported_object_hashes: readonly string[];
+    created_refs: readonly { name: string }[];
+    conflicting_refs: readonly unknown[];
+  };
+  assert.equal(result.mode, "full");
+  assert.equal(result.imported_commit_ids.length, 1);
+  assert.equal(result.created_refs[0]?.name, refName);
+  assert.deepEqual(result.conflicting_refs, []);
+
+  // The transferred graph object is byte-identical in the target Workspace.
+  const transferred = await authorizedFetch(
+    target.api,
+    `/v1/objects/${encodeURIComponent(graphObject.hash)}`,
+  );
+  assert.equal(transferred.status, 200);
+  assert.deepEqual(Buffer.from(await transferred.arrayBuffer()), graphBytes);
+
+  const wrongMediaType = await authorizedFetch(target.api, "/v1/exchange/imports", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: packBytes,
+  });
+  assert.equal(wrongMediaType.status, 400);
+});
+
 test("Host Local API reopens production LocalDataWorkspace without persisting its token", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-production-");

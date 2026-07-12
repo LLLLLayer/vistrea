@@ -839,6 +839,41 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "vistrea_export_pack",
+    title: "Export Pack",
+    description:
+      "Export refs and commits as a portable content-addressed .vistrea-pack Object; download its bytes through the objects route.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["created_by"],
+      properties: {
+        ref_names: { type: "array", maxItems: 64, items: { type: "string", maxLength: 256 } },
+        commit_ids: { type: "array", maxItems: 64, items: { type: "string", maxLength: 128 } },
+        prerequisite_commit_ids: {
+          type: "array",
+          maxItems: 64,
+          items: { type: "string", maxLength: 128 },
+        },
+        created_by: { type: "object" },
+        message: { type: "string", minLength: 1, maxLength: 2048 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
+    name: "vistrea_import_pack",
+    title: "Import Pack",
+    description: "Import a base64-encoded .vistrea-pack into the local Workspace.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pack_base64"],
+      properties: { pack_base64: { type: "string", minLength: 1, maxLength: 8388608 } },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -884,6 +919,8 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_suppress_validation_finding", "SuppressValidationFinding"],
   ["vistrea_compare_builds", "CompareBuilds"],
   ["vistrea_get_build_diff", "GetBuildDiff"],
+  ["vistrea_export_pack", "ExportPack"],
+  ["vistrea_import_pack", "ImportPack"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {

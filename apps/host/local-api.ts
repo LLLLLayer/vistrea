@@ -35,6 +35,7 @@ import {
 import { ScreenGraphEngine } from "../../engine/exploration/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
+import { PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -157,6 +158,11 @@ export async function startHostLocalApi(
   const knowledge = new KnowledgeEngine(options);
   const validation = new ValidationEngine(options);
   const buildDiffs = new BuildDiffEngine(options);
+  const exchange = new PackExchangeService({
+    data: options.workspace,
+    objects: options.objects,
+    validator: options.validator,
+  });
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -179,6 +185,7 @@ export async function startHostLocalApi(
         knowledge,
         validation,
         buildDiffs,
+        exchange,
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
@@ -246,6 +253,7 @@ interface RequestHandlerContext {
   readonly knowledge: KnowledgeEngine;
   readonly validation: ValidationEngine;
   readonly buildDiffs: BuildDiffEngine;
+  readonly exchange: PackExchangeService;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
@@ -953,6 +961,54 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       "validation finding ID",
     );
     writeJson(response, 200, context.validation.getFinding(findingId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/exchange/exports") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["ref_names", "commit_ids", "prerequisite_commit_ids", "created_by", "message"],
+      ["created_by"],
+    );
+    const pack = await context.exchange.exportPack(
+      command as unknown as Parameters<PackExchangeService["exportPack"]>[0],
+    );
+    context.workspace.registerVerifiedObjects([pack]);
+    writeJson(response, 201, pack as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/exchange/imports") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const contentType = request.headers["content-type"];
+    if (contentType !== PACK_MEDIA_TYPE) {
+      throw invalidArgument(`Pack imports require the ${PACK_MEDIA_TYPE} media type.`);
+    }
+    const stream = (async function* () {
+      let received = 0;
+      for await (const chunk of request) {
+        const bytes = chunk as Buffer;
+        received += bytes.byteLength;
+        if (received > MAXIMUM_DESIGN_ASSET_BYTES) {
+          throw new DataError("resource_exhausted", "The pack exceeds the upload limit.");
+        }
+        yield bytes;
+      }
+    })();
+    const pack = await context.objects.put(stream, {
+      media_type: PACK_MEDIA_TYPE,
+      compression: "none",
+    });
+    if (pack.byte_size === 0) {
+      throw invalidArgument("An empty pack upload is not a valid container.");
+    }
+    context.workspace.registerVerifiedObjects([pack]);
+    const result = await context.exchange.importPack({ pack });
+    writeJson(response, 201, result as unknown as JsonObject);
     return;
   }
 

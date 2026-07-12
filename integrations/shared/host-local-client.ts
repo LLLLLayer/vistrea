@@ -59,6 +59,10 @@ const BUILD_DIFF_ID_PATTERN =
   /^builddiff_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const BUILD_ID_PATTERN =
   /^build_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const COMMIT_ID_PATTERN = /^commit:sha256:[0-9a-f]{64}$/;
+const REF_NAME_PATTERN =
+  /^(?:users|teams|builds|baselines|releases)\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/;
+const PACK_MEDIA_TYPE = "application/vnd.vistrea-pack";
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
 const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
@@ -114,6 +118,8 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "SuppressValidationFinding",
   "CompareBuilds",
   "GetBuildDiff",
+  "ExportPack",
+  "ImportPack",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -1170,6 +1176,96 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "build_diff_id", BUILD_DIFF_ID_PATTERN);
+      }
+      case "ExportPack": {
+        const command = assertExactObject(
+          input,
+          ["ref_names", "commit_ids", "prerequisite_commit_ids", "created_by", "message"],
+          "Pack export input",
+          true,
+        );
+        for (const key of ["commit_ids", "prerequisite_commit_ids"] as const) {
+          const values = command[key];
+          if (values !== undefined) {
+            if (
+              !Array.isArray(values) ||
+              values.length > 64 ||
+              !values.every(
+                (entry) => typeof entry === "string" && COMMIT_ID_PATTERN.test(entry),
+              )
+            ) {
+              throw invalidInput();
+            }
+          }
+        }
+        const refNames = command["ref_names"];
+        if (refNames !== undefined) {
+          if (
+            !Array.isArray(refNames) ||
+            refNames.length > 64 ||
+            !refNames.every(
+              (entry) => typeof entry === "string" && REF_NAME_PATTERN.test(entry),
+            )
+          ) {
+            throw invalidInput();
+          }
+        }
+        const value = await this.#request("POST", "/v1/exchange/exports", command, 201, options);
+        const pack = requireObject(value);
+        const hash = pack["hash"];
+        if (
+          typeof hash !== "string" ||
+          !OBJECT_HASH_PATTERN.test(hash) ||
+          pack["media_type"] !== PACK_MEDIA_TYPE
+        ) {
+          throw invalidHostResult();
+        }
+        return pack;
+      }
+      case "ImportPack": {
+        const upload = assertExactObject(input, ["pack_base64"], "Pack import input");
+        const packBase64 = upload["pack_base64"];
+        if (
+          typeof packBase64 !== "string" ||
+          packBase64.length === 0 ||
+          packBase64.length > MAXIMUM_ASSET_BASE64_CHARACTERS
+        ) {
+          throw invalidInput();
+        }
+        let bytes: Buffer;
+        try {
+          bytes = Buffer.from(packBase64, "base64");
+        } catch {
+          throw invalidInput();
+        }
+        if (bytes.byteLength === 0) {
+          throw invalidInput();
+        }
+        const value = await this.#requestBinary(
+          "/v1/exchange/imports",
+          bytes,
+          PACK_MEDIA_TYPE,
+          {},
+          options,
+        );
+        const result = requireObject(value);
+        assertKeys(
+          result,
+          [
+            "mode",
+            "imported_commit_ids",
+            "existing_commit_ids",
+            "imported_object_hashes",
+            "existing_object_hashes",
+            "created_refs",
+            "unchanged_ref_names",
+            "conflicting_refs",
+          ],
+        );
+        if (result["mode"] !== "full" && result["mode"] !== "thin") {
+          throw invalidHostResult();
+        }
+        return result;
       }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);

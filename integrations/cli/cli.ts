@@ -100,6 +100,8 @@ export async function runVistreaCli(
           "validate suppress <finding_id> --json <command>",
           "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id>",
           "validate get-build-diff <build_diff_id>",
+          "pack export --json <command>",
+          "pack import --file <path>",
         ],
         format: "json",
       });
@@ -497,6 +499,27 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       { build_diff_id: command[2] as string },
       timeoutMilliseconds,
     );
+  }
+  if (command[0] === "pack" && command[1] === "export") {
+    return invocation("ExportPack", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "pack" && command[1] === "import") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--file"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const filePath = requireOption(values, "--file");
+    return {
+      operation: "ImportPack",
+      input: {},
+      loadInput: async () => {
+        const bytes = await fs.readFile(filePath);
+        return { pack_base64: bytes.toString("base64") };
+      },
+      ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
+    };
   }
   if (command[0] === "graph" && command[1] === "find-path") {
     const values = parseOptionPairs(command.slice(2));
