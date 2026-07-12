@@ -11,6 +11,7 @@ import {
   DataError,
   type ByteRange,
   type EventTimelineQuery,
+  type JsonObject,
   type ObjectStore,
   type PageRequest,
   type ProtocolValidator,
@@ -26,6 +27,7 @@ import {
   type RuntimeCapturePort,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
+import { DesignReviewEngine } from "../../engine/design/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -140,6 +142,7 @@ export async function startHostLocalApi(
   const getSnapshot = new GetSnapshotQuery(options.workspace);
   const listSnapshots = new ListSnapshotsQuery(options.workspace);
   const getEventTimeline = new GetEventTimelineQuery(options.workspace);
+  const design = new DesignReviewEngine(options);
   const server = http.createServer(
     {
       maxHeaderSize: 16 * 1024,
@@ -156,6 +159,7 @@ export async function startHostLocalApi(
         getSnapshot,
         listSnapshots,
         getEventTimeline,
+        design,
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
         workspace: options.workspace,
@@ -216,6 +220,7 @@ interface RequestHandlerContext {
   readonly getSnapshot: GetSnapshotQuery;
   readonly listSnapshots: ListSnapshotsQuery;
   readonly getEventTimeline: GetEventTimelineQuery;
+  readonly design: DesignReviewEngine;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
   readonly workspace: WorkspaceDataSource;
@@ -285,6 +290,196 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoRequestBody(request);
     const snapshotId = decodeResourceSegment(snapshotMatch[1] as string, "snapshot ID");
     writeJson(response, 200, context.getSnapshot.execute(snapshotId));
+    return;
+  }
+
+  if (pathname === "/v1/design-assets") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const object = await storeDesignAsset(request, context.objects);
+    context.workspace.registerVerifiedObjects([object]);
+    writeJson(response, 201, object as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/design-references") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, [
+      "name",
+      "kind",
+      "canvas_size",
+      "pixel_size",
+      "asset_hash",
+      "created_by",
+    ]);
+    const reference = await context.design.addDesignReference(
+      command as unknown as Parameters<DesignReviewEngine["addDesignReference"]>[0],
+    );
+    writeJson(response, 201, reference as unknown as JsonObject);
+    return;
+  }
+
+  const designReferenceMatch = /^\/v1\/design-references\/([^/]+)$/.exec(pathname);
+  if (designReferenceMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const referenceId = decodeResourceSegment(designReferenceMatch[1] as string, "design reference ID");
+    writeJson(response, 200, context.design.getDesignReference(referenceId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/design-mappings") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, [
+      "design_reference_id",
+      "design_region",
+      "runtime_target",
+      "created_by",
+    ]);
+    const mapping = context.design.mapDesignRegion(
+      command as unknown as Parameters<DesignReviewEngine["mapDesignRegion"]>[0],
+    );
+    writeJson(response, 201, mapping as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/design-comparisons") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, [
+      "design_reference_id",
+      "target_snapshot_id",
+      "completed_by",
+    ]);
+    const comparison = context.design.runDesignComparison(
+      command as unknown as Parameters<DesignReviewEngine["runDesignComparison"]>[0],
+    );
+    writeJson(response, 201, comparison as unknown as JsonObject);
+    return;
+  }
+
+  const designComparisonMatch = /^\/v1\/design-comparisons\/([^/]+)$/.exec(pathname);
+  if (designComparisonMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const comparisonId = decodeResourceSegment(designComparisonMatch[1] as string, "comparison ID");
+    writeJson(response, 200, context.design.getDesignComparison(comparisonId) as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/review-issues") {
+    if (request.method === "POST") {
+      assertNoSearchParameters(url);
+      const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+      const command = parseCommandObject(
+        input,
+        [
+          "design_reference_id",
+          "mapping_id",
+          "comparison_id",
+          "runtime_target",
+          "title",
+          "description",
+          "category",
+          "severity",
+          "expected",
+          "actual",
+          "created_by",
+        ],
+        [
+          "design_reference_id",
+          "runtime_target",
+          "title",
+          "category",
+          "severity",
+          "expected",
+          "actual",
+          "created_by",
+        ],
+      );
+      const issue = context.design.createReviewIssue(
+        command as unknown as Parameters<DesignReviewEngine["createReviewIssue"]>[0],
+      );
+      writeJson(response, 201, issue as unknown as JsonObject);
+      return;
+    }
+    assertMethod(request, "GET");
+    assertNoRequestBody(request);
+    const page = context.design.listReviewIssues(
+      parseReviewIssueQuery(url),
+      readPageValues(url),
+    );
+    writeJson(response, 200, page as unknown as JsonObject);
+    return;
+  }
+
+  const issueMatch = /^\/v1\/review-issues\/([^/]+)$/.exec(pathname);
+  if (issueMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const issueId = decodeResourceSegment(issueMatch[1] as string, "review issue ID");
+    writeJson(response, 200, context.design.getReviewIssue(issueId) as unknown as JsonObject);
+    return;
+  }
+
+  const issueTransitionMatch = /^\/v1\/review-issues\/([^/]+)\/transitions$/.exec(pathname);
+  if (issueTransitionMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const issueId = decodeResourceSegment(issueTransitionMatch[1] as string, "review issue ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["expected_revision", "to_state", "reason", "changed_by"],
+      ["expected_revision", "to_state", "changed_by"],
+    );
+    const issue = context.design.updateReviewIssue({
+      ...(command as unknown as Omit<Parameters<DesignReviewEngine["updateReviewIssue"]>[0], "issue_id">),
+      issue_id: issueId,
+    });
+    writeJson(response, 200, issue as unknown as JsonObject);
+    return;
+  }
+
+  const issueVerificationMatch = /^\/v1\/review-issues\/([^/]+)\/verifications$/.exec(pathname);
+  if (issueVerificationMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const issueId = decodeResourceSegment(issueVerificationMatch[1] as string, "review issue ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "expected_revision",
+        "basis",
+        "result",
+        "verified_snapshot_id",
+        "verified_build_id",
+        "rationale",
+        "verified_by",
+      ],
+      [
+        "expected_revision",
+        "basis",
+        "result",
+        "verified_snapshot_id",
+        "verified_build_id",
+        "verified_by",
+      ],
+    );
+    const result = await context.design.verifyReviewIssue({
+      ...(command as unknown as Omit<Parameters<DesignReviewEngine["verifyReviewIssue"]>[0], "issue_id">),
+      issue_id: issueId,
+    });
+    writeJson(response, 201, result as unknown as JsonObject);
     return;
   }
 
@@ -369,6 +564,98 @@ function assertNoSearchParameters(url: URL): void {
 const EVENT_EPOCH_ID_PATTERN =
   /^[a-z][a-z0-9]*_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const MAXIMUM_DESIGN_ASSET_BYTES = 64 * 1024 * 1024;
+const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+
+/** Structural command parsing; protocol-value validation stays in the Engine. */
+function parseCommandObject(
+  input: unknown,
+  allowedKeys: readonly string[],
+  requiredKeys: readonly string[] = allowedKeys,
+): JsonObject {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    throw invalidArgument("The command body must be a JSON object.");
+  }
+  const value = input as JsonObject;
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw invalidArgument(`Unsupported command field: ${key}.`);
+    }
+  }
+  for (const key of requiredKeys) {
+    if (!(key in value)) {
+      throw invalidArgument(`Missing required command field: ${key}.`);
+    }
+  }
+  return value;
+}
+
+function parseReviewIssueQuery(url: URL): { states?: string[]; design_reference_id?: string } | undefined {
+  const allowed = new Set(["states", "design_reference_id", "limit", "cursor"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) {
+      throw invalidArgument(`Unsupported review-issues query parameter: ${key}.`);
+    }
+    if (url.searchParams.getAll(key).length !== 1) {
+      throw invalidArgument(`The ${key} query parameter may appear only once.`);
+    }
+  }
+  const statesSource = url.searchParams.get("states");
+  const states = statesSource === null ? undefined : statesSource.split(",");
+  if (
+    states !== undefined &&
+    (states.length === 0 ||
+      states.length > 8 ||
+      !states.every((state) => /^[a-z_]{1,32}$/.test(state)))
+  ) {
+    throw invalidArgument("states must be a comma-separated list of issue states.");
+  }
+  const designReferenceId = url.searchParams.get("design_reference_id") ?? undefined;
+  if (states === undefined && designReferenceId === undefined) {
+    return undefined;
+  }
+  return {
+    ...(states === undefined ? {} : { states }),
+    ...(designReferenceId === undefined ? {} : { design_reference_id: designReferenceId }),
+  };
+}
+
+async function storeDesignAsset(
+  request: IncomingMessage,
+  objects: ObjectStore,
+): Promise<Awaited<ReturnType<ObjectStore["put"]>>> {
+  const contentType = request.headers["content-type"];
+  if (typeof contentType !== "string" || !MEDIA_TYPE_PATTERN.test(contentType)) {
+    throw invalidArgument("Design assets require a canonical Content-Type media type.");
+  }
+  const logicalNameHeader = request.headers["x-vistrea-logical-name"];
+  const logicalName = typeof logicalNameHeader === "string" ? logicalNameHeader : undefined;
+  if (logicalName !== undefined && (logicalName.length === 0 || logicalName.length > 512)) {
+    throw invalidArgument("The design asset logical name must contain 1 through 512 characters.");
+  }
+  const stream = (async function* () {
+    let received = 0;
+    for await (const chunk of request) {
+      const bytes = chunk as Buffer;
+      received += bytes.byteLength;
+      if (received > MAXIMUM_DESIGN_ASSET_BYTES) {
+        // DataError passes through the Object Store error mapping unchanged.
+        throw new DataError("resource_exhausted", "The design asset exceeds the upload limit.");
+      }
+      yield bytes;
+    }
+  })();
+  const object = await objects.put(stream, {
+    media_type: contentType,
+    compression: "none",
+    ...(logicalName === undefined ? {} : { logical_name: logicalName }),
+  });
+  if (object.byte_size === 0) {
+    throw invalidArgument("The design asset body must not be empty.");
+  }
+  return object;
+}
 
 function parseEventTimelineQuery(url: URL): EventTimelineQuery | undefined {
   const allowed = new Set(["event_epoch_id", "kinds", "first_sequence", "last_sequence"]);
@@ -447,7 +734,11 @@ function parsePageRequest(url: URL): PageRequest | undefined {
       throw invalidArgument(`The ${key} query parameter may appear only once.`);
     }
   }
+  return readPageValues(url);
+}
 
+/** Reads limit/cursor after the route has validated its own key set. */
+function readPageValues(url: URL): PageRequest | undefined {
   const limitSource = url.searchParams.get("limit");
   const cursor = url.searchParams.get("cursor");
   let limit: number | undefined;

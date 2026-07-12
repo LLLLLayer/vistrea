@@ -23,6 +23,19 @@ const EVENT_ID_PATTERN =
   /^event_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const EVENT_KIND_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
+const DESIGN_REFERENCE_ID_PATTERN =
+  /^designref_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const MAPPING_ID_PATTERN =
+  /^mapping_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const COMPARISON_ID_PATTERN =
+  /^comparison_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const ISSUE_ID_PATTERN =
+  /^issue_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const VERIFICATION_ID_PATTERN =
+  /^verification_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+const MAXIMUM_ASSET_BASE64_CHARACTERS = 8 * 1024 * 1024;
 
 export const HOST_LOCAL_API_ENVIRONMENT = {
   url: "VISTREA_HOST_URL",
@@ -37,6 +50,17 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "ListSnapshots",
   "GetSnapshot",
   "GetEventTimeline",
+  "AddDesignAsset",
+  "AddDesignReference",
+  "GetDesignReference",
+  "MapDesignRegion",
+  "RunDesignComparison",
+  "GetDesignComparison",
+  "CreateReviewIssue",
+  "ListReviewIssues",
+  "GetReviewIssue",
+  "TransitionReviewIssue",
+  "VerifyReviewIssue",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -233,6 +257,237 @@ export class HostLocalApiClient {
         }
         return snapshot;
       }
+      case "AddDesignAsset": {
+        const upload = assertExactObject(
+          input,
+          ["asset_base64", "media_type", "logical_name"],
+          "Design asset input",
+          true,
+        );
+        const assetBase64 = upload["asset_base64"];
+        const mediaType = upload["media_type"];
+        const logicalName = upload["logical_name"];
+        if (
+          typeof assetBase64 !== "string" ||
+          assetBase64.length === 0 ||
+          assetBase64.length > MAXIMUM_ASSET_BASE64_CHARACTERS ||
+          typeof mediaType !== "string" ||
+          !MEDIA_TYPE_PATTERN.test(mediaType) ||
+          (logicalName !== undefined &&
+            (typeof logicalName !== "string" ||
+              logicalName.length === 0 ||
+              logicalName.length > 512))
+        ) {
+          throw invalidInput();
+        }
+        let bytes: Buffer;
+        try {
+          bytes = Buffer.from(assetBase64, "base64");
+        } catch {
+          throw invalidInput();
+        }
+        if (bytes.byteLength === 0 || bytes.toString("base64") !== assetBase64) {
+          throw invalidInput();
+        }
+        const value = await this.#requestBinary("/v1/design-assets", bytes, mediaType, {
+          ...(logicalName === undefined
+            ? {}
+            : { "x-vistrea-logical-name": logicalName }),
+        }, options);
+        return validateObjectRef(value);
+      }
+      case "AddDesignReference": {
+        const command = assertExactObject(
+          input,
+          ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "created_by"],
+          "Design reference input",
+        );
+        const value = await this.#request("POST", "/v1/design-references", command, 201, options);
+        return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
+      }
+      case "GetDesignReference": {
+        const query = assertExactObject(input, ["design_reference_id"], "Design reference lookup");
+        const referenceId = query["design_reference_id"];
+        if (typeof referenceId !== "string" || !DESIGN_REFERENCE_ID_PATTERN.test(referenceId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/design-references/${encodeURIComponent(referenceId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
+      }
+      case "MapDesignRegion": {
+        const command = assertExactObject(
+          input,
+          ["design_reference_id", "design_region", "runtime_target", "created_by"],
+          "Design mapping input",
+        );
+        const value = await this.#request("POST", "/v1/design-mappings", command, 201, options);
+        return validateIdentifiedResource(value, "mapping_id", MAPPING_ID_PATTERN);
+      }
+      case "RunDesignComparison": {
+        const command = assertExactObject(
+          input,
+          ["design_reference_id", "target_snapshot_id", "completed_by"],
+          "Design comparison input",
+        );
+        const value = await this.#request("POST", "/v1/design-comparisons", command, 201, options);
+        return validateIdentifiedResource(value, "comparison_id", COMPARISON_ID_PATTERN);
+      }
+      case "GetDesignComparison": {
+        const query = assertExactObject(input, ["comparison_id"], "Design comparison lookup");
+        const comparisonId = query["comparison_id"];
+        if (typeof comparisonId !== "string" || !COMPARISON_ID_PATTERN.test(comparisonId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/design-comparisons/${encodeURIComponent(comparisonId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "comparison_id", COMPARISON_ID_PATTERN);
+      }
+      case "CreateReviewIssue": {
+        const command = assertExactObject(
+          input,
+          [
+            "design_reference_id",
+            "mapping_id",
+            "comparison_id",
+            "runtime_target",
+            "title",
+            "description",
+            "category",
+            "severity",
+            "expected",
+            "actual",
+            "created_by",
+          ],
+          "Review issue input",
+          true,
+        );
+        const value = await this.#request("POST", "/v1/review-issues", command, 201, options);
+        return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
+      }
+      case "ListReviewIssues": {
+        const query = assertExactObject(
+          input,
+          ["states", "design_reference_id", "limit", "cursor"],
+          "Review issue query",
+          true,
+        );
+        const parameters = new URLSearchParams();
+        const states = query["states"];
+        if (states !== undefined) {
+          if (
+            !Array.isArray(states) ||
+            states.length === 0 ||
+            states.length > 8 ||
+            !states.every((state) => typeof state === "string" && /^[a-z_]{1,32}$/.test(state))
+          ) {
+            throw invalidInput();
+          }
+          parameters.set("states", states.join(","));
+        }
+        const referenceId = query["design_reference_id"];
+        if (referenceId !== undefined) {
+          if (typeof referenceId !== "string" || !DESIGN_REFERENCE_ID_PATTERN.test(referenceId)) {
+            throw invalidInput();
+          }
+          parameters.set("design_reference_id", referenceId);
+        }
+        if (query["limit"] !== undefined) {
+          if (!Number.isInteger(query["limit"]) || (query["limit"] as number) < 1 || (query["limit"] as number) > 500) {
+            throw invalidInput();
+          }
+          parameters.set("limit", String(query["limit"]));
+        }
+        if (query["cursor"] !== undefined) {
+          if (typeof query["cursor"] !== "string" || query["cursor"].length === 0 || query["cursor"].length > 4096) {
+            throw invalidInput();
+          }
+          parameters.set("cursor", query["cursor"]);
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request("GET", `/v1/review-issues${suffix}`, undefined, 200, options);
+        return validateReviewIssuePage(value);
+      }
+      case "GetReviewIssue": {
+        const query = assertExactObject(input, ["issue_id"], "Review issue lookup");
+        const issueId = query["issue_id"];
+        if (typeof issueId !== "string" || !ISSUE_ID_PATTERN.test(issueId)) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/review-issues/${encodeURIComponent(issueId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
+      }
+      case "TransitionReviewIssue": {
+        const command = assertExactObject(
+          input,
+          ["issue_id", "expected_revision", "to_state", "reason", "changed_by"],
+          "Review issue transition input",
+          true,
+        );
+        const issueId = command["issue_id"];
+        if (typeof issueId !== "string" || !ISSUE_ID_PATTERN.test(issueId)) {
+          throw invalidInput();
+        }
+        const { issue_id: _omitted, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/review-issues/${encodeURIComponent(issueId)}/transitions`,
+          body,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
+      }
+      case "VerifyReviewIssue": {
+        const command = assertExactObject(
+          input,
+          [
+            "issue_id",
+            "expected_revision",
+            "basis",
+            "result",
+            "verified_snapshot_id",
+            "verified_build_id",
+            "rationale",
+            "verified_by",
+          ],
+          "Review issue verification input",
+          true,
+        );
+        const issueId = command["issue_id"];
+        if (typeof issueId !== "string" || !ISSUE_ID_PATTERN.test(issueId)) {
+          throw invalidInput();
+        }
+        const { issue_id: _omitted, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/review-issues/${encodeURIComponent(issueId)}/verifications`,
+          body,
+          201,
+          options,
+        );
+        const record = requireObject(requireObject(value)["record"]);
+        const issue = requireObject(requireObject(value)["issue"]);
+        validateIdentifiedResource(record, "verification_record_id", VERIFICATION_ID_PATTERN);
+        validateIdentifiedResource(issue, "issue_id", ISSUE_ID_PATTERN);
+        return requireObject(value);
+      }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
         const parameters = new URLSearchParams();
@@ -257,12 +512,31 @@ export class HostLocalApiClient {
     }
   }
 
+  async #requestBinary(
+    route: string,
+    body: Buffer,
+    contentType: string,
+    headers: Readonly<Record<string, string>>,
+    options: HostRequestOptions,
+  ): Promise<JsonValue> {
+    return this.#request("POST", route, undefined, 201, options, {
+      rawBody: body,
+      contentType,
+      headers,
+    });
+  }
+
   async #request(
     method: "GET" | "POST",
     route: string,
     body: JsonObject | undefined,
     expectedStatus: number,
     options: HostRequestOptions,
+    raw?: {
+      readonly rawBody: Buffer;
+      readonly contentType: string;
+      readonly headers: Readonly<Record<string, string>>;
+    },
   ): Promise<JsonValue> {
     const timeoutMilliseconds = normalizeIntegerOption(
       options.timeoutMilliseconds ?? this.#timeoutMilliseconds,
@@ -305,10 +579,12 @@ export class HostLocalApiClient {
           accept: "application/json",
           authorization: `Bearer ${this.#bearerToken}`,
           ...(encodedBody === undefined ? {} : { "content-type": "application/json" }),
+          ...(raw === undefined ? {} : { "content-type": raw.contentType, ...raw.headers }),
           ...(requestId === undefined ? {} : { "x-vistrea-request-id": requestId }),
           ...(traceId === undefined ? {} : { "x-vistrea-trace-id": traceId }),
         },
         ...(encodedBody === undefined ? {} : { body: encodedBody }),
+        ...(raw === undefined ? {} : { body: new Uint8Array(raw.rawBody) }),
       });
       let value: JsonValue;
       try {
@@ -693,6 +969,45 @@ function validateSnapshotPage(value: JsonValue): JsonObject {
         page["snapshot_version"].length > 256))
   ) {
     throw invalidHostResult();
+  }
+  return page;
+}
+
+function validateObjectRef(value: JsonValue): JsonObject {
+  const object = requireObject(value);
+  if (
+    typeof object["hash"] !== "string" ||
+    !OBJECT_HASH_PATTERN.test(object["hash"]) ||
+    typeof object["media_type"] !== "string" ||
+    !Number.isSafeInteger(object["byte_size"])
+  ) {
+    throw invalidHostResult();
+  }
+  return object;
+}
+
+function validateIdentifiedResource(
+  value: JsonValue,
+  idField: string,
+  pattern: RegExp,
+): JsonObject {
+  const resource = requireObject(value);
+  const identifier = resource[idField];
+  if (typeof identifier !== "string" || !pattern.test(identifier)) {
+    throw invalidHostResult();
+  }
+  return resource;
+}
+
+function validateReviewIssuePage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor", "snapshot_version"], true);
+  const items = page["items"];
+  if (!Array.isArray(items) || items.length > 500) {
+    throw invalidHostResult();
+  }
+  for (const itemValue of items) {
+    validateIdentifiedResource(itemValue as JsonValue, "issue_id", ISSUE_ID_PATTERN);
   }
   return page;
 }

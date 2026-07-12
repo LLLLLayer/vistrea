@@ -394,6 +394,208 @@ test("Host Local API exposes canonical fixture capture, list, object, and error 
   });
 });
 
+test("Host Local API drives the design review flow from asset to verified issue", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-design-");
+  const fixture = await captureFixture(validator);
+  const workspace = new MemoryDataStore({ validator });
+  const objects = await FileObjectStore.open({ workspaceRoot });
+  const runtime = new RecordingRuntimeCapturePort(
+    new FixtureRuntimeCapturePort({
+      snapshot: fixture.snapshot,
+      objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+    }),
+  );
+  const api = await startHostLocalApi({
+    host: "127.0.0.1",
+    runtime,
+    workspace,
+    objects,
+    validator,
+  });
+  t.after(() => api.close());
+  const actor = { kind: "agent", id: "vistrea-api-test", extensions: {} };
+
+  // Capture one Snapshot so design targets resolve.
+  const capture = await authorizedFetch(api, "/v1/captures", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(capture.status, 201);
+  const snapshot = (await capture.json()) as {
+    snapshot_id: string;
+    trees: readonly {
+      tree_id: string;
+      payload: { inline_nodes: readonly { node_id: string; stable_id?: string }[] };
+    }[];
+  };
+  const tree = snapshot.trees[0];
+  assert.ok(tree !== undefined);
+  const node = tree.payload.inline_nodes.find((candidate) => candidate.stable_id !== undefined);
+  assert.ok(node !== undefined);
+
+  const assetUpload = await authorizedFetch(api, "/v1/design-assets", {
+    method: "POST",
+    headers: { "content-type": "image/png", "x-vistrea-logical-name": "home-baseline.png" },
+    body: Buffer.from("vistrea-design-asset", "utf8"),
+  });
+  assert.equal(assetUpload.status, 201);
+  const asset = (await assetUpload.json()) as { hash: string; media_type: string };
+  assert.equal(asset.media_type, "image/png");
+
+  const referenceResponse = await authorizedFetch(api, "/v1/design-references", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Home baseline",
+      kind: "design_artifact",
+      canvas_size: { width: 390, height: 844 },
+      pixel_size: { width: 1170, height: 2532 },
+      asset_hash: asset.hash,
+      created_by: actor,
+    }),
+  });
+  assert.equal(referenceResponse.status, 201);
+  const reference = (await referenceResponse.json()) as { design_reference_id: string };
+
+  const mappingResponse = await authorizedFetch(api, "/v1/design-mappings", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      design_reference_id: reference.design_reference_id,
+      design_region: { x: 0, y: 10, width: 390, height: 844 },
+      runtime_target: {
+        snapshot_id: snapshot.snapshot_id,
+        tree_id: tree.tree_id,
+        node_id: node.node_id,
+        ...(node.stable_id === undefined ? {} : { stable_id: node.stable_id }),
+      },
+      created_by: actor,
+    }),
+  });
+  assert.equal(mappingResponse.status, 201);
+
+  const comparisonResponse = await authorizedFetch(api, "/v1/design-comparisons", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      design_reference_id: reference.design_reference_id,
+      target_snapshot_id: snapshot.snapshot_id,
+      completed_by: actor,
+    }),
+  });
+  assert.equal(comparisonResponse.status, 201);
+  const comparison = (await comparisonResponse.json()) as {
+    comparison_id: string;
+    differences: readonly { category: string; delta?: number }[];
+  };
+  assert.equal(comparison.differences.length, 1);
+  assert.equal(comparison.differences[0]?.category, "frame");
+  const comparisonReload = await authorizedFetch(
+    api,
+    `/v1/design-comparisons/${encodeURIComponent(comparison.comparison_id)}`,
+  );
+  assert.equal(comparisonReload.status, 200);
+
+  const issueResponse = await authorizedFetch(api, "/v1/review-issues", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      design_reference_id: reference.design_reference_id,
+      comparison_id: comparison.comparison_id,
+      runtime_target: {
+        snapshot_id: snapshot.snapshot_id,
+        tree_id: tree.tree_id,
+        node_id: node.node_id,
+      },
+      title: "Root container offset from baseline",
+      category: "frame",
+      severity: "minor",
+      expected: { kind: "number", value: 10, unit: "logical_point", extensions: {} },
+      actual: { kind: "number", value: 0, unit: "logical_point", extensions: {} },
+      created_by: actor,
+    }),
+  });
+  assert.equal(issueResponse.status, 201);
+  const issue = (await issueResponse.json()) as { issue_id: string; revision: number };
+
+  const transition = await authorizedFetch(
+    api,
+    `/v1/review-issues/${encodeURIComponent(issue.issue_id)}/transitions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: issue.revision,
+        to_state: "ready_for_verification",
+        changed_by: actor,
+      }),
+    },
+  );
+  assert.equal(transition.status, 200);
+  const ready = (await transition.json()) as { revision: number; state: string };
+  assert.equal(ready.state, "ready_for_verification");
+
+  const verification = await authorizedFetch(
+    api,
+    `/v1/review-issues/${encodeURIComponent(issue.issue_id)}/verifications`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: ready.revision,
+        basis: "real_build",
+        result: "passed",
+        verified_snapshot_id: snapshot.snapshot_id,
+        verified_build_id: "build_019f0000-0000-7000-8000-000000000002",
+        verified_by: actor,
+      }),
+    },
+  );
+  assert.equal(verification.status, 201);
+  const verified = (await verification.json()) as {
+    issue: { state: string };
+    record: { result: string };
+  };
+  assert.equal(verified.issue.state, "resolved");
+  assert.equal(verified.record.result, "passed");
+
+  const listed = await authorizedFetch(api, "/v1/review-issues?states=resolved");
+  assert.equal(listed.status, 200);
+  const page = (await listed.json()) as { items: readonly { issue_id: string }[] };
+  assert.deepEqual(
+    page.items.map((item) => item.issue_id),
+    [issue.issue_id],
+  );
+  const reloaded = await authorizedFetch(
+    api,
+    `/v1/review-issues/${encodeURIComponent(issue.issue_id)}`,
+  );
+  assert.equal(reloaded.status, 200);
+
+  const illegalTransition = await authorizedFetch(
+    api,
+    `/v1/review-issues/${encodeURIComponent(issue.issue_id)}/transitions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: 999,
+        to_state: "wont_fix",
+        changed_by: actor,
+      }),
+    },
+  );
+  assert.equal(illegalTransition.status, 409);
+  const emptyAsset = await authorizedFetch(api, "/v1/design-assets", {
+    method: "POST",
+    headers: { "content-type": "image/png" },
+    body: Buffer.alloc(0),
+  });
+  assert.equal(emptyAsset.status, 400);
+});
+
 test("Host Local API reopens production LocalDataWorkspace without persisting its token", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-production-");

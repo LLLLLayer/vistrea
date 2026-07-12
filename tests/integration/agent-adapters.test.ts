@@ -123,11 +123,22 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assert.deepEqual(
     tools.tools.map((tool) => tool.name).sort(),
     [
+      "vistrea_add_design_reference",
       "vistrea_capture_snapshot",
+      "vistrea_create_review_issue",
+      "vistrea_get_design_comparison",
+      "vistrea_get_design_reference",
       "vistrea_get_event_timeline",
+      "vistrea_get_review_issue",
       "vistrea_get_snapshot",
       "vistrea_get_workspace_status",
+      "vistrea_list_review_issues",
       "vistrea_list_snapshots",
+      "vistrea_map_design_region",
+      "vistrea_run_design_comparison",
+      "vistrea_transition_review_issue",
+      "vistrea_upload_design_asset",
+      "vistrea_verify_review_issue",
     ],
   );
   const inheritedToolName = await mcp.callTool({ name: "__proto__", arguments: {} });
@@ -207,6 +218,157 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   });
   assert.equal(mcpEvents.isError, undefined);
   assert.deepEqual(mcpEvents.structuredContent, cliEventsEnvelope.data);
+
+  // Design review round trip: CLI drives the flow; MCP reads identical state.
+  const assetPath = path.join(workspaceRoot, "design-baseline.png");
+  await fs.writeFile(assetPath, Buffer.from("vistrea-adapter-design-asset", "utf8"));
+  const uploadedAsset = await runCli(
+    [
+      "design",
+      "upload-asset",
+      "--file",
+      assetPath,
+      "--media-type",
+      "image/png",
+      "--name",
+      "design-baseline.png",
+    ],
+    environment,
+  );
+  assert.equal(uploadedAsset.exitCode, 0, uploadedAsset.stdout);
+  const assetHash = (parseCliEnvelope(uploadedAsset.stdout).data as JsonObject)["hash"] as string;
+
+  const actorJson = JSON.stringify({ kind: "agent", id: "vistrea-cli", extensions: {} });
+  const referenceCreate = await runCli(
+    [
+      "design",
+      "add-reference",
+      "--json",
+      JSON.stringify({
+        name: "Adapter baseline",
+        kind: "design_artifact",
+        canvas_size: { width: 390, height: 844 },
+        pixel_size: { width: 1170, height: 2532 },
+        asset_hash: assetHash,
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(referenceCreate.exitCode, 0, referenceCreate.stdout);
+  const referenceEnvelope = parseCliEnvelope(referenceCreate.stdout).data as JsonObject;
+  const referenceId = referenceEnvelope["design_reference_id"] as string;
+
+  const capturedSnapshot = cliCaptureEnvelope.data as JsonObject;
+  const capturedTree = (capturedSnapshot["trees"] as readonly JsonObject[])[0] as JsonObject;
+  const capturedNode = ((capturedTree["payload"] as JsonObject)[
+    "inline_nodes"
+  ] as readonly JsonObject[])[0] as JsonObject;
+  const runtimeTarget = {
+    snapshot_id: capturedSnapshot["snapshot_id"],
+    tree_id: capturedTree["tree_id"],
+    node_id: capturedNode["node_id"],
+  };
+  const mapCreate = await runCli(
+    [
+      "design",
+      "map",
+      "--json",
+      JSON.stringify({
+        design_reference_id: referenceId,
+        design_region: { x: 0, y: 12, width: 390, height: 844 },
+        runtime_target: runtimeTarget,
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(mapCreate.exitCode, 0, mapCreate.stdout);
+
+  const comparisonRun = await runCli(
+    [
+      "design",
+      "compare",
+      "--reference",
+      referenceId,
+      "--snapshot",
+      capturedSnapshot["snapshot_id"] as string,
+    ],
+    environment,
+  );
+  assert.equal(comparisonRun.exitCode, 0, comparisonRun.stdout);
+  const comparisonEnvelope = parseCliEnvelope(comparisonRun.stdout).data as JsonObject;
+  assert.equal((comparisonEnvelope["differences"] as readonly JsonObject[]).length, 1);
+
+  const issueCreate = await runCli(
+    [
+      "issue",
+      "create",
+      "--json",
+      JSON.stringify({
+        design_reference_id: referenceId,
+        comparison_id: comparisonEnvelope["comparison_id"],
+        runtime_target: runtimeTarget,
+        title: "Adapter-detected frame drift",
+        category: "frame",
+        severity: "minor",
+        expected: { kind: "number", value: 12, unit: "logical_point", extensions: {} },
+        actual: { kind: "number", value: 0, unit: "logical_point", extensions: {} },
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(issueCreate.exitCode, 0, issueCreate.stdout);
+  const issueEnvelope = parseCliEnvelope(issueCreate.stdout).data as JsonObject;
+  const issueId = issueEnvelope["issue_id"] as string;
+
+  const issueTransition = await runCli(
+    ["issue", "transition", issueId, "--revision", "1", "--to", "ready_for_verification"],
+    environment,
+  );
+  assert.equal(issueTransition.exitCode, 0, issueTransition.stdout);
+  const readyIssue = parseCliEnvelope(issueTransition.stdout).data as JsonObject;
+
+  const issueVerify = await runCli(
+    [
+      "issue",
+      "verify",
+      issueId,
+      "--revision",
+      String(readyIssue["revision"]),
+      "--basis",
+      "real_build",
+      "--result",
+      "passed",
+      "--snapshot",
+      capturedSnapshot["snapshot_id"] as string,
+      "--build",
+      "build_019f0000-0000-7000-8000-000000000002",
+    ],
+    environment,
+  );
+  assert.equal(issueVerify.exitCode, 0, issueVerify.stdout);
+  const verifiedEnvelope = parseCliEnvelope(issueVerify.stdout).data as JsonObject;
+  assert.equal((verifiedEnvelope["issue"] as JsonObject)["state"], "resolved");
+
+  const mcpIssue = await mcp.callTool({
+    name: "vistrea_get_review_issue",
+    arguments: { issue_id: issueId },
+  });
+  assert.equal(mcpIssue.isError, undefined);
+  assert.deepEqual(mcpIssue.structuredContent, verifiedEnvelope["issue"]);
+  const mcpIssueList = await mcp.callTool({
+    name: "vistrea_list_review_issues",
+    arguments: { states: ["resolved"] },
+  });
+  assert.equal(mcpIssueList.isError, undefined);
+  assert.deepEqual(
+    ((mcpIssueList.structuredContent as JsonObject)["items"] as readonly JsonObject[]).map(
+      (item) => item["issue_id"],
+    ),
+    [issueId],
+  );
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);

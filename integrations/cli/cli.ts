@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+
 import {
   HostClientError,
   createCorrelationId,
@@ -24,6 +26,8 @@ interface CliContext {
 interface ParsedInvocation {
   readonly operation?: ImplementedHostOperation;
   readonly input: JsonObject;
+  /** Deferred input construction for commands that read local files. */
+  readonly loadInput?: () => Promise<JsonObject>;
   readonly timeoutMilliseconds?: number;
   readonly help?: true;
 }
@@ -58,17 +62,30 @@ export async function runVistreaCli(
           "snapshot list",
           "snapshot get <snapshot_id>",
           "events list",
+          "design upload-asset --file <path> --media-type <type> [--name <logical>]",
+          "design add-reference --json <command>",
+          "design get-reference <design_reference_id>",
+          "design map --json <command>",
+          "design compare --reference <id> --snapshot <id> [--actor <id>]",
+          "design get-comparison <comparison_id>",
+          "issue create --json <command>",
+          "issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]",
+          "issue get <issue_id>",
+          "issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]",
+          "issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]",
         ],
         format: "json",
       });
       return 0;
     }
+    const input =
+      invocation.loadInput === undefined ? invocation.input : await invocation.loadInput();
     const client = createHostLocalApiClientFromEnvironment(runtime.environment, {
       ...(invocation.timeoutMilliseconds === undefined
         ? {}
         : { timeoutMilliseconds: invocation.timeoutMilliseconds }),
     });
-    const result = await client.execute(invocation.operation as ImplementedHostOperation, invocation.input, {
+    const result = await client.execute(invocation.operation as ImplementedHostOperation, input, {
       requestId: context.requestId,
       traceId: context.traceId,
     });
@@ -152,7 +169,217 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "events" && command[1] === "list") {
     return invocation("GetEventTimeline", parseEventOptions(command.slice(2)), timeoutMilliseconds);
   }
+  if (command[0] === "design" && command[1] === "upload-asset") {
+    return uploadAssetInvocation(command.slice(2), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "add-reference") {
+    return invocation("AddDesignReference", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "get-reference" && command.length === 3) {
+    return invocation(
+      "GetDesignReference",
+      { design_reference_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "design" && command[1] === "map") {
+    return invocation("MapDesignRegion", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "compare") {
+    return invocation("RunDesignComparison", parseCompareOptions(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "get-comparison" && command.length === 3) {
+    return invocation(
+      "GetDesignComparison",
+      { comparison_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "issue" && command[1] === "create") {
+    return invocation("CreateReviewIssue", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "issue" && command[1] === "list") {
+    return invocation("ListReviewIssues", parseIssueListOptions(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "issue" && command[1] === "get" && command.length === 3) {
+    return invocation("GetReviewIssue", { issue_id: command[2] as string }, timeoutMilliseconds);
+  }
+  if (command[0] === "issue" && command[1] === "transition" && command.length >= 3) {
+    return invocation(
+      "TransitionReviewIssue",
+      parseIssueTransitionOptions(command[2] as string, command.slice(3)),
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "issue" && command[1] === "verify" && command.length >= 3) {
+    return invocation(
+      "VerifyReviewIssue",
+      parseIssueVerifyOptions(command[2] as string, command.slice(3)),
+      timeoutMilliseconds,
+    );
+  }
   throw invalidArguments();
+}
+
+function cliActor(id: string | undefined): JsonObject {
+  return { kind: "agent", id: id ?? "vistrea-cli", extensions: {} };
+}
+
+function parseOptionPairs(arguments_: readonly string[]): Map<string, string> {
+  const values = new Map<string, string>();
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const option = arguments_[index] as string;
+    const value = arguments_[index + 1];
+    if (!option.startsWith("--") || value === undefined || values.has(option)) {
+      throw invalidArguments();
+    }
+    values.set(option, value);
+    index += 1;
+  }
+  return values;
+}
+
+function requireOption(values: Map<string, string>, name: string): string {
+  const value = values.get(name);
+  if (value === undefined) {
+    throw invalidArguments();
+  }
+  return value;
+}
+
+function parseJsonOption(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  if (values.size !== 1) {
+    throw invalidArguments();
+  }
+  const source = requireOption(values, "--json");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch {
+    throw invalidArguments();
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw invalidArguments();
+  }
+  return parsed as JsonObject;
+}
+
+function uploadAssetInvocation(
+  arguments_: readonly string[],
+  timeoutMilliseconds: number | undefined,
+): ParsedInvocation {
+  const values = parseOptionPairs(arguments_);
+  const file = requireOption(values, "--file");
+  const mediaType = requireOption(values, "--media-type");
+  const logicalName = values.get("--name");
+  for (const key of values.keys()) {
+    if (!["--file", "--media-type", "--name"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  return {
+    operation: "AddDesignAsset",
+    input: {},
+    loadInput: async () => {
+      let bytes: Buffer;
+      try {
+        bytes = await fs.readFile(file);
+      } catch {
+        throw new HostClientError("invalid_argument", "The design asset file could not be read.");
+      }
+      return {
+        asset_base64: bytes.toString("base64"),
+        media_type: mediaType,
+        ...(logicalName === undefined ? {} : { logical_name: logicalName }),
+      };
+    },
+    ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
+  };
+}
+
+function parseCompareOptions(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--reference", "--snapshot", "--actor"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  return {
+    design_reference_id: requireOption(values, "--reference"),
+    target_snapshot_id: requireOption(values, "--snapshot"),
+    completed_by: cliActor(values.get("--actor")),
+  };
+}
+
+function parseIssueListOptions(arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--states", "--reference", "--limit", "--cursor"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  const limitSource = values.get("--limit");
+  if (limitSource !== undefined && !/^[1-9][0-9]{0,2}$/.test(limitSource)) {
+    throw invalidArguments();
+  }
+  const states = values.get("--states");
+  const reference = values.get("--reference");
+  const cursor = values.get("--cursor");
+  return {
+    ...(states === undefined ? {} : { states: states.split(",") }),
+    ...(reference === undefined ? {} : { design_reference_id: reference }),
+    ...(limitSource === undefined ? {} : { limit: Number(limitSource) }),
+    ...(cursor === undefined ? {} : { cursor }),
+  };
+}
+
+function parseIssueTransitionOptions(issueId: string, arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!["--revision", "--to", "--reason", "--actor"].includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  const revision = requireOption(values, "--revision");
+  if (!/^[1-9][0-9]{0,14}$/.test(revision)) {
+    throw invalidArguments();
+  }
+  const reason = values.get("--reason");
+  return {
+    issue_id: issueId,
+    expected_revision: Number(revision),
+    to_state: requireOption(values, "--to"),
+    ...(reason === undefined ? {} : { reason }),
+    changed_by: cliActor(values.get("--actor")),
+  };
+}
+
+function parseIssueVerifyOptions(issueId: string, arguments_: readonly string[]): JsonObject {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (
+      !["--revision", "--basis", "--result", "--snapshot", "--build", "--rationale", "--actor"]
+        .includes(key)
+    ) {
+      throw invalidArguments();
+    }
+  }
+  const revision = requireOption(values, "--revision");
+  if (!/^[1-9][0-9]{0,14}$/.test(revision)) {
+    throw invalidArguments();
+  }
+  const rationale = values.get("--rationale");
+  return {
+    issue_id: issueId,
+    expected_revision: Number(revision),
+    basis: requireOption(values, "--basis"),
+    result: requireOption(values, "--result"),
+    verified_snapshot_id: requireOption(values, "--snapshot"),
+    verified_build_id: requireOption(values, "--build"),
+    ...(rationale === undefined ? {} : { rationale }),
+    verified_by: cliActor(values.get("--actor")),
+  };
 }
 
 function parseEventOptions(arguments_: readonly string[]): JsonObject {
