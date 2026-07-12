@@ -31,9 +31,9 @@ enum class VistreaSemanticRole(val wireName: String) {
  * The declared Vistrea role wire name attached as its own semantics fact.
  *
  * Roles such as link, text-field, or list-item have no lossless Compose
- * `Role` equivalent, so the canonical wire name always travels on this key
- * and a capture adapter or UIAutomator-based tooling can recover the declared
- * role for every annotated composable.
+ * `Role` equivalent, so the canonical wire name always travels on this key.
+ * [ComposeSemanticsCaptureExtension] and UIAutomator-based tooling recover
+ * the declared role for every annotated composable.
  */
 val VistreaRoleSemanticsKey: SemanticsPropertyKey<String> = SemanticsPropertyKey("VistreaRole")
 
@@ -45,10 +45,10 @@ var SemanticsPropertyReceiver.vistreaRole: String by VistreaRoleSemanticsKey
  *
  * Compose renders inside one `AndroidComposeView`, so the annotation travels
  * as standard semantics facts: the stable identifier becomes the test tag
- * (exposed as the resource identifier when the application enables
- * `testTagsAsResourceId`, which UIAutomator and the future Compose semantics
- * capture adapter read as the cross-platform `stable_id`), the role becomes
- * the [VistreaRoleSemanticsKey] fact plus the closest semantics role, and the
+ * (read by [ComposeSemanticsCaptureExtension] as the cross-platform
+ * `stable_id`, and exposed as the resource identifier for UIAutomator when
+ * the application enables `testTagsAsResourceId`), the role becomes the
+ * [VistreaRoleSemanticsKey] fact plus the closest semantics role, and the
  * optional label becomes the content description. The modifier never invokes
  * business logic.
  */

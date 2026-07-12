@@ -17,6 +17,7 @@ This directory currently contains a pure Kotlin/JVM protocol adapter for the can
 - walks a real View/ViewGroup hierarchy on the main thread without invoking application business methods;
 - converts Android pixels into full-display logical points using effective display density;
 - records stable IDs, parent/child identity, visibility, interaction actions, accessibility, and reviewable visual properties;
+- consults explicitly registered `ViewSemanticsCaptureExtension`s (a constructor parameter, no global registry) for every View before recursing: the first extension returning a subtree replaces that View's children with capture-time semantic nodes, the host node records `extensions["android.capture.semantics_source"]`, replaced-but-present embedded child Views surface as an `android.capture.interop-view-children-skipped` limitation, and semantic nodes count toward the node limit and share the walker's deterministic node-identifier scheme;
 - redacts password text and accessibility values before they enter the Snapshot;
 - optionally renders the observed root into canonical PNG bytes and returns a SHA-256 `ObjectRef` separately from transport and persistence; `beginCapture` stages the main-thread observation and bitmap draw so PNG encoding and hashing can run on a background dispatcher, which the connection capture provider does;
 - fails closed on empty roots, off-main-thread capture, display mismatch, node limits, screenshot limits, and encoding failure.
@@ -38,7 +39,12 @@ The connection source is compiled only into the Android library's `debug` and `i
 
 The Debug Demo Inspector and protected Host bootstrap exist under `examples/android/VistreaDemoApp/`; its Debug variant records transient banner presentation and dismissal through the bounded `RuntimeEventRecorder`, while the Release variant installs no reporter. `AndroidViewRuntimeTuningController` resolves stable identifiers to live views with the capture adapter's candidate order and previews only their alpha on the main thread; it compiles only into the debug and internal variants.
 
-`runtime-compose/` is the Compose semantic annotation bridge: `Modifier.vistreaSemantics(stableId, role, label)` declares the cross-platform stable identifier as the test tag (exposed as the resource identifier when the application enables `testTagsAsResourceId`), the canonical role wire name as a dedicated `VistreaRole` semantics property for every role plus the closest Compose semantics role, and the optional label as the content description. Compose renders inside one `AndroidComposeView`, so the current View capture sees the container only; the full Compose semantic-tree capture adapter, automatic View event observation, and additional tuning properties remain follow-up work.
+`runtime-compose/` is the Compose bridge, with two halves:
+
+- `Modifier.vistreaSemantics(stableId, role, label)` declares the cross-platform stable identifier as the test tag (exposed as the resource identifier when the application enables `testTagsAsResourceId`), the canonical role wire name as a dedicated `VistreaRole` semantics property for every role plus the closest Compose semantics role, and the optional label as the content description.
+- `ComposeSemanticsCaptureExtension` implements the View walker's semantics extension point for `AndroidComposeView`, which it recognizes through the public `androidx.compose.ui.node.RootForTest` interface (no reflection). It reads the owner's unmerged semantics tree and maps every semantics node — annotated or not — to a canonical `UiNode`: `testTag` becomes `stable_id`, the `VistreaRole` fact (falling back to Compose `Role`, heading, editable-text, and text facts, then `container`) becomes `role`, text/content description fill the shared content fields, `Password` semantics redact text and value, `OnClick`/`OnLongClick`/`SetText`/`ScrollBy` become observation-level actions, and pixel geometry converts with the same density and frame-origin math as View nodes. Each node also carries its Compose semantics id under `extensions["android.compose.semantics_node_id"]`.
+
+Known Compose capture limits: the capture is the semantics tree, so composables that contribute no semantics produce no node and per-node visual properties (colors, fonts, alpha) are not available; child Views embedded through `AndroidView` interop are skipped and flagged on the host node; Compose UI tuning is not implemented. Automatic View event observation and additional tuning properties also remain follow-up work. The pure `SemanticsConfiguration`-to-`UiNode` mapping is covered by plain JVM unit tests; the live `AndroidComposeView` loop is covered by `:runtime-compose:connectedDebugAndroidTest`, and a fake-extension `:runtime-android:connectedDebugAndroidTest` proves the walker-side subtree replacement without Compose.
 
 ## Verification
 
@@ -48,10 +54,13 @@ Run from this directory:
 ANDROID_HOME="$HOME/Library/Android/sdk" \
   ./gradlew test :runtime-connection:testDebugUnitTest \
   :runtime-android:assembleDebug :runtime-android:assembleRelease \
-  :runtime-android:lintDebug
+  :runtime-android:lintDebug \
+  :runtime-compose:test :runtime-compose:assembleDebug \
+  :runtime-compose:assembleRelease :runtime-compose:lintDebug
 
 ANDROID_HOME="$HOME/Library/Android/sdk" \
-  ./gradlew :runtime-android:connectedDebugAndroidTest
+  ./gradlew :runtime-android:connectedDebugAndroidTest \
+  :runtime-compose:connectedDebugAndroidTest
 
 ANDROID_HOME="$HOME/Library/Android/sdk" \
   ./tools/verify-runtime-release-boundary.sh

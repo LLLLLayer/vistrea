@@ -3,6 +3,7 @@ plugins {
     kotlin("plugin.serialization") version "2.1.20"
     id("com.android.library") version "8.11.2" apply false
     kotlin("android") version "2.1.20" apply false
+    kotlin("plugin.compose") version "2.1.20" apply false
 }
 
 group = "dev.vistrea"

@@ -150,9 +150,15 @@ class AndroidRuntimeCaptureException(
  * The adapter never invokes application business methods or performs device
  * actions. It returns the canonical Runtime Snapshot plus encoded Object bytes;
  * transport and persistence remain separate responsibilities.
+ *
+ * [semanticsExtensions] are consulted for every View before the walker
+ * recurses into its children; the first extension returning a subtree
+ * replaces that View's child subtree with capture-time semantic nodes, for
+ * example the Compose semantics tree inside an `AndroidComposeView`.
  */
 class AndroidViewRuntimeCaptureAdapter(
     private val configuration: AndroidViewRuntimeCaptureConfiguration,
+    private val semanticsExtensions: List<ViewSemanticsCaptureExtension> = emptyList(),
 ) {
     fun capture(
         rootView: View,
@@ -422,18 +428,35 @@ class AndroidViewRuntimeCaptureAdapter(
         snapshotRawId: String,
         density: Double,
     ): HierarchyCapture {
+        val idFactory = ViewSemanticsNodeIdFactory { stableSeed, path ->
+            NodeId(
+                RuntimeIdentifierFactory.deterministic(
+                    "node",
+                    "$snapshotRawId:${stableSeed ?: path}:$path",
+                ),
+            )
+        }
         val orderedViews = mutableListOf<TraversalItem>()
+        val semanticSubtrees = HashMap<String, SemanticSubtreeCapture>()
+        var capturedNodeCount = 0
         val stack = ArrayDeque<TraversalItem>()
         stack.addLast(TraversalItem(rootView, "0", null))
         while (stack.isNotEmpty()) {
-            if (orderedViews.size >= configuration.maximumNodeCount) {
-                throw AndroidRuntimeCaptureException(
-                    AndroidRuntimeCaptureFailure.NODE_LIMIT_EXCEEDED,
-                    "The Android View hierarchy exceeds maximumNodeCount.",
-                )
+            if (capturedNodeCount >= configuration.maximumNodeCount) {
+                throw nodeLimitExceeded()
             }
             val current = stack.removeLast()
             orderedViews += current
+            capturedNodeCount += 1
+            val subtree = captureSemanticSubtree(current, density, idFactory)
+            if (subtree != null) {
+                capturedNodeCount += subtree.capture.nodes.size
+                if (capturedNodeCount > configuration.maximumNodeCount) {
+                    throw nodeLimitExceeded()
+                }
+                semanticSubtrees[current.path] = subtree
+                continue
+            }
             val group = current.view as? ViewGroup ?: continue
             for (index in group.childCount - 1 downTo 0) {
                 stack.addLast(
@@ -444,36 +467,65 @@ class AndroidViewRuntimeCaptureAdapter(
 
         val idsByPath = LinkedHashMap<String, NodeId>()
         for (item in orderedViews) {
-            val stableSeed = stableIdentifier(item.view)?.value ?: item.path
-            idsByPath[item.path] = NodeId(
-                RuntimeIdentifierFactory.deterministic(
-                    "node",
-                    "$snapshotRawId:$stableSeed:${item.path}",
-                ),
-            )
+            idsByPath[item.path] = idFactory.nodeId(stableIdentifier(item.view)?.value, item.path)
         }
-        val nodes = orderedViews.map { item ->
+        val nodes = mutableListOf<UiNode>()
+        for (item in orderedViews) {
             val nodeId = checkNotNull(idsByPath[item.path])
             val parentId = item.parentPath?.let(idsByPath::get)
-            val childIds = (item.view as? ViewGroup)?.let { group ->
-                (0 until group.childCount).mapNotNull { index ->
-                    idsByPath["${item.path}.$index"]
+            val subtree = semanticSubtrees[item.path]
+            val childIds = subtree?.capture?.directChildIds
+                ?: (item.view as? ViewGroup)?.let { group ->
+                    (0 until group.childCount).mapNotNull { index ->
+                        idsByPath["${item.path}.$index"]
+                    }
                 }
-            } ?: emptyList()
-            captureNode(
+                ?: emptyList()
+            nodes += captureNode(
                 NodeCaptureInput(
                     view = item.view,
                     nodeId = nodeId,
                     parentId = parentId,
                     childIds = childIds,
                     density = density,
+                    semanticsSource = subtree?.source,
                 ),
             )
+            subtree?.let { nodes += it.capture.nodes }
         }
         return HierarchyCapture(
             rootNodeId = checkNotNull(idsByPath["0"]),
             nodes = nodes,
         )
+    }
+
+    private fun nodeLimitExceeded() = AndroidRuntimeCaptureException(
+        AndroidRuntimeCaptureFailure.NODE_LIMIT_EXCEEDED,
+        "The Android View hierarchy exceeds maximumNodeCount.",
+    )
+
+    private fun captureSemanticSubtree(
+        item: TraversalItem,
+        density: Double,
+        idFactory: ViewSemanticsNodeIdFactory,
+    ): SemanticSubtreeCapture? {
+        if (semanticsExtensions.isEmpty()) {
+            return null
+        }
+        val hostFrame = frameInDisplay(item.view, density)
+        val context = ViewSemanticsCaptureContext(
+            hostNodeId = idFactory.nodeId(stableIdentifier(item.view)?.value, item.path),
+            hostPath = item.path,
+            hostFrameOriginX = hostFrame.x,
+            hostFrameOriginY = hostFrame.y,
+            density = density,
+            nodeIdFactory = idFactory,
+        )
+        for (extension in semanticsExtensions) {
+            val capture = extension.captureSemanticChildren(item.view, context) ?: continue
+            return SemanticSubtreeCapture(extension.semanticsSource, capture)
+        }
+        return null
     }
 
     private fun captureNode(input: NodeCaptureInput): UiNode {
@@ -521,8 +573,25 @@ class AndroidViewRuntimeCaptureAdapter(
             ),
             sourceContext = SourceContext(component = view.javaClass.name),
             relatedNodes = emptyList(),
-            captureLimitations = emptyList(),
-            extensions = nodeExtensions(view),
+            captureLimitations = captureLimitations(input),
+            extensions = nodeExtensions(view, input.semanticsSource),
+        )
+    }
+
+    private fun captureLimitations(input: NodeCaptureInput): List<CaptureLimitation> {
+        val view = input.view
+        if (input.semanticsSource == null || view !is ViewGroup || view.childCount == 0) {
+            return emptyList()
+        }
+        return listOf(
+            CaptureLimitation(
+                code = "android.capture.interop-view-children-skipped",
+                severity = CaptureLimitationSeverity.INFO,
+                message = "A semantics extension replaced this subtree, so its " +
+                    "${view.childCount} embedded child View(s) were not walked.",
+                retryable = false,
+                extensions = Extensions.empty(),
+            ),
         )
     }
 
@@ -688,15 +757,17 @@ class AndroidViewRuntimeCaptureAdapter(
         colorSpace = ColorSpace.SRGB,
     )
 
-    private fun nodeExtensions(view: View): Extensions {
-        if (view.id == View.NO_ID) {
-            return Extensions.empty()
+    private fun nodeExtensions(view: View, semanticsSource: String?): Extensions {
+        val values = LinkedHashMap<String, JsonPrimitive>()
+        if (view.id != View.NO_ID) {
+            runCatching { view.resources.getResourceName(view.id) }.getOrNull()?.let {
+                values["android.view.resource_id"] = JsonPrimitive(it)
+            }
         }
-        val resourceName = runCatching { view.resources.getResourceName(view.id) }.getOrNull()
-            ?: return Extensions.empty()
-        return Extensions.of(
-            mapOf("android.view.resource_id" to JsonPrimitive(resourceName)),
-        )
+        if (semanticsSource != null) {
+            values["android.capture.semantics_source"] = JsonPrimitive(semanticsSource)
+        }
+        return if (values.isEmpty()) Extensions.empty() else Extensions.of(values)
     }
 
     private fun stableIdentifier(view: View): StableId? {
@@ -810,6 +881,12 @@ private data class NodeCaptureInput(
     val parentId: NodeId?,
     val childIds: List<NodeId>,
     val density: Double,
+    val semanticsSource: String? = null,
+)
+
+private data class SemanticSubtreeCapture(
+    val source: String,
+    val capture: CapturedSemanticSubtree,
 )
 
 internal data class HierarchyCapture(

@@ -43,6 +43,10 @@ Omitting the Scenario extra opens the manifest-driven chooser. Omitting the prof
 
 `MainActivity` is `singleTop`. A new Intent containing `VISTREA_RUNTIME_HOST` or `VISTREA_RUNTIME_PORT` is treated as an explicit Runtime endpoint update: a complete valid configuration with a fresh one-shot token constructs and starts a replacement connection after stopping the old one. An invalid or incomplete update leaves the active connection unchanged. A Scenario-only Intent changes the displayed Scenario while preserving the existing Runtime connection.
 
+## Compose capture wiring
+
+The Debug Runtime wiring registers `ComposeSemanticsCaptureExtension` from `dev.vistrea:runtime-compose` on the capture adapter, so any `AndroidComposeView` content would capture as real per-node semantic trees. The demo screens themselves remain View-based because the shared cross-platform Scenario manifest defines no Compose-specific behavior; the Compose capture path is exercised by the SDK's `:runtime-compose:connectedDebugAndroidTest` instead of demo UI. This dependency is Debug-only: the Release APK contains no Compose or other AndroidX classes.
+
 ## Security boundary
 
 Debug builds expose the local View Tree and can opt into the authenticated loopback Runtime transport. Both entry points live only in the `debug` source set. Release builds compile null factories, contain no transport implementation or network permission, and expose neither entry point. The underlying Android SDK also publishes an empty Release connection artifact, so a Release consumer cannot select a Debug enum at runtime to recover the client.

@@ -13,6 +13,7 @@ import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureAdapter
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureConfiguration
 import dev.vistrea.runtime.android.AndroidViewRuntimeSnapshotCaptureProvider
 import dev.vistrea.runtime.android.AndroidViewRuntimeTuningController
+import dev.vistrea.runtime.compose.ComposeSemanticsCaptureExtension
 import dev.vistrea.protocol.v1.RuntimeEventKind
 import dev.vistrea.protocol.v1.StableId
 import dev.vistrea.runtime.connection.LoopbackRuntimeClient
@@ -46,7 +47,7 @@ internal object RuntimeConnectionFactory {
         val tokenBytes = OneShotRuntimeAuthorization.read(activity) ?: return null
         return try {
             val adapter = AndroidViewRuntimeCaptureAdapter(
-                AndroidViewRuntimeCaptureConfiguration(
+                configuration = AndroidViewRuntimeCaptureConfiguration(
                     projectId = ProjectId(PROJECT_ID),
                     buildId = BuildId(BUILD_ID),
                     deviceId = DeviceId(DEVICE_ID),
@@ -56,6 +57,11 @@ internal object RuntimeConnectionFactory {
                     sdkVersion = "0.1.0",
                     adapterVersion = "0.1.0",
                 ),
+                // Any Compose content behind an AndroidComposeView captures as
+                // real semantic nodes; the demo scenarios themselves remain
+                // View-based because the shared cross-platform scenario
+                // manifest defines no Compose-specific behavior yet.
+                semanticsExtensions = listOf(ComposeSemanticsCaptureExtension()),
             )
             val provider = AndroidViewRuntimeSnapshotCaptureProvider(
                 adapter = adapter,

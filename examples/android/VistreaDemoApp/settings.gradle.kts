@@ -21,5 +21,7 @@ includeBuild("../../../sdks/android") {
     dependencySubstitution {
         substitute(module("dev.vistrea:runtime-android"))
             .using(project(":runtime-android"))
+        substitute(module("dev.vistrea:runtime-compose"))
+            .using(project(":runtime-compose"))
     }
 }
