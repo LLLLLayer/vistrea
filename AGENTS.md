@@ -1,5 +1,7 @@
 # Vistrea Repository Guidance
 
+`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only; never replace the symlink with a divergent copy.
+
 ## Required reading
 
 Before designing, implementing, or splitting work, read:
@@ -46,6 +48,7 @@ Swift packages, from the repository root:
 ```bash
 swift test --package-path sdks/ios
 swift test --package-path apps/studio-macos
+swift test --package-path sdks/ios --filter <TestClassOrMethod>   # single Swift test
 swift run --package-path apps/studio-macos VistreaStudio   # fixture-backed when no Host is configured
 ```
 
