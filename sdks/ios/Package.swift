@@ -17,16 +17,54 @@ let package = Package(
             name: "VistreaRuntimeUIKit",
             targets: ["VistreaRuntimeUIKit"]
         ),
+        .library(
+            name: "VistreaRuntimeConnection",
+            targets: ["VistreaRuntimeConnection"]
+        ),
+        .library(
+            name: "VistreaRuntimeUIKitConnection",
+            targets: ["VistreaRuntimeUIKitConnection"]
+        ),
+        .executable(
+            name: "VistreaRuntimeInteropFixtureClient",
+            targets: ["VistreaRuntimeInteropFixtureClient"]
+        ),
     ],
     targets: [
         .target(name: "VistreaRuntimeModels"),
         .target(
+            name: "VistreaRuntimeConnection",
+            dependencies: ["VistreaRuntimeModels"]
+        ),
+        .target(
             name: "VistreaRuntimeUIKit",
             dependencies: ["VistreaRuntimeModels"]
+        ),
+        .target(
+            name: "VistreaRuntimeUIKitConnection",
+            dependencies: [
+                "VistreaRuntimeConnection",
+                "VistreaRuntimeUIKit",
+            ]
         ),
         .testTarget(
             name: "VistreaRuntimeModelsTests",
             dependencies: ["VistreaRuntimeModels"]
+        ),
+        .testTarget(
+            name: "VistreaRuntimeConnectionTests",
+            dependencies: [
+                "VistreaRuntimeConnection",
+                "VistreaRuntimeModels",
+            ]
+        ),
+        .executableTarget(
+            name: "VistreaRuntimeInteropFixtureClient",
+            dependencies: [
+                "VistreaRuntimeConnection",
+                "VistreaRuntimeModels",
+            ],
+            path: "Tests/InteropFixtureClient"
         ),
     ]
 )

@@ -9,16 +9,19 @@
 /* Begin PBXBuildFile section */
 		07CF473491ED18BA9D5C3D3A /* ScenarioStateViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5ED2A1D0CD4117541AA3A84 /* ScenarioStateViewController.swift */; };
 		0FAC067D07C5F427A26FAE59 /* ScenarioListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF679B2739AE67DF2AFF8D25 /* ScenarioListViewController.swift */; };
+		2AA2F9C52814473976DE4F58 /* DebugRuntimeConnectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88348C6854F8DC16DFB5DF60 /* DebugRuntimeConnectionController.swift */; };
 		30B78552160F986394FB6604 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */; };
 		6175E1103644B1D4A641D329 /* ErrorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63342939C1226AF013189B27 /* ErrorViewController.swift */; };
 		63DA21192944C4A772E4C9E9 /* VistreaDemoAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C36D789C3091819CC51AC129 /* VistreaDemoAppUITests.swift */; };
-		6695A984357284ACF1FF8E34 /* VistreaRuntimeUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = DDA6A09CA7A655EA0A792FBB /* VistreaRuntimeUIKit */; };
+		6695A984357284ACF1FF8E34 /* VistreaRuntimeConnection in Frameworks */ = {isa = PBXBuildFile; productRef = 522172FBED8DCA824F1C1FC1 /* VistreaRuntimeConnection */; };
 		68E5FF12544EBBF7ACF3CB54 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632B5D6EC60A02491F96DC58 /* AppDelegate.swift */; };
 		724157E63D085AF834B6CA2B /* ScenarioCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 161A15B4825786242639A385 /* ScenarioCatalog.swift */; };
+		769639C05EDCDE3C5D7B9A0A /* VistreaRuntimeUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = DDA6A09CA7A655EA0A792FBB /* VistreaRuntimeUIKit */; };
 		8E8C2AAA4B74DBFE7C50D2CC /* v1 in Resources */ = {isa = PBXBuildFile; fileRef = E2959B615B3C6EF5F06B971B /* v1 */; };
 		AB62149C2F44F4C53A8D581E /* VistreaRuntimeModels in Frameworks */ = {isa = PBXBuildFile; productRef = 0FE9807DBF8628F1979EE85F /* VistreaRuntimeModels */; };
 		BA64BCFBF74F3B41DCF79BD4 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 445F4E971917BB39FB8B70CA /* manifest.json */; };
 		DF8219F00E8536C126C4F418 /* ScenarioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A39FF8BEF12A922224503C /* ScenarioModels.swift */; };
+		F5B96AFBA2FC688B8C28851C /* VistreaRuntimeUIKitConnection in Frameworks */ = {isa = PBXBuildFile; productRef = C4A1AC38DAD917062950B8F3 /* VistreaRuntimeUIKitConnection */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,6 +41,7 @@
 		63342939C1226AF013189B27 /* ErrorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorViewController.swift; sourceTree = "<group>"; };
 		761C269257DCCE229DDC7498 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = ../../../sdks/ios; sourceTree = SOURCE_ROOT; };
 		7DE89CC72CED9C526739A48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		88348C6854F8DC16DFB5DF60 /* DebugRuntimeConnectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugRuntimeConnectionController.swift; sourceTree = "<group>"; };
 		90A39FF8BEF12A922224503C /* ScenarioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModels.swift; sourceTree = "<group>"; };
 		9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorViewController.swift; sourceTree = "<group>"; };
 		9CE5D298AC09901745691E29 /* VistreaDemoApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VistreaDemoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -54,7 +58,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				AB62149C2F44F4C53A8D581E /* VistreaRuntimeModels in Frameworks */,
-				6695A984357284ACF1FF8E34 /* VistreaRuntimeUIKit in Frameworks */,
+				6695A984357284ACF1FF8E34 /* VistreaRuntimeConnection in Frameworks */,
+				769639C05EDCDE3C5D7B9A0A /* VistreaRuntimeUIKit in Frameworks */,
+				F5B96AFBA2FC688B8C28851C /* VistreaRuntimeUIKitConnection in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -73,6 +79,7 @@
 			isa = PBXGroup;
 			children = (
 				632B5D6EC60A02491F96DC58 /* AppDelegate.swift */,
+				88348C6854F8DC16DFB5DF60 /* DebugRuntimeConnectionController.swift */,
 				63342939C1226AF013189B27 /* ErrorViewController.swift */,
 				7DE89CC72CED9C526739A48E /* Info.plist */,
 				9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */,
@@ -140,7 +147,9 @@
 			name = VistreaDemoApp;
 			packageProductDependencies = (
 				0FE9807DBF8628F1979EE85F /* VistreaRuntimeModels */,
+				522172FBED8DCA824F1C1FC1 /* VistreaRuntimeConnection */,
 				DDA6A09CA7A655EA0A792FBB /* VistreaRuntimeUIKit */,
+				C4A1AC38DAD917062950B8F3 /* VistreaRuntimeUIKitConnection */,
 			);
 			productName = VistreaDemoApp;
 			productReference = 9CE5D298AC09901745691E29 /* VistreaDemoApp.app */;
@@ -222,6 +231,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				68E5FF12544EBBF7ACF3CB54 /* AppDelegate.swift in Sources */,
+				2AA2F9C52814473976DE4F58 /* DebugRuntimeConnectionController.swift in Sources */,
 				6175E1103644B1D4A641D329 /* ErrorViewController.swift in Sources */,
 				30B78552160F986394FB6604 /* InspectorViewController.swift in Sources */,
 				724157E63D085AF834B6CA2B /* ScenarioCatalog.swift in Sources */,
@@ -496,6 +506,14 @@
 		0FE9807DBF8628F1979EE85F /* VistreaRuntimeModels */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VistreaRuntimeModels;
+		};
+		522172FBED8DCA824F1C1FC1 /* VistreaRuntimeConnection */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VistreaRuntimeConnection;
+		};
+		C4A1AC38DAD917062950B8F3 /* VistreaRuntimeUIKitConnection */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VistreaRuntimeUIKitConnection;
 		};
 		DDA6A09CA7A655EA0A792FBB /* VistreaRuntimeUIKit */ = {
 			isa = XCSwiftPackageProductDependency;

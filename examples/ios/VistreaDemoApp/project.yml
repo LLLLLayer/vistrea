@@ -26,7 +26,11 @@ targets:
       - package: VistreaIOSSDK
         product: VistreaRuntimeModels
       - package: VistreaIOSSDK
+        product: VistreaRuntimeConnection
+      - package: VistreaIOSSDK
         product: VistreaRuntimeUIKit
+      - package: VistreaIOSSDK
+        product: VistreaRuntimeUIKitConnection
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.demo
@@ -62,8 +66,19 @@ schemes:
     run:
       config: Debug
       environmentVariables:
-        VISTREA_SCENARIO_ID: demo.navigation.basic
-        VISTREA_SCENARIO_PROFILE: baseline
+        - variable: VISTREA_SCENARIO_ID
+          value: demo.navigation.basic
+        - variable: VISTREA_SCENARIO_PROFILE
+          value: baseline
+        - variable: VISTREA_RUNTIME_HOST
+          value: 127.0.0.1
+          isEnabled: false
+        - variable: VISTREA_RUNTIME_PORT
+          value: "0"
+          isEnabled: false
+        - variable: VISTREA_RUNTIME_TOKEN
+          value: ""
+          isEnabled: false
     test:
       config: Debug
       targets:

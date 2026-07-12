@@ -3,6 +3,9 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
+#if DEBUG
+    private var runtimeConnectionController: DebugRuntimeConnectionController?
+#endif
 
     func application(
         _ application: UIApplication,
@@ -37,6 +40,24 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             window.rootViewController = ErrorViewController(error: error)
         }
         window.makeKeyAndVisible()
+#if DEBUG
+        let runtimeConnectionController = DebugRuntimeConnectionController(
+            windowProvider: { [weak window] in
+                window.map { [$0] } ?? []
+            },
+            scenarioIDProvider: {
+                ProcessInfo.processInfo.environment["VISTREA_SCENARIO_ID"]
+            }
+        )
+        self.runtimeConnectionController = runtimeConnectionController
+        runtimeConnectionController?.start()
+#endif
         return true
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+#if DEBUG
+        runtimeConnectionController?.stop()
+#endif
     }
 }

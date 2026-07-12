@@ -9,9 +9,22 @@ The canonical native UIKit executable fixture for Vistrea.
 - Scenario-required nodes use the shared stable node IDs as UIKit accessibility identifiers.
 - The data-driven UIKit renderer supports screen, loading, error, transient, overlay, dialog, banner, tap, type, wait, dismiss, and back fixtures needed by the current suite.
 - A Debug-only in-app Runtime Inspector captures the real hierarchy and screenshot through `VistreaRuntimeUIKit`, then shows the canonical Snapshot identity and View Tree.
+- A Debug-only Runtime connection entry composes the same UIKit capture with `VistreaRuntimeConnection` and serves authenticated Host `capture_request` messages.
 - Release builds do not expose the Inspector entry point.
 
-The loopback Host transport and automation provider are separate implementation slices. User and automation actions operate UIKit controls; the Runtime SDK only observes their results.
+The automation provider remains a separate implementation slice. User and automation actions operate UIKit controls; the Runtime SDK only observes their results.
+
+## Debug Runtime connection
+
+The checked-in Debug scheme contains disabled placeholders for these launch variables:
+
+- `VISTREA_RUNTIME_HOST`: `127.0.0.1` or `::1`;
+- `VISTREA_RUNTIME_PORT`: the ephemeral Node Host port;
+- `VISTREA_RUNTIME_TOKEN`: a per-run token of at least 32 bytes.
+
+Enable and populate all three only for the active Host run. The token is never committed, placed in command-line arguments, included in a Snapshot, or reflected in transport errors. The bootstrap source is compiled under `#if DEBUG`; Release has no launch-variable lookup and the SDK configuration also fails closed outside Debug or an explicitly compiled Internal build.
+
+The current direct path targets the iOS Simulator. Physical-device discovery and trusted Host forwarding remain separate follow-up work.
 
 ## Generate and verify
 
