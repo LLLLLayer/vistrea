@@ -22,6 +22,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "apps/**/*.ts",
     "data/**/*.ts",
     "engine/**/*.ts",
     "integrations/**/*.ts",
