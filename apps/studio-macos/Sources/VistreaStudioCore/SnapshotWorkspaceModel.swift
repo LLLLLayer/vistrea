@@ -31,6 +31,14 @@ public enum ScreenshotEvidencePhase: Equatable, Sendable {
     case unavailable(String)
 }
 
+public enum EventTimelinePhase: Equatable, Sendable {
+    case idle
+    case loading
+    case content
+    case empty
+    case failure(String)
+}
+
 @MainActor
 public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var contentPhase: WorkspaceContentPhase = .idle
@@ -43,6 +51,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var selectedNodeID: String?
     @Published public private(set) var selectedNode: NodePresentation?
     @Published public private(set) var screenshotData: Data?
+    @Published public private(set) var eventsPhase: EventTimelinePhase = .idle
+    @Published public private(set) var events: [EventListItem] = []
+    @Published public private(set) var reportedEventGaps: [EventSequenceGap] = []
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isCapturing = false
     @Published public private(set) var operationError: String?
@@ -69,6 +80,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         } catch {
             connectionPhase = .unavailable(Self.message(for: error))
         }
+
+        await loadEventTimeline()
 
         do {
             let page = try await client.listSnapshots()
@@ -150,6 +163,27 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     public func dismissOperationError() {
         operationError = nil
+    }
+
+    /// Reloads the persisted Runtime event timeline, newest events first.
+    public func loadEventTimeline() async {
+        eventsPhase = .loading
+        do {
+            let timeline = try await client.getEventTimeline(eventEpochID: nil)
+            let ordered = timeline.events.sorted { left, right in
+                if left.eventEpochID.rawValue != right.eventEpochID.rawValue {
+                    return left.eventEpochID.rawValue > right.eventEpochID.rawValue
+                }
+                return left.sequence.rawValue > right.sequence.rawValue
+            }
+            events = ordered.map(EventListItem.init(event:))
+            reportedEventGaps = timeline.reportedGaps
+            eventsPhase = events.isEmpty ? .empty : .content
+        } catch {
+            events = []
+            reportedEventGaps = []
+            eventsPhase = .failure(Self.message(for: error))
+        }
     }
 
     private func apply(snapshot: RuntimeSnapshot) throws {

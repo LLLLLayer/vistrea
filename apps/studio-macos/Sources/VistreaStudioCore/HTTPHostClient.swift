@@ -163,6 +163,26 @@ public struct HTTPHostClient: HostClient, Sendable {
         return response.body
     }
 
+    public func getEventTimeline(eventEpochID: String? = nil) async throws -> EventTimeline {
+        if let eventEpochID {
+            guard (try? EventEpochID(validating: eventEpochID)) != nil else {
+                throw HostClientError.invalidIdentifier(eventEpochID)
+            }
+        }
+        let response = try await request(
+            method: "GET",
+            path: ["v1", "events"],
+            query: eventEpochID.map { [URLQueryItem(name: "event_epoch_id", value: $0)] } ?? []
+        )
+        try requireStatus(response, expected: [200])
+        try requireJSONSize(response.body)
+        do {
+            return try JSONDecoder().decode(EventTimeline.self, from: response.body)
+        } catch {
+            throw HostClientError.decoding(String(describing: error))
+        }
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {
@@ -203,6 +223,7 @@ public struct HTTPHostClient: HostClient, Sendable {
     private func request(
         method: String,
         path: [String],
+        query: [URLQueryItem] = [],
         headers: [String: String] = [:],
         body: Data? = nil,
         accept: String = "application/json",
@@ -211,6 +232,9 @@ public struct HTTPHostClient: HostClient, Sendable {
         var url = baseURL
         for component in path {
             url.append(path: component)
+        }
+        if !query.isEmpty {
+            url.append(queryItems: query)
         }
         var request = URLRequest(url: url)
         request.httpMethod = method

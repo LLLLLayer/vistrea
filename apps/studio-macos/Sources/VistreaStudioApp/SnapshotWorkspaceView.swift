@@ -40,8 +40,13 @@ struct SnapshotWorkspaceView: View {
             }
         case .content:
             HSplitView {
-                SnapshotListPane(model: model)
-                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
+                VSplitView {
+                    SnapshotListPane(model: model)
+                        .frame(minHeight: 200)
+                    EventTimelinePane(model: model)
+                        .frame(minHeight: 140)
+                }
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
                 VSplitView {
                     ScreenshotPane(model: model)
                         .frame(minHeight: 280)
@@ -51,6 +56,70 @@ struct SnapshotWorkspaceView: View {
                 NodeDetailsPane(model: model)
                     .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
             }
+        }
+    }
+}
+
+private struct EventTimelinePane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneHeader(title: "Events", systemImage: "clock.arrow.circlepath")
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.eventsPhase {
+        case .idle, .loading:
+            ProgressView("Loading Runtime events…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            Text("No Runtime events have been persisted yet.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.events) { event in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(event.kind)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("#\(event.sequence)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let stableID = event.stableID {
+                        Text(stableID)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if let summary = event.summary {
+                        Text(summary)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    Text(event.wallTime)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .padding(.vertical, 2)
+                .accessibilityLabel("Runtime event \(event.kind) sequence \(event.sequence)")
+            }
+            .listStyle(.sidebar)
         }
     }
 }

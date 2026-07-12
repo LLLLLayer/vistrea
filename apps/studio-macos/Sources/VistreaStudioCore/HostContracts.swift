@@ -6,20 +6,74 @@ public enum HostReadiness: String, Codable, Equatable, Sendable {
     case degraded
 }
 
+public enum RuntimeEventsPumpState: String, Codable, Equatable, Sendable {
+    case idle
+    case unsupported
+    case running
+    case stopped
+    case failed
+}
+
+public struct RuntimeEventsStatus: Codable, Equatable, Sendable {
+    public let state: RuntimeEventsPumpState
+    public let eventEpochID: String?
+    public let persistedThroughSequence: UInt64?
+    public let errorCode: String?
+
+    public init(
+        state: RuntimeEventsPumpState,
+        eventEpochID: String? = nil,
+        persistedThroughSequence: UInt64? = nil,
+        errorCode: String? = nil
+    ) {
+        self.state = state
+        self.eventEpochID = eventEpochID
+        self.persistedThroughSequence = persistedThroughSequence
+        self.errorCode = errorCode
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case state
+        case eventEpochID = "event_epoch_id"
+        case persistedThroughSequence = "persisted_through_sequence"
+        case errorCode = "error_code"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        state = try container.decode(RuntimeEventsPumpState.self, forKey: .state)
+        eventEpochID = try container.decodeIfPresent(String.self, forKey: .eventEpochID)
+        persistedThroughSequence = try container.decodeIfPresent(
+            UInt64.self,
+            forKey: .persistedThroughSequence
+        )
+        errorCode = try container.decodeIfPresent(String.self, forKey: .errorCode)
+    }
+}
+
 public struct HostStatus: Codable, Equatable, Sendable {
     public let status: HostReadiness
     public let runtimeConnected: Bool
+    public let runtimeEvents: RuntimeEventsStatus?
     public let message: String?
 
-    public init(status: HostReadiness, runtimeConnected: Bool, message: String? = nil) {
+    public init(
+        status: HostReadiness,
+        runtimeConnected: Bool,
+        runtimeEvents: RuntimeEventsStatus? = nil,
+        message: String? = nil
+    ) {
         self.status = status
         self.runtimeConnected = runtimeConnected
+        self.runtimeEvents = runtimeEvents
         self.message = message
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case status
         case runtimeConnected = "runtime_connected"
+        case runtimeEvents = "runtime_events"
         case message
     }
 
@@ -28,7 +82,56 @@ public struct HostStatus: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         status = try container.decode(HostReadiness.self, forKey: .status)
         runtimeConnected = try container.decode(Bool.self, forKey: .runtimeConnected)
+        runtimeEvents = try container.decodeIfPresent(RuntimeEventsStatus.self, forKey: .runtimeEvents)
         message = try container.decodeIfPresent(String.self, forKey: .message)
+    }
+}
+
+public struct EventSequenceGap: Codable, Equatable, Sendable {
+    public let firstSequence: UInt64
+    public let lastSequence: UInt64
+
+    public init(firstSequence: UInt64, lastSequence: UInt64) {
+        self.firstSequence = firstSequence
+        self.lastSequence = lastSequence
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case firstSequence = "first_sequence"
+        case lastSequence = "last_sequence"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        firstSequence = try container.decode(UInt64.self, forKey: .firstSequence)
+        lastSequence = try container.decode(UInt64.self, forKey: .lastSequence)
+    }
+}
+
+public struct EventTimeline: Codable, Equatable, Sendable {
+    public let eventEpochID: String?
+    public let events: [RuntimeEvent]
+    public let reportedGaps: [EventSequenceGap]
+
+    public init(eventEpochID: String? = nil, events: [RuntimeEvent], reportedGaps: [EventSequenceGap]) {
+        self.eventEpochID = eventEpochID
+        self.events = events
+        self.reportedGaps = reportedGaps
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case eventEpochID = "event_epoch_id"
+        case events
+        case reportedGaps = "reported_gaps"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eventEpochID = try container.decodeIfPresent(String.self, forKey: .eventEpochID)
+        events = try container.decode([RuntimeEvent].self, forKey: .events)
+        reportedGaps = try container.decode([EventSequenceGap].self, forKey: .reportedGaps)
     }
 }
 
@@ -159,6 +262,7 @@ public protocol HostClient: Sendable {
     func getSnapshot(id: String) async throws -> RuntimeSnapshot
     func getObject(hash: String, range: ObjectByteRange?) async throws -> Data
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot
+    func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline
 }
 
 public enum HostClientError: Error, Equatable, Sendable {

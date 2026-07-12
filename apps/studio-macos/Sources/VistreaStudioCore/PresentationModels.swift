@@ -35,6 +35,30 @@ public struct DetailField: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct EventListItem: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let sequence: UInt64
+    public let kind: String
+    public let stableID: String?
+    public let wallTime: String
+    public let summary: String?
+    public let eventEpochID: String
+
+    public init(event: RuntimeEvent) {
+        id = event.eventID.rawValue
+        sequence = event.sequence.rawValue
+        kind = event.kind.rawValue
+        stableID = event.stableID?.rawValue
+        wallTime = event.time.wallTime.rawValue
+        if case let .string(text)? = event.payload?["text"] {
+            summary = text
+        } else {
+            summary = nil
+        }
+        eventEpochID = event.eventEpochID.rawValue
+    }
+}
+
 public struct RectPresentation: Equatable, Sendable {
     public let x: Double
     public let y: Double

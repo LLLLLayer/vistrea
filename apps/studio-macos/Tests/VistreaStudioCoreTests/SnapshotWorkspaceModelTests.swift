@@ -44,6 +44,49 @@ final class SnapshotWorkspaceModelTests: XCTestCase {
         XCTAssertEqual(model.selectedNode?.stableID, "demo.home.root")
     }
 
+    func testEventTimelineLoadsNewestFirstWithTransientSummary() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let epoch = try EventEpochID(validating: "epoch_019f0000-0000-7000-8000-000000000001")
+        let presented = try RuntimeEvent(
+            eventID: EventID(validating: "event_019f0000-0000-7000-8000-000000000001"),
+            protocolVersion: ProtocolVersion(minor: 0),
+            eventEpochID: epoch,
+            sequence: JSONSafeUInt(validating: 1),
+            time: EventTime(wallTime: Timestamp(validating: "2026-07-12T00:00:01.100Z")),
+            kind: .transientPresented,
+            stableID: StableID(validating: "demo.toast.success"),
+            durationMilliseconds: 2_000,
+            payload: ["text": .string("Saved successfully")]
+        )
+        let dismissed = try RuntimeEvent(
+            eventID: EventID(validating: "event_019f0000-0000-7000-8000-000000000002"),
+            protocolVersion: ProtocolVersion(minor: 0),
+            eventEpochID: epoch,
+            sequence: JSONSafeUInt(validating: 2),
+            time: EventTime(wallTime: Timestamp(validating: "2026-07-12T00:00:03.100Z")),
+            kind: .transientDismissed,
+            stableID: StableID(validating: "demo.toast.success")
+        )
+        let model = SnapshotWorkspaceModel(
+            client: FixtureHostClient(
+                snapshots: [snapshot],
+                eventTimeline: EventTimeline(events: [presented, dismissed], reportedGaps: [])
+            )
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(model.eventsPhase, .content)
+        XCTAssertEqual(model.events.map(\.sequence), [2, 1])
+        XCTAssertEqual(model.events.first?.kind, "transient_dismissed")
+        XCTAssertEqual(model.events.last?.summary, "Saved successfully")
+        XCTAssertEqual(model.events.last?.stableID, "demo.toast.success")
+
+        let emptyModel = SnapshotWorkspaceModel(client: FixtureHostClient(snapshots: [snapshot]))
+        await emptyModel.refresh()
+        XCTAssertEqual(emptyModel.eventsPhase, .empty)
+    }
+
     func testEmptyAndFailureStatesRemainDistinct() async {
         let emptyModel = SnapshotWorkspaceModel(client: FixtureHostClient(snapshots: []))
         await emptyModel.refresh()
@@ -125,6 +168,9 @@ private struct AlwaysFailingHostClient: HostClient {
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot {
         throw HostClientError.transport("offline")
     }
+    func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
+        throw HostClientError.transport("offline")
+    }
 }
 
 private actor OperationGateHostClient: HostClient {
@@ -171,6 +217,10 @@ private actor OperationGateHostClient: HostClient {
         return snapshot
     }
 
+    func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
+        EventTimeline(events: [], reportedGaps: [])
+    }
+
     func isStatusWaiting() -> Bool { statusContinuation != nil }
     func isCaptureWaiting() -> Bool { captureContinuation != nil }
 
@@ -210,4 +260,8 @@ private struct CaptureResultHostClient: HostClient {
     }
 
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot { captured }
+
+    func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
+        EventTimeline(events: [], reportedGaps: [])
+    }
 }
