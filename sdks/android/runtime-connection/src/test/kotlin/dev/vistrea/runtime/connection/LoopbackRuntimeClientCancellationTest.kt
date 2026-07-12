@@ -9,6 +9,7 @@ import kotlin.system.measureTimeMillis
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
@@ -69,11 +70,9 @@ class LoopbackRuntimeClientCancellationTest {
             }
 
             assertTrue(cancellationMilliseconds < 2_000)
-            assertTrue(failure is RuntimeConnectionException)
-            assertEquals(
-                RuntimeConnectionErrorCode.CANCELLED,
-                (failure as RuntimeConnectionException).code,
-            )
+            // Caller cancellation keeps the coroutine cancellation contract
+            // instead of being converted into a RuntimeConnectionException.
+            assertTrue(failure is CancellationException)
             assertEquals(RuntimeConnectionState.FAILED, client.state)
         } finally {
             client.close()

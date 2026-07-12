@@ -78,6 +78,7 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.util.ArrayDeque
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.JsonPrimitive
 
 private const val ADAPTER_NAME = "view"
@@ -116,6 +117,12 @@ class CapturedAndroidRuntimeObject(
     /** Returns an isolated copy so callers cannot invalidate the captured ObjectRef hash. */
     val bytes: ByteArray
         get() = encodedBytes.copyOf()
+
+    /**
+     * The captured bytes without an isolating copy, for transport payloads
+     * that immediately take their own defensive copy of the array.
+     */
+    internal fun transportBytes(): ByteArray = encodedBytes
 }
 
 data class AndroidViewRuntimeCaptureResult(
@@ -151,7 +158,19 @@ class AndroidViewRuntimeCaptureAdapter(
         rootView: View,
         scenarioId: String? = null,
         includeScreenshot: Boolean = true,
-    ): AndroidViewRuntimeCaptureResult {
+    ): AndroidViewRuntimeCaptureResult = beginCapture(rootView, scenarioId, includeScreenshot).encode()
+
+    /**
+     * Runs only the main-thread half of a capture: hierarchy observation plus
+     * the screenshot bitmap draw. The returned stage performs the CPU-heavy
+     * PNG encoding and hashing and may be consumed on any thread, so callers
+     * can move that work off the main thread.
+     */
+    fun beginCapture(
+        rootView: View,
+        scenarioId: String? = null,
+        includeScreenshot: Boolean = true,
+    ): StagedAndroidViewRuntimeCapture {
         validateCaptureRoot(rootView)
         val snapshotRawId = RuntimeIdentifierFactory.make("snapshot")
         val treeId = TreeId(
@@ -159,15 +178,38 @@ class AndroidViewRuntimeCaptureAdapter(
         )
         val treeMoment = CaptureMoment.now()
         val display = captureDisplay(rootView)
-        val components = CaptureComponents(
-            snapshotId = SnapshotId(snapshotRawId),
-            treeId = treeId,
-            treeMoment = treeMoment,
-            display = display,
-            hierarchy = captureHierarchy(rootView, snapshotRawId, display.density),
-            screenshot = if (includeScreenshot) captureScreenshot(rootView) else null,
+        return StagedAndroidViewRuntimeCapture(
+            adapter = this,
+            stage = StagedCaptureComponents(
+                context = rootView.context,
+                scenarioId = scenarioId,
+                snapshotId = SnapshotId(snapshotRawId),
+                treeId = treeId,
+                treeMoment = treeMoment,
+                display = display,
+                hierarchy = captureHierarchy(rootView, snapshotRawId, display.density),
+                screenshot = if (includeScreenshot) drawScreenshot(rootView) else null,
+            ),
         )
-        return assembleResult(rootView.context, scenarioId, components)
+    }
+
+    internal fun encodeStage(stage: StagedCaptureComponents): AndroidViewRuntimeCaptureResult {
+        val screenshot = stage.screenshot?.let { staged ->
+            try {
+                encodeScreenshot(staged)
+            } finally {
+                staged.bitmap.recycle()
+            }
+        }
+        val components = CaptureComponents(
+            snapshotId = stage.snapshotId,
+            treeId = stage.treeId,
+            treeMoment = stage.treeMoment,
+            display = stage.display,
+            hierarchy = stage.hierarchy,
+            screenshot = screenshot,
+        )
+        return assembleResult(stage.context, stage.scenarioId, components)
     }
 
     private fun validateCaptureRoot(rootView: View) {
@@ -484,7 +526,7 @@ class AndroidViewRuntimeCaptureAdapter(
         )
     }
 
-    private fun captureScreenshot(rootView: View): ScreenshotCapture {
+    private fun drawScreenshot(rootView: View): StagedScreenshot {
         val pixels = rootView.width.toLong() * rootView.height.toLong()
         if (pixels > configuration.maximumScreenshotPixels) {
             throw AndroidRuntimeCaptureException(
@@ -494,19 +536,31 @@ class AndroidViewRuntimeCaptureAdapter(
         }
         val startedAt = CaptureMoment.now()
         val bitmap = Bitmap.createBitmap(rootView.width, rootView.height, Bitmap.Config.ARGB_8888)
-        val bytes = try {
+        try {
             rootView.draw(Canvas(bitmap))
-            ByteArrayOutputStream().use { output ->
-                if (!bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, output)) {
-                    throw AndroidRuntimeCaptureException(
-                        AndroidRuntimeCaptureFailure.SCREENSHOT_ENCODING_FAILED,
-                        "Android PNG encoding failed.",
-                    )
-                }
-                output.toByteArray()
-            }
-        } finally {
+        } catch (error: Throwable) {
             bitmap.recycle()
+            throw error
+        }
+        return StagedScreenshot(
+            bitmap = bitmap,
+            pixelSize = PixelSize(
+                JsonSafePositiveInteger(rootView.width.toLong()),
+                JsonSafePositiveInteger(rootView.height.toLong()),
+            ),
+            startedAt = startedAt,
+        )
+    }
+
+    private fun encodeScreenshot(staged: StagedScreenshot): ScreenshotCapture {
+        val bytes = ByteArrayOutputStream().use { output ->
+            if (!staged.bitmap.compress(Bitmap.CompressFormat.PNG, PNG_QUALITY, output)) {
+                throw AndroidRuntimeCaptureException(
+                    AndroidRuntimeCaptureFailure.SCREENSHOT_ENCODING_FAILED,
+                    "Android PNG encoding failed.",
+                )
+            }
+            output.toByteArray()
         }
         val finishedAt = CaptureMoment.now()
         val hash = MessageDigest.getInstance("SHA-256")
@@ -522,11 +576,8 @@ class AndroidViewRuntimeCaptureAdapter(
         )
         return ScreenshotCapture(
             objectValue = CapturedAndroidRuntimeObject(reference, bytes),
-            pixelSize = PixelSize(
-                JsonSafePositiveInteger(rootView.width.toLong()),
-                JsonSafePositiveInteger(rootView.height.toLong()),
-            ),
-            startedAt = startedAt,
+            pixelSize = staged.pixelSize,
+            startedAt = staged.startedAt,
             finishedAt = finishedAt,
         )
     }
@@ -717,6 +768,36 @@ class AndroidViewRuntimeCaptureAdapter(
     }
 }
 
+/**
+ * The main-thread half of one capture: the observed hierarchy plus the drawn
+ * screenshot bitmap, before PNG encoding and hashing.
+ *
+ * Call [encode] exactly once — on any thread — to produce the final result,
+ * or [discard] to release the staged bitmap without encoding, for example
+ * after a cancellation between the two halves.
+ */
+class StagedAndroidViewRuntimeCapture internal constructor(
+    private val adapter: AndroidViewRuntimeCaptureAdapter,
+    private val stage: StagedCaptureComponents,
+) {
+    private val consumed = AtomicBoolean(false)
+
+    /** Encodes the PNG bytes and hashes, then assembles the capture result. */
+    fun encode(): AndroidViewRuntimeCaptureResult {
+        check(consumed.compareAndSet(false, true)) {
+            "This staged capture was already consumed."
+        }
+        return adapter.encodeStage(stage)
+    }
+
+    /** Releases the staged bitmap without encoding; a no-op after [encode]. */
+    fun discard() {
+        if (consumed.compareAndSet(false, true)) {
+            stage.screenshot?.bitmap?.recycle()
+        }
+    }
+}
+
 private data class TraversalItem(
     val view: View,
     val path: String,
@@ -731,12 +812,12 @@ private data class NodeCaptureInput(
     val density: Double,
 )
 
-private data class HierarchyCapture(
+internal data class HierarchyCapture(
     val rootNodeId: NodeId,
     val nodes: List<UiNode>,
 )
 
-private data class DisplayCapture(
+internal data class DisplayCapture(
     val geometry: DisplayGeometry,
     val density: Double,
     val rootCoverage: NonEmptyRect,
@@ -750,6 +831,23 @@ private data class ScreenshotCapture(
     val finishedAt: CaptureMoment,
 )
 
+internal data class StagedScreenshot(
+    val bitmap: Bitmap,
+    val pixelSize: PixelSize,
+    val startedAt: CaptureMoment,
+)
+
+internal data class StagedCaptureComponents(
+    val context: Context,
+    val scenarioId: String?,
+    val snapshotId: SnapshotId,
+    val treeId: TreeId,
+    val treeMoment: CaptureMoment,
+    val display: DisplayCapture,
+    val hierarchy: HierarchyCapture,
+    val screenshot: StagedScreenshot?,
+)
+
 private data class CaptureComponents(
     val snapshotId: SnapshotId,
     val treeId: TreeId,
@@ -759,7 +857,7 @@ private data class CaptureComponents(
     val screenshot: ScreenshotCapture?,
 )
 
-private data class CaptureMoment(
+internal data class CaptureMoment(
     val wallTime: Instant,
     val monotonicNanos: Long,
 ) {

@@ -51,6 +51,13 @@ if jar tf "$temporary_root/adapter-release.jar" | grep -q \
     echo "Release Android adapter AAR contains the protected transport bridge." >&2
     exit 1
 fi
+jar tf "$temporary_root/adapter-debug.jar" | grep -q \
+    'dev/vistrea/runtime/android/AndroidViewRuntimeTuningController.class'
+if jar tf "$temporary_root/adapter-release.jar" | grep -q \
+    'AndroidViewRuntimeTuningController'; then
+    echo "Release Android adapter AAR contains the live UI tuning controller." >&2
+    exit 1
+fi
 
 unzip -p "$demo_debug" 'classes*.dex' | strings > "$temporary_root/debug-strings.txt"
 unzip -p "$demo_release" 'classes*.dex' | strings > "$temporary_root/release-strings.txt"
@@ -58,7 +65,8 @@ for marker in \
     'VISTREA_RUNTIME_HOST' \
     'vistrea/runtime-token' \
     'vistrea-runtime-client-v1' \
-    'LoopbackRuntimeClient'; do
+    'LoopbackRuntimeClient' \
+    'AndroidViewRuntimeTuningController'; do
     grep -q "$marker" "$temporary_root/debug-strings.txt"
     if grep -q "$marker" "$temporary_root/release-strings.txt"; then
         echo "Release Demo APK contains protected Runtime marker: $marker" >&2

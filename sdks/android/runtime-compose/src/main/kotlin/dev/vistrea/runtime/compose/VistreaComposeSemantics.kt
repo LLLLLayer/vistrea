@@ -3,6 +3,8 @@ package dev.vistrea.runtime.compose
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
@@ -26,6 +28,19 @@ enum class VistreaSemanticRole(val wireName: String) {
 }
 
 /**
+ * The declared Vistrea role wire name attached as its own semantics fact.
+ *
+ * Roles such as link, text-field, or list-item have no lossless Compose
+ * `Role` equivalent, so the canonical wire name always travels on this key
+ * and a capture adapter or UIAutomator-based tooling can recover the declared
+ * role for every annotated composable.
+ */
+val VistreaRoleSemanticsKey: SemanticsPropertyKey<String> = SemanticsPropertyKey("VistreaRole")
+
+/** The canonical `UiNode.role` wire name declared through [vistreaSemantics]. */
+var SemanticsPropertyReceiver.vistreaRole: String by VistreaRoleSemanticsKey
+
+/**
  * Declares Vistrea capture semantics on a composable.
  *
  * Compose renders inside one `AndroidComposeView`, so the annotation travels
@@ -33,14 +48,21 @@ enum class VistreaSemanticRole(val wireName: String) {
  * (exposed as the resource identifier when the application enables
  * `testTagsAsResourceId`, which UIAutomator and the future Compose semantics
  * capture adapter read as the cross-platform `stable_id`), the role becomes
- * the semantics role, and the optional label becomes the content description.
- * The modifier never invokes business logic.
+ * the [VistreaRoleSemanticsKey] fact plus the closest semantics role, and the
+ * optional label becomes the content description. The modifier never invokes
+ * business logic.
  */
 fun Modifier.vistreaSemantics(
     stableId: String,
     role: VistreaSemanticRole,
     label: String? = null,
-): Modifier = testTag(stableId).semantics {
+): Modifier = testTag(stableId).semantics { applyVistreaSemantics(role, label) }
+
+internal fun SemanticsPropertyReceiver.applyVistreaSemantics(
+    role: VistreaSemanticRole,
+    label: String?,
+) {
+    vistreaRole = role.wireName
     if (label != null) {
         contentDescription = label
     }

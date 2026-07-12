@@ -21,11 +21,24 @@ private class ScriptedTuningController(
     initial: Map<String, Double>,
 ) : RuntimeTuningApplying {
     private val alphaByStableId = initial.toMutableMap()
+    private val setAlphaCounts = mutableMapOf<String, Int>()
+    var vanishOnSetAlpha = false
+    var failSecondSetAlphaFor: String? = null
 
     override suspend fun currentAlpha(stableId: String): Double? = alphaByStableId[stableId]
 
-    override suspend fun setAlpha(stableId: String, value: Double) {
+    override suspend fun setAlpha(stableId: String, value: Double): Boolean {
+        val callCount = (setAlphaCounts[stableId] ?: 0) + 1
+        setAlphaCounts[stableId] = callCount
+        if (vanishOnSetAlpha || !alphaByStableId.containsKey(stableId)) {
+            return false
+        }
+        if (stableId == failSecondSetAlphaFor && callCount > 1) {
+            // The apply write succeeded; only the later restore write fails.
+            return false
+        }
         alphaByStableId[stableId] = value
+        return true
     }
 
     fun alpha(stableId: String): Double? = alphaByStableId[stableId]
@@ -125,6 +138,61 @@ class RuntimeTuningProcessorTest {
             it.jsonObject["reason_code"]?.jsonPrimitive?.content
         }
         assertEquals(listOf("target_not_found", "policy_blocked"), reasons)
+    }
+
+    @Test
+    fun `rejects a change whose target another active application already covers`() = runBlocking {
+        val controller = ScriptedTuningController(mapOf("demo.home.open_catalog" to 1.0))
+        val outcome = RuntimeTuningProcessor.apply(
+            patch = alphaPatch(preview = 0.7),
+            expectedSnapshotId = SNAPSHOT_ID,
+            lastCapturedSnapshotId = SNAPSHOT_ID,
+            connectionId = CONNECTION_ID,
+            controller = controller,
+            activeTargetStableIds = setOf("demo.home.open_catalog"),
+        )
+        assertFalse(outcome.isActive)
+        assertTrue(outcome.restoreEntries.isEmpty())
+        assertEquals(1.0, controller.alpha("demo.home.open_catalog"))
+        assertEquals("policy_blocked", firstRejectionReason(outcome.application))
+    }
+
+    @Test
+    fun `rejects a change whose target vanishes before the preview applies`() = runBlocking {
+        val controller = ScriptedTuningController(mapOf("demo.home.open_catalog" to 1.0))
+        controller.vanishOnSetAlpha = true
+        val outcome = RuntimeTuningProcessor.apply(
+            patch = alphaPatch(preview = 0.7),
+            expectedSnapshotId = SNAPSHOT_ID,
+            lastCapturedSnapshotId = SNAPSHOT_ID,
+            connectionId = CONNECTION_ID,
+            controller = controller,
+        )
+        assertFalse(outcome.isActive)
+        assertTrue(outcome.restoreEntries.isEmpty())
+        assertEquals(1.0, controller.alpha("demo.home.open_catalog"))
+        assertEquals("target_not_found", firstRejectionReason(outcome.application))
+    }
+
+    @Test
+    fun `reports a failed restore honestly after a partial failure`() = runBlocking {
+        val controller = ScriptedTuningController(mapOf("demo.home.open_catalog" to 1.0))
+        controller.failSecondSetAlphaFor = "demo.home.open_catalog"
+        val outcome = RuntimeTuningProcessor.apply(
+            patch = twoChangePatch(),
+            expectedSnapshotId = SNAPSHOT_ID,
+            lastCapturedSnapshotId = SNAPSHOT_ID,
+            connectionId = CONNECTION_ID,
+            controller = controller,
+        )
+        assertFalse(outcome.isActive)
+        assertTrue(outcome.restoreEntries.isEmpty())
+        assertEquals(0, outcome.application["applied_changes"]?.jsonArray?.size)
+        val reasons = outcome.application["rejected_changes"]?.jsonArray.orEmpty().map {
+            it.jsonObject["reason_code"]?.jsonPrimitive?.content
+        }
+        // The applied change failed to restore, so it must not claim success.
+        assertEquals(listOf("target_not_found", "internal"), reasons)
     }
 
     private fun firstRejectionReason(application: JsonObject): String? =

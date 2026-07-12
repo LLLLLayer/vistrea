@@ -15,14 +15,17 @@ import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -115,7 +118,14 @@ class LoopbackRuntimeClient(
     private val eventLock = Any()
     private val tuningLock = Any()
     private val sendMutex = Mutex()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Every launched coroutine already maps failures to terminal connection or
+    // request states; the handler guarantees that nothing an app-implemented
+    // provider or controller throws ever escapes to the process default
+    // handler and crashes the host application.
+    private val containedExceptionHandler = CoroutineExceptionHandler { _, _ -> }
+    private val scope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO + containedExceptionHandler)
     private val terminal = CompletableDeferred<Unit>()
     private val lineDecoder = BoundedStrictJsonLineDecoder(configuration.maximumInboundLineBytes)
     private val captureJobs = mutableMapOf<String, Job>()
@@ -127,6 +137,12 @@ class LoopbackRuntimeClient(
     @Volatile
     private var lastCapturedSnapshotId: String? = null
     private val activeTunings = mutableMapOf<String, ActiveTuningState>()
+
+    // Restore failures cannot travel in the schema-fixed terminal application,
+    // so they are tracked here instead of being silently claimed as success.
+    private val unrestoredTuningChanges = AtomicLong(0)
+    internal val unrestoredTuningChangeCount: Long
+        get() = unrestoredTuningChanges.get()
     @Volatile
     private var socket: Socket? = null
 
@@ -154,7 +170,8 @@ class LoopbackRuntimeClient(
                 terminalState = RuntimeConnectionState.FAILED,
                 error = RuntimeConnectionException(RuntimeConnectionErrorCode.CANCELLED),
             )
-            throw RuntimeConnectionException(RuntimeConnectionErrorCode.CANCELLED)
+            // Caller cancellation must keep the coroutine cancellation contract.
+            throw error
         } catch (error: RuntimeConnectionException) {
             shutdown(RuntimeConnectionState.FAILED, error)
             throw error
@@ -170,7 +187,8 @@ class LoopbackRuntimeClient(
                 terminalState = RuntimeConnectionState.FAILED,
                 error = RuntimeConnectionException(RuntimeConnectionErrorCode.CANCELLED),
             )
-            throw RuntimeConnectionException(RuntimeConnectionErrorCode.CANCELLED)
+            // Caller cancellation must keep the coroutine cancellation contract.
+            throw error
         }
     }
 
@@ -568,6 +586,10 @@ class LoopbackRuntimeClient(
                 return
             }
             terminalClaimed = true
+            // The tuning staleness check may only reference Snapshots whose
+            // capture bodies the Host fully received; a cancelled or failed
+            // capture never claims the terminal and never stamps.
+            lastCapturedSnapshotId = validated.snapshot.snapshotId.value
             send(WireCaptureComplete(type = "capture_complete", requestId = requestId))
         } catch (_: CancellationException) {
             // A Host cancellation already owns the claim; provider-local cancellation reports error.
@@ -775,6 +797,11 @@ class LoopbackRuntimeClient(
         ) {
             throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
         }
+        val activeTargetStableIds = synchronized(tuningLock) {
+            activeTunings.values.flatMapTo(mutableSetOf()) { state ->
+                state.restoreEntries.map(RuntimeTuningRestoreEntry::stableId)
+            }
+        }
         val outcome = try {
             RuntimeTuningProcessor.apply(
                 patch = message.command.patch,
@@ -782,6 +809,7 @@ class LoopbackRuntimeClient(
                 lastCapturedSnapshotId = lastCapturedSnapshotId,
                 connectionId = boundConnectionId,
                 controller = controller,
+                activeTargetStableIds = activeTargetStableIds,
             )
         } catch (_: RuntimeConnectionException) {
             send(
@@ -887,10 +915,23 @@ class LoopbackRuntimeClient(
         }
     }
 
+    // Every override must stay reversible: restores run to completion even
+    // when the owning scope is cancelled mid-restore, and one failing entry
+    // never prevents the remaining originals from being restored.
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun restoreTuningEntries(entries: List<RuntimeTuningRestoreEntry>) {
         val controller = tuningController ?: return
-        for (entry in entries.reversed()) {
-            controller.setAlpha(entry.stableId, entry.originalAlpha)
+        withContext(NonCancellable) {
+            for (entry in entries.reversed()) {
+                val restored = try {
+                    controller.setAlpha(entry.stableId, entry.originalAlpha)
+                } catch (_: Exception) {
+                    false
+                }
+                if (!restored) {
+                    unrestoredTuningChanges.incrementAndGet()
+                }
+            }
         }
     }
 
@@ -907,7 +948,6 @@ class LoopbackRuntimeClient(
         val limits = sessionLimits
             ?: throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
         coroutineContext.ensureActive()
-        lastCapturedSnapshotId = payload.snapshot.snapshotId.value
         send(
             WireCaptureResult(
                 type = "capture_result",
@@ -1081,9 +1121,14 @@ class LoopbackRuntimeClient(
         if (tuningController != null && tunings.any { it.restoreEntries.isNotEmpty() }) {
             // Restoration must outlive the cancelled connection scope so no
             // preview survives a disconnect or close. The controller owns its
-            // own main-thread dispatch.
-            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-                for (active in tunings) {
+            // own main-thread dispatch. Applications restore in reverse apply
+            // order so captured originals win, and the handler keeps any
+            // controller failure away from the process default handler.
+            val restoreScope = CoroutineScope(
+                SupervisorJob() + Dispatchers.Default + containedExceptionHandler,
+            )
+            restoreScope.launch {
+                for (active in tunings.asReversed()) {
                     restoreTuningEntries(active.restoreEntries)
                 }
             }

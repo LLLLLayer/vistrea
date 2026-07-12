@@ -18,19 +18,19 @@ This directory currently contains a pure Kotlin/JVM protocol adapter for the can
 - converts Android pixels into full-display logical points using effective display density;
 - records stable IDs, parent/child identity, visibility, interaction actions, accessibility, and reviewable visual properties;
 - redacts password text and accessibility values before they enter the Snapshot;
-- optionally renders the observed root into canonical PNG bytes and returns a SHA-256 `ObjectRef` separately from transport and persistence;
+- optionally renders the observed root into canonical PNG bytes and returns a SHA-256 `ObjectRef` separately from transport and persistence; `beginCapture` stages the main-thread observation and bitmap draw so PNG encoding and hashing can run on a background dispatcher, which the connection capture provider does;
 - fails closed on empty roots, off-main-thread capture, display mismatch, node limits, screenshot limits, and encoding failure.
 
 `runtime-connection/` implements the authenticated loopback transport shared with the Node Host:
 
 - literal `127.0.0.1` or `::1` endpoints only;
 - HMAC-SHA256 mutual proof compatible with the Node reference implementation;
-- bounded fatal UTF-8 JSON lines with duplicate-key and unknown-key rejection;
+- bounded fatal UTF-8 JSON lines with duplicate-key rejection; unknown optional fields in Host frames are tolerated for forward compatibility, matching the iOS client;
 - negotiated line, object, and chunk limits;
 - exact Snapshot-to-`ObjectRef` association plus size and SHA-256 verification;
 - bounded concurrent captures, cancellation, clean close, and generic credential-free errors;
 - `runtime.events` negotiation when a `RuntimeEventRecorder` is attached: the hello declares the recorder epoch, `subscribe_events` streams strictly ordered `event_batch` frames with explicit dropped-range evidence, retained events release only after `acknowledge_events`, and unresolvable epochs or ranges answer `subscribe_error` conflicts;
-- `design.tuning` negotiation when a `RuntimeTuningApplying` controller is attached: only the alpha allowlist applies, with stale-snapshot, original-value, and target checks, the canonical `TuningApplication` is returned, and captured originals always restore on explicit revert, TTL expiry, partial failure, disconnect, and close.
+- `design.tuning` negotiation when a `RuntimeTuningApplying` controller is attached: only the alpha allowlist applies, with stale-snapshot, original-value, and target checks, the canonical `TuningApplication` is returned, and captured originals always restore on explicit revert, TTL expiry, partial failure, disconnect, and close — restores run non-cancellably in reverse apply order, a change targeting a `(stable_id, property)` another active application already covers rejects with `policy_blocked` instead of stacking, and a restore that fails is reported (`internal`) or tracked instead of being claimed as success.
 
 The current Snapshot slice intentionally supports only two exact field-mask combinations: `{trees}` with `screenshot: "none"`, or `{trees, screenshot}` with `screenshot: "reference"`. Duplicate, unknown, or unsatisfied paths produce `capture_error` without making the connection unusable. Capture completion, failure, and cancellation atomically claim the request before writing a terminal message, so the client makes a best-effort exactly-one choice among `capture_complete`, `capture_error`, and `capture_cancelled`; an unknown or late cancellation is a no-op, and a failed terminal write closes the session instead of attempting a second terminal message.
 
@@ -38,7 +38,7 @@ The connection source is compiled only into the Android library's `debug` and `i
 
 The Debug Demo Inspector and protected Host bootstrap exist under `examples/android/VistreaDemoApp/`; its Debug variant records transient banner presentation and dismissal through the bounded `RuntimeEventRecorder`, while the Release variant installs no reporter. `AndroidViewRuntimeTuningController` resolves stable identifiers to live views with the capture adapter's candidate order and previews only their alpha on the main thread; it compiles only into the debug and internal variants.
 
-`runtime-compose/` is the Compose semantic annotation bridge: `Modifier.vistreaSemantics(stableId, role, label)` declares the cross-platform stable identifier as the test tag (exposed as the resource identifier when the application enables `testTagsAsResourceId`), the canonical role as the semantics role, and the optional label as the content description. Compose renders inside one `AndroidComposeView`, so the current View capture sees the container only; the full Compose semantic-tree capture adapter, automatic View event observation, and additional tuning properties remain follow-up work.
+`runtime-compose/` is the Compose semantic annotation bridge: `Modifier.vistreaSemantics(stableId, role, label)` declares the cross-platform stable identifier as the test tag (exposed as the resource identifier when the application enables `testTagsAsResourceId`), the canonical role wire name as a dedicated `VistreaRole` semantics property for every role plus the closest Compose semantics role, and the optional label as the content description. Compose renders inside one `AndroidComposeView`, so the current View capture sees the container only; the full Compose semantic-tree capture adapter, automatic View event observation, and additional tuning properties remain follow-up work.
 
 ## Verification
 

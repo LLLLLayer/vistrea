@@ -40,9 +40,11 @@ internal object RuntimeConnectionFactory {
         intent: Intent,
         scenarioIdProvider: () -> String?,
     ): RuntimeConnectionController? {
+        // The intent endpoint validates first so a malformed launch never
+        // consumes the one-shot authorization token for nothing.
+        val values = DebugRuntimeConnectionValues.from(intent) ?: return null
         val tokenBytes = OneShotRuntimeAuthorization.read(activity) ?: return null
         return try {
-            val values = DebugRuntimeConnectionValues.from(intent) ?: return null
             val adapter = AndroidViewRuntimeCaptureAdapter(
                 AndroidViewRuntimeCaptureConfiguration(
                     projectId = ProjectId(PROJECT_ID),

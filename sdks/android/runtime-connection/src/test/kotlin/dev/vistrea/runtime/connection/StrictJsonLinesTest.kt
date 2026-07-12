@@ -65,12 +65,12 @@ class StrictJsonLinesTest {
     }
 
     @Test
-    fun typedWireDecodingRejectsUnknownKeys() {
-        val error = assertFailsWith<RuntimeConnectionException> {
-            RuntimeWireCodec.decode<WireDisconnect>(
-                "{\"type\":\"disconnect\",\"unexpected\":true}",
-            )
-        }
-        assertEquals(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION, error.code)
+    fun typedWireDecodingToleratesUnknownKeys() {
+        // A newer Host may add optional fields to any frame; the client keeps
+        // interoperating like iOS while duplicate keys stay rejected above.
+        val decoded = RuntimeWireCodec.decode<WireDisconnect>(
+            "{\"type\":\"disconnect\",\"unexpected\":true}",
+        )
+        assertEquals("disconnect", decoded.type)
     }
 }

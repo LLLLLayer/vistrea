@@ -5,6 +5,8 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -26,7 +28,8 @@ interface RuntimeTuningApplying {
     /** The current alpha for the stable identifier, or null when unresolvable. */
     suspend fun currentAlpha(stableId: String): Double?
 
-    suspend fun setAlpha(stableId: String, value: Double)
+    /** Returns true only when a live view resolved and the value applied. */
+    suspend fun setAlpha(stableId: String, value: Double): Boolean
 }
 
 internal data class RuntimeTuningRejection(
@@ -66,6 +69,7 @@ internal object RuntimeTuningProcessor {
         lastCapturedSnapshotId: String?,
         connectionId: String,
         controller: RuntimeTuningApplying,
+        activeTargetStableIds: Set<String> = emptySet(),
     ): RuntimeTuningOutcome {
         val patchObject = patch as? JsonObject
             ?: throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
@@ -126,6 +130,17 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
+            if (stableId in activeTargetStableIds) {
+                // Stacking previews on one target makes restore order ambiguous,
+                // so a covered (stable_id, property) rejects instead of stacking.
+                rejected += RuntimeTuningRejection(
+                    changeId = changeId,
+                    runtimeTarget = runtimeTarget,
+                    reasonCode = "policy_blocked",
+                    message = "Another active tuning application already previews this target property.",
+                )
+                continue
+            }
             val expectedOriginal = numberValue(originalValue)
             val previewAlpha = numberValue(previewValue)
             if (expectedOriginal == null || previewAlpha == null || previewAlpha !in 0.0..1.0) {
@@ -156,7 +171,15 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
-            controller.setAlpha(stableId, previewAlpha)
+            if (!controller.setAlpha(stableId, previewAlpha)) {
+                rejected += RuntimeTuningRejection(
+                    changeId = changeId,
+                    runtimeTarget = runtimeTarget,
+                    reasonCode = "target_not_found",
+                    message = "The live view vanished before the preview value applied.",
+                )
+                continue
+            }
             restoreEntries += RuntimeTuningRestoreEntry(
                 stableId = stableId,
                 originalAlpha = currentAlpha,
@@ -173,18 +196,25 @@ internal object RuntimeTuningProcessor {
         // The patch reversion policy restores captured originals whenever any
         // change fails; a partially applied preview never survives silently.
         if (rejected.isNotEmpty() && restoreEntries.isNotEmpty()) {
-            for (entry in restoreEntries.reversed()) {
-                controller.setAlpha(entry.stableId, entry.originalAlpha)
-            }
-            for (change in applied) {
+            val restoreFailed = restoreOriginals(controller, restoreEntries)
+            for ((index, change) in applied.withIndex()) {
                 val changeId = stringValue(change["tuning_change_id"]) ?: continue
                 val runtimeTarget = change["runtime_target"] ?: continue
-                rejected += RuntimeTuningRejection(
-                    changeId = changeId,
-                    runtimeTarget = runtimeTarget,
-                    reasonCode = "policy_blocked",
-                    message = "Restored after a partial failure per the patch reversion policy.",
-                )
+                rejected += if (restoreFailed[index]) {
+                    RuntimeTuningRejection(
+                        changeId = changeId,
+                        runtimeTarget = runtimeTarget,
+                        reasonCode = "internal",
+                        message = "The captured original failed to restore after a partial failure.",
+                    )
+                } else {
+                    RuntimeTuningRejection(
+                        changeId = changeId,
+                        runtimeTarget = runtimeTarget,
+                        reasonCode = "policy_blocked",
+                        message = "Restored after a partial failure per the patch reversion policy.",
+                    )
+                }
             }
             applied = mutableListOf()
             restoreEntries = mutableListOf()
@@ -246,6 +276,30 @@ internal object RuntimeTuningProcessor {
             restoreEntries = restoreEntries,
             isActive = isActive,
         )
+    }
+
+    /**
+     * Restores captured originals in reverse apply order even when the caller
+     * is cancelled or the controller throws, and reports per-entry failures.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun restoreOriginals(
+        controller: RuntimeTuningApplying,
+        entries: List<RuntimeTuningRestoreEntry>,
+    ): BooleanArray {
+        val failed = BooleanArray(entries.size)
+        withContext(NonCancellable) {
+            for (index in entries.indices.reversed()) {
+                val entry = entries[index]
+                val restored = try {
+                    controller.setAlpha(entry.stableId, entry.originalAlpha)
+                } catch (_: Exception) {
+                    false
+                }
+                failed[index] = !restored
+            }
+        }
+        return failed
     }
 
     /** The terminal application after reverting the captured originals. */

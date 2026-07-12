@@ -12,30 +12,45 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** Main-thread bridge from Android View observation to the Runtime transport. */
+/**
+ * Bridge from Android View observation to the Runtime transport.
+ *
+ * Hierarchy observation and the screenshot draw stay on the main thread;
+ * the CPU-heavy PNG encoding and hashing run on a background dispatcher.
+ */
 class AndroidViewRuntimeSnapshotCaptureProvider(
     private val adapter: AndroidViewRuntimeCaptureAdapter,
     private val rootViewProvider: () -> View,
     private val scenarioIdProvider: () -> String? = { null },
 ) : RuntimeSnapshotCaptureProvider {
-    override suspend fun capture(request: RuntimeCaptureRequest): RuntimeSnapshotCapturePayload =
-        withContext(Dispatchers.Main.immediate) {
+    override suspend fun capture(request: RuntimeCaptureRequest): RuntimeSnapshotCapturePayload {
+        val staged = withContext(Dispatchers.Main.immediate) {
             coroutineContext.ensureActive()
             request.requireSupportedSnapshotSlice()
-            val result = adapter.capture(
+            adapter.beginCapture(
                 rootView = rootViewProvider(),
                 scenarioId = scenarioIdProvider(),
                 includeScreenshot = request.screenshot == RuntimeCaptureScreenshotMode.REFERENCE,
             )
-            coroutineContext.ensureActive()
-            RuntimeSnapshotCapturePayload(
-                snapshot = result.snapshot,
-                objects = result.objects.map { objectValue ->
-                    RuntimeObjectPayload(
-                        reference = objectValue.reference,
-                        bytes = objectValue.bytes,
-                    )
-                },
-            )
         }
+        try {
+            return withContext(Dispatchers.Default) {
+                coroutineContext.ensureActive()
+                val result = staged.encode()
+                RuntimeSnapshotCapturePayload(
+                    snapshot = result.snapshot,
+                    objects = result.objects.map { objectValue ->
+                        RuntimeObjectPayload(
+                            reference = objectValue.reference,
+                            bytes = objectValue.transportBytes(),
+                        )
+                    },
+                )
+            }
+        } finally {
+            // A cancellation between the two halves must not leak the bitmap;
+            // after a successful encode this is a no-op.
+            staged.discard()
+        }
+    }
 }

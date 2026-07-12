@@ -66,8 +66,12 @@ private class ScriptedTuningController : RuntimeTuningApplying {
         alphaByStableId[stableId]
     }
 
-    override suspend fun setAlpha(stableId: String, value: Double) {
-        lock.withLock { alphaByStableId[stableId] = value }
+    override suspend fun setAlpha(stableId: String, value: Double): Boolean = lock.withLock {
+        if (!alphaByStableId.containsKey(stableId)) {
+            return@withLock false
+        }
+        alphaByStableId[stableId] = value
+        true
     }
 }
 

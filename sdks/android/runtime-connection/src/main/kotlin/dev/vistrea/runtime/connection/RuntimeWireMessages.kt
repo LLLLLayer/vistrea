@@ -313,7 +313,10 @@ internal data class WireTuningReverted(
 
 internal object RuntimeWireCodec {
     val format = Json {
-        ignoreUnknownKeys = false
+        // Unknown optional fields in Host frames are tolerated so a newer Host
+        // can extend messages without breaking older Runtimes, matching the
+        // iOS client. Duplicate keys are still rejected by StrictJsonLines.
+        ignoreUnknownKeys = true
         isLenient = false
         coerceInputValues = false
         explicitNulls = false

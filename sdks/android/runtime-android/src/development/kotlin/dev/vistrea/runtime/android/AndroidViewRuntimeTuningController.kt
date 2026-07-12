@@ -23,11 +23,12 @@ class AndroidViewRuntimeTuningController(
             findView(rootViewProvider(), stableId)?.alpha?.toDouble()
         }
 
-    override suspend fun setAlpha(stableId: String, value: Double) {
+    override suspend fun setAlpha(stableId: String, value: Double): Boolean =
         withContext(Dispatchers.Main.immediate) {
-            findView(rootViewProvider(), stableId)?.alpha = value.toFloat()
+            val view = findView(rootViewProvider(), stableId)
+            view?.alpha = value.toFloat()
+            view != null
         }
-    }
 
     private fun findView(view: View, stableId: String): View? {
         if (stableIdentifier(view)?.value == stableId) {
