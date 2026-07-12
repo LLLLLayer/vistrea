@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -497,6 +500,20 @@ export const VISTREA_MCP_TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: "vistrea_get_screen_state",
+    title: "Get Screen State",
+    description: "Read one Screen State, including its representative Snapshot reference.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["screen_state_id"],
+      properties: {
+        screen_state_id: { type: "string", maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
+  {
     name: "vistrea_find_screen_path",
     title: "Find Screen Path",
     description: "Find acyclic transition paths between two known Screen States.",
@@ -509,6 +526,7 @@ export const VISTREA_MCP_TOOLS = [
         target_state_id: { type: "string", maxLength: 128 },
         graph_id: { type: "string", maxLength: 128 },
         maximum_depth: { type: "integer", minimum: 0, maximum: 10000 },
+        maximum_paths: { type: "integer", minimum: 1, maximum: 100 },
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
@@ -843,7 +861,7 @@ export const VISTREA_MCP_TOOLS = [
     name: "vistrea_export_pack",
     title: "Export Pack",
     description:
-      "Export refs and commits as a portable content-addressed .vistrea-pack Object; download its bytes through the objects route.",
+      "Export refs and commits as a portable content-addressed .vistrea-pack Object; download its bytes with vistrea_get_object.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -874,6 +892,22 @@ export const VISTREA_MCP_TOOLS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
+  {
+    name: "vistrea_get_object",
+    title: "Get Object",
+    description:
+      "Download one content-addressed Object (screenshot, exported pack) into a new local file at output_path.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hash", "output_path"],
+      properties: {
+        hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
+        output_path: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+  },
 ] as const satisfies readonly Tool[];
 
 const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
@@ -902,6 +936,7 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_observe_screen_state", "RecordStateObservation"],
   ["vistrea_observe_transition", "RecordTransitionObservation"],
   ["vistrea_get_screen_graph", "GetScreenGraph"],
+  ["vistrea_get_screen_state", "GetScreenState"],
   ["vistrea_find_screen_path", "FindScreenPath"],
   ["vistrea_create_wiki_node", "CreateWikiNode"],
   ["vistrea_update_wiki_node", "UpdateWikiNode"],
@@ -921,6 +956,7 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_get_build_diff", "GetBuildDiff"],
   ["vistrea_export_pack", "ExportPack"],
   ["vistrea_import_pack", "ImportPack"],
+  ["vistrea_get_object", "GetObject"],
 ]);
 
 export function createVistreaMcpServer(client: HostLocalApiClient): Server {
@@ -943,6 +979,33 @@ export function createVistreaMcpServer(client: HostLocalApiClient): Server {
         throw new HostClientError("unsupported", "The requested MCP tool is not implemented.");
       }
       const input = request.params.arguments ?? {};
+      if (request.params.name === "vistrea_get_object") {
+        // Object bytes go to a fresh local file, never into the tool result.
+        const command = input as JsonObject;
+        const outputPath = command["output_path"];
+        if (typeof outputPath !== "string" || !path.isAbsolute(outputPath)) {
+          throw new HostClientError("invalid_argument", "output_path must be an absolute path.");
+        }
+        const result = (await client.execute(
+          operation,
+          { hash: command["hash"] ?? null },
+          { requestId, traceId, signal: extra.signal },
+        )) as JsonObject;
+        const encoded = result["bytes_base64"];
+        if (typeof encoded !== "string") {
+          throw new HostClientError("integrity_error", "The Host returned an invalid object body.");
+        }
+        try {
+          await fs.writeFile(outputPath, Buffer.from(encoded, "base64"), { flag: "wx" });
+        } catch {
+          throw new HostClientError(
+            "invalid_argument",
+            "output_path could not be created; it must name a new writable file.",
+          );
+        }
+        const { bytes_base64: _encoded, ...summary } = result;
+        return successResult({ ...summary, output_path: outputPath });
+      }
       const result = await client.execute(operation, input, {
         requestId,
         traceId,

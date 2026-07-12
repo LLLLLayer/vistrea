@@ -249,9 +249,14 @@ export class DesignReviewEngine {
       let quality: "complete" | "partial" = nodes.completeInlineTrees ? "complete" : "partial";
       for (const mapping of mappings) {
         const target = mapping["runtime_target"] as JsonObject;
+        // node_id values are per-capture identities, so the fallback is only
+        // sound when the mapping was recorded on this exact Snapshot; on any
+        // other Snapshot it silently measures an unrelated node.
         const located =
           nodes.byStableId.get(String(target["stable_id"] ?? "")) ??
-          nodes.byNodeId.get(String(target["node_id"]));
+          (String(target["snapshot_id"]) === snapshot.snapshot_id
+            ? nodes.byNodeId.get(String(target["node_id"]))
+            : undefined);
         if (located === undefined) {
           quality = "partial";
           continue;

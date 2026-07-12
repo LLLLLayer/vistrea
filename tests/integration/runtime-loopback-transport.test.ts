@@ -268,6 +268,12 @@ test("loopback Host authenticates Debug Runtime and transfers a strict chunked c
   assert.equal(ready.session.state, "ready");
   assert.deepEqual(ready.session.selectedVersion, { major: 1, minor: 0 });
   assert.deepEqual(ready.session.enabledCapabilities, ["runtime.snapshot"]);
+  // TuningApplication records persist this value, whose schema requires a
+  // typed UUIDv7 — a bare UUID here breaks every real tuning persistence.
+  assert.match(
+    stringField(ready.welcome, "connection_id"),
+    /^connection_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
 
   const hostProof = computeLoopbackHostProof(authorizationToken, {
     connectionAttemptId: stringField(ready.challenge, "connection_attempt_id"),

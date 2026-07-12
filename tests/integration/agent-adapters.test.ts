@@ -136,8 +136,10 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_get_design_comparison",
       "vistrea_get_design_reference",
       "vistrea_get_event_timeline",
+      "vistrea_get_object",
       "vistrea_get_review_issue",
       "vistrea_get_screen_graph",
+      "vistrea_get_screen_state",
       "vistrea_get_snapshot",
       "vistrea_get_tuning_application",
       "vistrea_get_tuning_patch",
@@ -503,6 +505,14 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     2,
   );
 
+  // MCP agents can dereference the state IDs the graph tools return.
+  const mcpGraphState = await mcp.callTool({
+    name: "vistrea_get_screen_state",
+    arguments: { screen_state_id: observedScreenState["screen_state_id"] },
+  });
+  assert.equal(mcpGraphState.isError, undefined);
+  assert.deepEqual(mcpGraphState.structuredContent, parseCliEnvelope(cliGraphState.stdout).data);
+
   // Deep Wiki: create, revise, search, link, and backlinks round trip.
   const wikiCreate = await runCli(
     [
@@ -562,6 +572,29 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   });
   assert.equal(noteCreate.isError, undefined);
   const note = noteCreate.structuredContent as JsonObject;
+
+  // Long-form documents (well past the 64 KiB adapter envelope) persist.
+  const longMarkdown = `# Long document\n\n${"vistrea knowledge line\n".repeat(6000)}`;
+  const longCreate = await mcp.callTool({
+    name: "vistrea_create_wiki_node",
+    arguments: {
+      kind: "concept",
+      title: "Long-form knowledge",
+      markdown: longMarkdown,
+      created_by: JSON.parse(actorJson),
+    },
+  });
+  assert.equal(longCreate.isError, undefined);
+  const longNode = longCreate.structuredContent as JsonObject;
+  const longRead = await runCli(
+    ["wiki", "get", longNode["wiki_node_id"] as string],
+    environment,
+  );
+  assert.equal(longRead.exitCode, 0, longRead.stdout);
+  const longContent = (parseCliEnvelope(longRead.stdout).data as JsonObject)[
+    "content"
+  ] as JsonObject;
+  assert.equal((longContent["text"] as string).length, longMarkdown.length);
   const wikiLink = await runCli(
     [
       "wiki",
@@ -622,6 +655,42 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     (mcpFindings.structuredContent as JsonObject)["items"],
     validateEnvelope["findings"],
   );
+
+  // Object bytes round-trip through the sanctioned adapters, never raw curl.
+  const objectOutput = path.join(workspaceRoot, "downloaded-design-asset.bin");
+  const cliObjectGet = await runCli(
+    ["object", "get", "--hash", assetHash, "--output", objectOutput],
+    environment,
+  );
+  assert.equal(cliObjectGet.exitCode, 0, cliObjectGet.stdout);
+  const objectEnvelope = parseCliEnvelope(cliObjectGet.stdout).data as JsonObject;
+  assert.equal(objectEnvelope["hash"], assetHash);
+  assert.equal(objectEnvelope["output"], objectOutput);
+  assert.equal(objectEnvelope["bytes_base64"], undefined);
+  assert.deepEqual(
+    await fs.readFile(objectOutput),
+    Buffer.from("vistrea-adapter-design-asset", "utf8"),
+  );
+
+  const mcpObjectOutput = path.join(workspaceRoot, "downloaded-design-asset-mcp.bin");
+  const mcpObjectGet = await mcp.callTool({
+    name: "vistrea_get_object",
+    arguments: { hash: assetHash, output_path: mcpObjectOutput },
+  });
+  assert.equal(mcpObjectGet.isError, undefined);
+  const mcpObjectSummary = mcpObjectGet.structuredContent as JsonObject;
+  assert.equal(mcpObjectSummary["bytes_base64"], undefined);
+  assert.equal(mcpObjectSummary["output_path"], mcpObjectOutput);
+  assert.deepEqual(
+    await fs.readFile(mcpObjectOutput),
+    Buffer.from("vistrea-adapter-design-asset", "utf8"),
+  );
+  // Refusing to overwrite an existing file keeps the download side effect safe.
+  const mcpObjectClobber = await mcp.callTool({
+    name: "vistrea_get_object",
+    arguments: { hash: assetHash, output_path: mcpObjectOutput },
+  });
+  assert.equal(mcpObjectClobber.isError, true);
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);

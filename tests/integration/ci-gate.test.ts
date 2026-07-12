@@ -60,6 +60,7 @@ async function loadSnapshot(mutate?: (copy: Record<string, unknown>) => void): P
 async function startGateHost(
   t: TestContext,
   snapshot: Record<string, unknown>,
+  others: readonly Record<string, unknown>[] = [],
 ): Promise<NodeJS.ProcessEnv> {
   const validator = await validatorPromise;
   const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-ci-gate-"));
@@ -68,6 +69,9 @@ async function startGateHost(
   const objects = await FileObjectStore.open({ workspaceRoot });
   const unit = workspace.beginUnitOfWork("write");
   unit.snapshots.put(snapshot as unknown as RuntimeSnapshot);
+  for (const other of others) {
+    unit.snapshots.put(other as unknown as RuntimeSnapshot);
+  }
   unit.commit();
   const api = await startHostLocalApi({
     host: "127.0.0.1",
@@ -129,6 +133,30 @@ test("the CI gate fails on open findings at the configured severity", async (t) 
   const tolerated = await runGate(["--fail-on", "critical"], environment);
   assert.equal(tolerated.exitCode, 0, JSON.stringify(tolerated.report));
   assert.equal(tolerated.report["status"], "passed");
+});
+
+test("the CI gate validates the newest Snapshot, not the first captured", async (t) => {
+  const newestId = "snapshot_02a00000-0000-7000-8000-0000000000aa";
+  const cleanOldest = await loadSnapshot();
+  const brokenNewest = await loadSnapshot((copy) => {
+    copy["snapshot_id"] = newestId;
+    const tree = (copy["trees"] as Record<string, unknown>[])[0] as {
+      payload: { inline_nodes: Record<string, unknown>[] };
+    };
+    const root = tree.payload.inline_nodes[0] as { node_id: string; child_ids: string[] };
+    const duplicate = structuredClone(tree.payload.inline_nodes[1]) as Record<string, unknown>;
+    duplicate["node_id"] = "node_019f0000-0000-7000-8000-00000000c102";
+    duplicate["parent_id"] = root.node_id;
+    root.child_ids = [...root.child_ids, duplicate["node_id"] as string];
+    tree.payload.inline_nodes.push(duplicate);
+  });
+  // Seed the newest snapshot first so only true recency ordering can win.
+  const environment = await startGateHost(t, brokenNewest, [cleanOldest]);
+
+  const gated = await runGate([], environment);
+  assert.equal(gated.exitCode, 1, JSON.stringify(gated.report));
+  const runs = gated.report["runs"] as readonly Record<string, unknown>[];
+  assert.equal(runs[0]?.["target"], newestId);
 });
 
 test("the CI gate reports usage errors and unavailable Hosts distinctly", async () => {

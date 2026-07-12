@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { DataError } from "../api/errors.js";
 import type {
@@ -190,16 +190,60 @@ export class SequenceIdGenerator implements IdGenerator {
   }
 
   next(prefix: string): string {
-    if (!/^[a-z][a-z0-9]*$/.test(prefix)) {
-      throw new DataError("invalid_argument", "ID prefixes must contain lowercase ASCII letters and digits.", {
-        details: { prefix },
-      });
-    }
+    assertIdPrefix(prefix);
     if (this.#counter > 999_999_999_999) {
       throw new DataError("resource_exhausted", "The deterministic ID sequence is exhausted.");
     }
     const suffix = String(this.#counter).padStart(12, "0");
     this.#counter += 1;
     return `${prefix}_019f0000-0000-7000-8000-${suffix}`;
+  }
+}
+
+/** Real wall-clock time for durable production Workspaces. */
+export class SystemClock implements Clock {
+  now(): string {
+    return new Date().toISOString();
+  }
+}
+
+/**
+ * Real UUIDv7 identities for durable production Workspaces: millisecond
+ * wall-clock prefix plus a per-process monotonic sequence in the version
+ * group, so identifiers created by one process sort in creation order and
+ * never collide across restarts.
+ */
+export class SystemIdGenerator implements IdGenerator {
+  #lastMilliseconds = 0;
+  #sequence = 0;
+
+  next(prefix: string): string {
+    assertIdPrefix(prefix);
+    let milliseconds = Date.now();
+    if (milliseconds <= this.#lastMilliseconds) {
+      milliseconds = this.#lastMilliseconds;
+      this.#sequence += 1;
+      if (this.#sequence > 0x0fff) {
+        milliseconds += 1;
+        this.#sequence = 0;
+      }
+    } else {
+      this.#sequence = 0;
+    }
+    this.#lastMilliseconds = milliseconds;
+    const time = milliseconds.toString(16).padStart(12, "0");
+    const versionGroup = (0x7000 | this.#sequence).toString(16);
+    const random = randomBytes(8);
+    random[0] = ((random[0] as number) & 0x3f) | 0x80;
+    const randomHex = random.toString("hex");
+    return `${prefix}_${time.slice(0, 8)}-${time.slice(8)}-${versionGroup}-${randomHex.slice(0, 4)}-${randomHex.slice(4)}`;
+  }
+}
+
+function assertIdPrefix(prefix: string): void {
+  if (!/^[a-z][a-z0-9]*$/.test(prefix)) {
+    throw new DataError("invalid_argument", "ID prefixes must contain lowercase ASCII letters and digits.", {
+      details: { prefix },
+    });
   }
 }

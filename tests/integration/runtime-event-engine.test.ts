@@ -153,6 +153,42 @@ test("the event pump persists ordered batches, acknowledges durably, and resumes
   assert.deepEqual(secondRun.subscription.acknowledged, [4]);
 });
 
+test("the event pump resumes correctly past one repository page of history", async () => {
+  const validator = await validatorPromise;
+  const workspace = new MemoryDataStore({ validator });
+  // More persisted events than the 500-item repository page, so a resume
+  // computed from one page would replay history and permanently conflict.
+  const total = 620;
+  const batches: JsonObject[] = [];
+  for (let start = 0; start < total; start += 100) {
+    const slice = Array.from({ length: Math.min(100, total - start) }, (_, index) => {
+      const sequence = start + index + 1;
+      return {
+        ...runtimeEvent(sequence, "00"),
+        event_id: `event_019f0000-0000-7000-8000-00000000${sequence
+          .toString(16)
+          .padStart(4, "0")}`,
+        sequence,
+      };
+    });
+    batches.push(wireBatch(start + 1, start + slice.length, slice));
+  }
+  const longEpoch = { ...epochDescriptor, nextSequence: total + 1 };
+  const firstRun = new ScriptedEventPort(longEpoch, batches);
+  const pump = new RuntimeEventPump({ runtime: firstRun, workspace, validator });
+  await pump.start();
+  firstRun.subscription.end();
+  await pump.whenSettled();
+  assert.equal(pump.status().persisted_through_sequence, total);
+
+  const secondRun = new ScriptedEventPort(longEpoch, []);
+  const resumed = new RuntimeEventPump({ runtime: secondRun, workspace, validator });
+  await resumed.start();
+  assert.deepEqual(secondRun.lastCommand?.start, { mode: "after_sequence", sequence: total });
+  secondRun.subscription.end();
+  await resumed.whenSettled();
+});
+
 test("the event pump fails closed on epoch mismatch and overlap without acknowledging", async () => {
   const validator = await validatorPromise;
   const workspace = new MemoryDataStore({ validator });

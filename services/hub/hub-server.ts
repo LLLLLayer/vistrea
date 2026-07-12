@@ -72,6 +72,17 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
   if (!PROJECT_ID_PATTERN.test(options.projectId)) {
     throw new DataError("invalid_argument", "The Hub project identifier is invalid.");
   }
+  // Callers can cast arbitrary strings into HubBindAddress; the bearer token
+  // travels as plain HTTP, so refuse any non-loopback interface at runtime.
+  if (options.host !== "127.0.0.1" && options.host !== "::1") {
+    throw new DataError("invalid_argument", "The Hub binds loopback interfaces only.");
+  }
+  if (
+    options.port !== undefined &&
+    (!Number.isSafeInteger(options.port) || options.port < 0 || options.port > 65_535)
+  ) {
+    throw new DataError("invalid_argument", "The Hub port must be an integer from 0 through 65535.");
+  }
   const exchange = new PackExchangeService({
     data: options.workspace,
     objects: options.objects,

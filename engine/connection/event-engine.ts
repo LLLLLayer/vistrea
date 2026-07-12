@@ -64,6 +64,7 @@ export class RuntimeEventPump {
   readonly #eventKinds: readonly string[];
   readonly #maxBatchSize: number | undefined;
   #state: RuntimeEventPumpState = "idle";
+  #starting = false;
   #subscription: RuntimeEventSubscription | undefined;
   #persistedThroughSequence: number | undefined;
   #errorCode: string | undefined;
@@ -91,7 +92,7 @@ export class RuntimeEventPump {
 
   /** Resolves once the subscription is active; the pump then drains in the background. */
   async start(): Promise<void> {
-    if (this.#state !== "idle") {
+    if (this.#state !== "idle" || this.#starting) {
       throw new DataError("conflict", "The Runtime event pump was already started.");
     }
     const epoch = this.#runtime.eventEpoch;
@@ -99,22 +100,29 @@ export class RuntimeEventPump {
       this.#state = "unsupported";
       return;
     }
-    const resumeAfter = this.#durablyPersistedSequence(epoch.eventEpochId);
-    const subscription = await this.#runtime.subscribeEvents({
-      eventEpochId: epoch.eventEpochId,
-      eventKinds: this.#eventKinds,
-      start:
-        resumeAfter === undefined
-          ? { mode: "oldest_retained" }
-          : { mode: "after_sequence", sequence: resumeAfter },
-      ...(this.#maxBatchSize === undefined ? {} : { maxBatchSize: this.#maxBatchSize }),
-    });
-    this.#subscription = subscription;
-    if (resumeAfter !== undefined) {
-      this.#persistedThroughSequence = resumeAfter;
+    // Guard the await window so a concurrent start() conflicts here instead
+    // of racing a second subscription against the session.
+    this.#starting = true;
+    try {
+      const resumeAfter = this.#durablyPersistedSequence(epoch.eventEpochId);
+      const subscription = await this.#runtime.subscribeEvents({
+        eventEpochId: epoch.eventEpochId,
+        eventKinds: this.#eventKinds,
+        start:
+          resumeAfter === undefined
+            ? { mode: "oldest_retained" }
+            : { mode: "after_sequence", sequence: resumeAfter },
+        ...(this.#maxBatchSize === undefined ? {} : { maxBatchSize: this.#maxBatchSize }),
+      });
+      this.#subscription = subscription;
+      if (resumeAfter !== undefined) {
+        this.#persistedThroughSequence = resumeAfter;
+      }
+      this.#state = "running";
+      this.#completion = this.#drain(subscription, epoch.eventEpochId);
+    } finally {
+      this.#starting = false;
     }
-    this.#state = "running";
-    this.#completion = this.#drain(subscription, epoch.eventEpochId);
   }
 
   /** Ends the subscription and waits for the drain loop to settle. */
@@ -219,13 +227,23 @@ export class RuntimeEventPump {
   #durablyPersistedSequence(eventEpochId: string): number | undefined {
     const unit = this.#workspace.beginUnitOfWork("read");
     try {
-      const timeline = unit.runtimeEvents.getTimeline({ event_epoch_id: eventEpochId });
+      // The repository lists an epoch in ascending sequence order, so the
+      // highest persisted sequence is the last item of the last page; the
+      // timeline view is capped to one page and must not be trusted here.
       let highest: number | undefined;
-      for (const event of timeline.events) {
-        if (highest === undefined || event.sequence > highest) {
-          highest = event.sequence;
+      let cursor: string | undefined;
+      do {
+        const page = unit.runtimeEvents.list(
+          { event_epoch_id: eventEpochId },
+          { limit: 500, ...(cursor === undefined ? {} : { cursor }) },
+        );
+        const last = page.items.at(-1);
+        if (last !== undefined && (highest === undefined || last.sequence > highest)) {
+          highest = last.sequence;
         }
-      }
+        cursor = page.next_cursor;
+      } while (cursor !== undefined);
+      const timeline = unit.runtimeEvents.getTimeline({ event_epoch_id: eventEpochId });
       for (const gap of timeline.reported_gaps) {
         if (highest === undefined || gap.last_sequence > highest) {
           highest = gap.last_sequence;

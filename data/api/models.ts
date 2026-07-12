@@ -642,6 +642,8 @@ export interface PathQuery {
   readonly source_state_id: string;
   readonly target_state_id: string;
   readonly maximum_depth?: number;
+  /** How many shortest paths to return; defaults to 16, at most 100. */
+  readonly maximum_paths?: number;
 }
 
 export interface PathResult {

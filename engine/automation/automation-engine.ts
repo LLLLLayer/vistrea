@@ -30,6 +30,7 @@ export class AutomationError extends Error {
 const MUTATING_TIMEOUT_DEFAULT_MS = 10_000;
 const MUTATING_TIMEOUT_MAXIMUM_MS = 120_000;
 const AUTHORIZATION_LIFETIME_MS = 60_000;
+const CONFIRMATION_LIFETIME_MS = 5 * 60_000;
 const DEFAULT_POLICY_ID = "policy.vistrea.default-v1";
 
 export interface AutomationProviderDescriptor {
@@ -524,7 +525,9 @@ export class AutomationEngine {
     } else if (risk === "dangerous") {
       const confirmed =
         command.intent.confirmation_token !== undefined &&
-        command.intent.confirmation_token === digest;
+        this.#acceptableConfirmationTokens(session, command.kind, resolution).includes(
+          command.intent.confirmation_token,
+        );
       decision = confirmed || this.#isolatedEnvironment ? "allow_once" : "deny";
     } else {
       decision = "allow";
@@ -543,13 +546,28 @@ export class AutomationEngine {
 
   /**
    * The confirmation token a caller must echo to run one dangerous action.
-   * It binds the action kind, resolved target, and session so a UI change or
-   * different action cannot reuse it.
+   * It binds the policy, actor, session, action kind, resolved target, and a
+   * time window, so a UI change, a different action, another actor, or a
+   * stale token cannot reuse it.
    */
   confirmationTokenFor(command: ExecuteSemanticActionCommand): string {
     const session = this.#requireSession(command.automation_session_id);
     const resolution = this.#resolveTarget(command);
-    return boundActionDigest(session.id, command.kind, resolution);
+    return this.#acceptableConfirmationTokens(session, command.kind, resolution)[0] as string;
+  }
+
+  /** Tokens for the current and previous window, so a boundary never races. */
+  #acceptableConfirmationTokens(
+    session: SessionState,
+    kind: string,
+    resolution: ResolvedActionTarget | undefined,
+  ): readonly string[] {
+    const window = Math.floor(
+      Date.parse(this.#workspace.clock.now()) / CONFIRMATION_LIFETIME_MS,
+    );
+    return [window, window - 1].map((value) =>
+      confirmationDigest(session, kind, resolution, value),
+    );
   }
 
   #requireSession(sessionId: string): SessionState {
@@ -616,6 +634,24 @@ export function boundActionDigest(
     session_id: sessionId,
     kind,
     target: (resolution ?? null) as unknown as JsonValue,
+  });
+  return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
+}
+
+function confirmationDigest(
+  session: SessionState,
+  kind: string,
+  resolution: ResolvedActionTarget | undefined,
+  window: number,
+): string {
+  const canonical = canonicalJson({
+    purpose: "confirmation",
+    policy_id: DEFAULT_POLICY_ID,
+    actor_id: session.actorId,
+    session_id: session.id,
+    kind,
+    target: (resolution ?? null) as unknown as JsonValue,
+    window,
   });
   return `sha256:${createHash("sha256").update(canonical, "utf8").digest("hex")}`;
 }

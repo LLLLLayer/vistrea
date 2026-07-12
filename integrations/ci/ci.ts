@@ -118,11 +118,25 @@ export async function runVistreaCiGate(
 }
 
 async function newestSnapshotId(client: HostLocalApiClient): Promise<string | undefined> {
-  const page = (await client.execute("ListSnapshots", { limit: 1 })) as {
-    items?: readonly { snapshot_id?: unknown }[];
-  };
-  const snapshotId = page.items?.[0]?.snapshot_id;
-  return typeof snapshotId === "string" ? snapshotId : undefined;
+  // The Host lists snapshots in ascending snapshot_id order (UUIDv7, so
+  // capture order), so the newest snapshot is the last item of the last page.
+  let newest: string | undefined;
+  let cursor: string | undefined;
+  do {
+    const page = (await client.execute("ListSnapshots", {
+      limit: 500,
+      ...(cursor === undefined ? {} : { cursor }),
+    })) as {
+      items?: readonly { snapshot_id?: unknown }[];
+      next_cursor?: unknown;
+    };
+    const last = page.items?.at(-1)?.snapshot_id;
+    if (typeof last === "string") {
+      newest = last;
+    }
+    cursor = typeof page.next_cursor === "string" ? page.next_cursor : undefined;
+  } while (cursor !== undefined);
+  return newest;
 }
 
 function summarizeRun(kind: string, target: string, outcome: JsonObject): JsonObject {

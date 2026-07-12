@@ -81,6 +81,7 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
       runtimeTuning: runtime,
       isRuntimeConnected: () => runtime.connected,
       runtimeEventsStatus: () => runtime.eventsStatus,
+      tuningReversionsStatus: () => runtime.tuningReversionsStatus,
       workspace: workspace.data,
       objects: workspace.objects,
       validator: options.validator,
@@ -163,6 +164,8 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort, RuntimeTuningPort 
   readonly #tuning: TuningEngine;
   #session: LoopbackRuntimeSession | undefined;
   #eventPump: RuntimeEventPump | undefined;
+  #reversionsRecorded = 0;
+  #reversionsFailed = 0;
   #closed = false;
   readonly #waiters = new Set<{
     readonly resolve: () => void;
@@ -221,6 +224,14 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort, RuntimeTuningPort 
     return this.#eventPump?.status();
   }
 
+  /** How many Runtime self-reversions this Host recorded or failed to record. */
+  get tuningReversionsStatus(): { recorded: number; failed: number } | undefined {
+    if (this.#reversionsRecorded === 0 && this.#reversionsFailed === 0) {
+      return undefined;
+    }
+    return { recorded: this.#reversionsRecorded, failed: this.#reversionsFailed };
+  }
+
   attach(session: LoopbackRuntimeSession): void {
     if (this.#closed) {
       session.close();
@@ -241,14 +252,20 @@ class ActiveRuntimeCapturePort implements RuntimeCapturePort, RuntimeTuningPort 
 
   #drainRuntimeReversions(session: LoopbackRuntimeSession): void {
     // Self-reverted previews (for example TTL expiry) stay auditable even when
-    // no caller is waiting; a broken report fails the drain, not the Host.
+    // no caller is waiting; one broken report is counted and skipped so the
+    // drain keeps auditing later reversions instead of dying silently.
     void (async () => {
       for (;;) {
         const candidate = await session.nextRevertedTuning();
         if (candidate === undefined) {
           return;
         }
-        this.#tuning.recordRuntimeReversion(candidate, session.connectionId);
+        try {
+          this.#tuning.recordRuntimeReversion(candidate, session.connectionId);
+          this.#reversionsRecorded += 1;
+        } catch {
+          this.#reversionsFailed += 1;
+        }
       }
     })().catch(() => {});
   }

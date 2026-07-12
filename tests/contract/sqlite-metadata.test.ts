@@ -28,6 +28,8 @@ import {
   commitIdForManifest,
   SequenceClock,
   SequenceIdGenerator,
+  SystemClock,
+  SystemIdGenerator,
 } from "../../data/memory/support.js";
 import {
   SQLiteDataStore,
@@ -552,6 +554,41 @@ test("Validation summaries persist with Finding mutations in one SQLite transact
     () => new SQLiteDataStore({ databasePath, validator }),
     expectDataError("integrity_error"),
   );
+});
+
+test("the production defaults mint real time and restart-safe UUIDv7 identities", async (t) => {
+  const validator = await validatorPromise;
+  const directory = await temporaryDirectory(t, "vistrea-sqlite-defaults");
+
+  // The default clock is wall time, not the deterministic fixture epoch.
+  const clock = new SystemClock();
+  const before = Date.now();
+  const stamped = Date.parse(clock.now());
+  assert.ok(stamped >= before && stamped <= Date.now());
+
+  // Generated identities are typed UUIDv7, in-process monotonic, and random
+  // enough that a second process (restart) cannot collide by construction.
+  const ids = new SystemIdGenerator();
+  const pattern =
+    /^workingset_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const minted = Array.from({ length: 500 }, () => ids.next("workingset"));
+  for (const value of minted) {
+    assert.match(value, pattern);
+  }
+  assert.deepEqual([...minted].sort(), minted);
+  assert.equal(new Set(minted).size, minted.length);
+  const rival = new SystemIdGenerator();
+  assert.notEqual(rival.next("workingset"), minted[0]);
+  assert.throws(() => ids.next("Bad-Prefix"), expectDataError("invalid_argument"));
+
+  // An uninjected store wires those defaults in.
+  const store = new SQLiteDataStore({
+    databasePath: path.join(directory, "defaults.sqlite"),
+    validator,
+  });
+  const now = Date.parse(store.clock.now());
+  assert.ok(Number.isFinite(now) && Math.abs(now - Date.now()) < 60_000);
+  store.close();
 });
 
 test("migration discovery rejects gaps and unsafe SQL before touching a database", async (t) => {

@@ -5,6 +5,9 @@ import path from "node:path";
 import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
 import { startLocalHost, type HostLocalApiBindAddress } from "./index.js";
 
+/** A caller mistake whose message is static and safe to print. */
+class UsageError extends Error {}
+
 interface ServeArguments {
   readonly workspaceRoot: string;
   readonly connectionFile: string;
@@ -127,18 +130,18 @@ function parseArguments(source: readonly string[]): ServeArguments {
       values.has(name) ||
       value.startsWith("--")
     ) {
-      throw new Error("Host arguments are invalid. Use --help for the supported form.");
+      throw new UsageError("Host arguments are invalid. Use --help for the supported form.");
     }
     values.set(name, value);
   }
 
   const workspace = values.get("--workspace");
   if (workspace === undefined || workspace.length === 0) {
-    throw new Error("--workspace is required.");
+    throw new UsageError("--workspace is required.");
   }
   const host = values.get("--host") ?? "127.0.0.1";
   if (host !== "127.0.0.1" && host !== "::1") {
-    throw new Error("--host must be the literal 127.0.0.1 or ::1 loopback address.");
+    throw new UsageError("--host must be the literal 127.0.0.1 or ::1 loopback address.");
   }
   const connectionFile = path.resolve(
     values.get("--connection-file") ?? path.join(os.tmpdir(), `vistrea-host-${process.pid}.json`),
@@ -160,11 +163,11 @@ function optionalPort(
     return {};
   }
   if (!/^(?:0|[1-9][0-9]{0,4})$/.test(source)) {
-    throw new Error(`--${key === "runtimePort" ? "runtime-port" : "api-port"} is invalid.`);
+    throw new UsageError(`--${key === "runtimePort" ? "runtime-port" : "api-port"} is invalid.`);
   }
   const value = Number(source);
   if (value > 65_535) {
-    throw new Error(`--${key === "runtimePort" ? "runtime-port" : "api-port"} is invalid.`);
+    throw new UsageError(`--${key === "runtimePort" ? "runtime-port" : "api-port"} is invalid.`);
   }
   return { [key]: value };
 }
@@ -196,7 +199,11 @@ function filesystemCode(error: unknown): string | undefined {
     : undefined;
 }
 
-void main().catch(() => {
-  process.stderr.write("Vistrea Host could not start.\n");
+void main().catch((error: unknown) => {
+  // Usage errors carry static messages; everything else stays generic so no
+  // failure path can echo workspace contents or credentials.
+  process.stderr.write(
+    error instanceof UsageError ? `${error.message}\n` : "Vistrea Host could not start.\n",
+  );
   process.exitCode = 1;
 });

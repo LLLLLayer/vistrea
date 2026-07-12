@@ -148,11 +148,13 @@ export class AdbAutomationProvider implements AutomationProviderPort {
       command.kind,
       command.target,
     );
+    const expiresAt = Date.parse(authorization.expires_at);
     if (
       authorization.decision === "deny" ||
       authorization.session_id !== command.automation_session_id ||
       authorization.bound_action_digest !== expected ||
-      Date.parse(authorization.expires_at) <= Date.now()
+      // An unparseable expiry (NaN) must fail closed, so require proof of life.
+      !(expiresAt > Date.now())
     ) {
       throw new DataError(
         "invalid_argument",
@@ -229,7 +231,12 @@ export class AdbAutomationProvider implements AutomationProviderPort {
           reject(new DataError("internal", "The adb invocation timed out.", { retryable: true })),
         );
       }, this.#timeoutMilliseconds);
-      options?.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options?.signal?.aborted) {
+        // A signal aborted before registration never replays its event.
+        onAbort();
+      } else {
+        options?.signal?.addEventListener("abort", onAbort, { once: true });
+      }
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {

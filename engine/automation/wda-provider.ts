@@ -158,11 +158,13 @@ export class WdaAutomationProvider implements AutomationProviderPort {
       command.kind,
       command.target,
     );
+    const expiresAt = Date.parse(authorization.expires_at);
     if (
       authorization.decision === "deny" ||
       authorization.session_id !== command.automation_session_id ||
       authorization.bound_action_digest !== expected ||
-      Date.parse(authorization.expires_at) <= Date.now()
+      // An unparseable expiry (NaN) must fail closed, so require proof of life.
+      !(expiresAt > Date.now())
     ) {
       throw new DataError(
         "invalid_argument",
@@ -265,7 +267,12 @@ export class WdaAutomationProvider implements AutomationProviderPort {
   ): Promise<JsonValue> {
     const abort = new AbortController();
     const forwardAbort = (): void => abort.abort();
-    options?.signal?.addEventListener("abort", forwardAbort, { once: true });
+    if (options?.signal?.aborted) {
+      // A signal aborted before registration never replays its event.
+      forwardAbort();
+    } else {
+      options?.signal?.addEventListener("abort", forwardAbort, { once: true });
+    }
     const timer = setTimeout(() => abort.abort(), this.#timeoutMilliseconds);
     let response: Response;
     let text: string;

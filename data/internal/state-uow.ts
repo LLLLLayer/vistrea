@@ -489,9 +489,27 @@ class StateScreenGraphRepository extends BoundStateRepository implements ScreenG
     if (!Number.isSafeInteger(maximumDepth) || maximumDepth < 0 || maximumDepth > 10_000) {
       throw new DataError("invalid_argument", "maximum_depth is outside the supported range.");
     }
+    const maximumPaths = query.maximum_paths ?? 16;
+    if (!Number.isSafeInteger(maximumPaths) || maximumPaths < 1 || maximumPaths > 100) {
+      throw new DataError("invalid_argument", "maximum_paths is outside the supported range.");
+    }
+    // Simple-path enumeration is exponential in well-connected graphs, so the
+    // search returns the first (shortest, BFS order) paths and fails closed
+    // when the expansion budget runs out before any path is found.
+    let expansionBudget = 50_000;
     const queue: PathResult[] = [{ state_ids: [query.source_state_id], transition_ids: [] }];
     const results: PathResult[] = [];
-    while (queue.length > 0) {
+    while (queue.length > 0 && results.length < maximumPaths) {
+      if (expansionBudget === 0) {
+        if (results.length > 0) {
+          break;
+        }
+        throw new DataError(
+          "resource_exhausted",
+          "The path search exceeded its expansion budget; lower maximum_depth.",
+        );
+      }
+      expansionBudget -= 1;
       const path = queue.shift() as PathResult;
       const current = path.state_ids[path.state_ids.length - 1];
       if (current === query.target_state_id) {
@@ -502,9 +520,10 @@ class StateScreenGraphRepository extends BoundStateRepository implements ScreenG
         continue;
       }
       for (const transition of graph.transitions.filter((item) => item.source_state_id === current)) {
-        if (path.state_ids.includes(transition.target_state_id)) {
+        if (path.state_ids.includes(transition.target_state_id) || expansionBudget === 0) {
           continue;
         }
+        expansionBudget -= 1;
         queue.push({
           state_ids: [...path.state_ids, transition.target_state_id],
           transition_ids: [...path.transition_ids, transition.transition_id],
@@ -1443,6 +1462,11 @@ class StateVersionRepository extends BoundStateRepository implements VersionRepo
       extensions: {},
     } as unknown as WorkingSet;
     const workingSet = this.unit.validate(PROTOCOL_SCHEMA_IDS.workingSet, candidate);
+    if (this.unit.state.workingSets.has(workingSet.working_set_id)) {
+      throw new DataError("conflict", "The generated working-set ID already exists.", {
+        details: { working_set_id: workingSet.working_set_id },
+      });
+    }
     this.unit.state.workingSets.set(workingSet.working_set_id, workingSet);
     return cloneFrozen(workingSet);
   }
@@ -1701,6 +1725,14 @@ class StateVersionRepository extends BoundStateRepository implements VersionRepo
       throw new DataError("conflict", "The Ref already exists.", {
         retryable: true,
         details: { ref_name: name, current_commit_id: current.commit_id },
+      });
+    } else if (precondition.mode === "force") {
+      // The contract requires a protected-ref policy decision plus an
+      // auditable authorization record for forced moves; that policy layer
+      // does not exist yet, so forcing fails closed instead of trusting an
+      // unverifiable authorization reference.
+      throw new DataError("unsupported", "Forced Ref updates require the protected-ref policy layer.", {
+        details: { ref_name: name },
       });
     }
     const candidate = {

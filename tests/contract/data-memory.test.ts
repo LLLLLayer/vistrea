@@ -463,6 +463,16 @@ test("Working Set commit and Ref CAS are atomic and preserve drafts on conflict"
     conflicting.versions.getWorkingSet(updatedWorkingSet.working_set_id).revision,
     updatedWorkingSet.revision,
   );
+
+  // Forced moves fail closed until the protected-ref policy layer exists.
+  assert.throws(
+    () =>
+      conflicting.versions.updateRef(currentRef.name, initialCommit.commit_id, {
+        mode: "force",
+        authorization: { kind: "review_issue", id: "issue_019f0000-0000-7000-8000-000000000001" },
+      } as never),
+    expectDataError("unsupported"),
+  );
   conflicting.rollback();
 });
 

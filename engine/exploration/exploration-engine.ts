@@ -176,6 +176,11 @@ export class ExplorationEngine {
           depthStack.length = 0;
           depthStack.push(returnedStateId);
         }
+        if (actionCount >= command.maximum_actions) {
+          // The budget ran out on the return navigation, not the frontier.
+          stoppedReason = "action_budget";
+          break;
+        }
         continue;
       }
 

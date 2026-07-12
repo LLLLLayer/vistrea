@@ -39,6 +39,9 @@ import { PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
+// Deep Wiki markdown may hold 262144 code points, which JSON escaping can
+// expand several-fold, so wiki writes get their own body budget.
+const MAXIMUM_WIKI_BODY_BYTES = 2 * 1024 * 1024;
 const MAXIMUM_JSON_NESTING_DEPTH = 128;
 const TOKEN_BYTES = 32;
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -61,6 +64,8 @@ export interface HostLocalApiDependencies {
   readonly isRuntimeConnected?: () => boolean;
   /** Reports the Runtime event pump status when the Host composition runs one. */
   readonly runtimeEventsStatus?: () => RuntimeEventPumpStatus | undefined;
+  /** Reports Runtime self-reversion audit counts when the composition tracks them. */
+  readonly tuningReversionsStatus?: () => { recorded: number; failed: number } | undefined;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
   readonly validator: ProtocolValidator;
@@ -189,6 +194,7 @@ export async function startHostLocalApi(
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
         runtimeEventsStatus: options.runtimeEventsStatus ?? (() => undefined),
+        tuningReversionsStatus: options.tuningReversionsStatus ?? (() => undefined),
         workspace: options.workspace,
         objects: options.objects,
       }).catch((error: unknown) => sendError(response, requestId, error));
@@ -257,6 +263,7 @@ interface RequestHandlerContext {
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
   readonly runtimeEventsStatus: () => RuntimeEventPumpStatus | undefined;
+  readonly tuningReversionsStatus: () => { recorded: number; failed: number } | undefined;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
 }
@@ -274,10 +281,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoRequestBody(request);
     const health = context.workspace.checkHealth();
     const events = context.runtimeEventsStatus();
+    const reversions = context.tuningReversionsStatus();
     writeJson(response, 200, {
       status: health.ok ? "ready" : "degraded",
       runtime_connected: context.isRuntimeConnected(),
       ...(events === undefined ? {} : { runtime_events: events }),
+      ...(reversions === undefined ? {} : { tuning_reversions: reversions }),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
     return;
@@ -664,6 +673,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       "target_state_id",
       "graph_id",
       "maximum_depth",
+      "maximum_paths",
     ]);
     const sourceStateId = values["source_state_id"];
     const targetStateId = values["target_state_id"];
@@ -671,16 +681,21 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       throw invalidArgument("source_state_id and target_state_id are required.");
     }
     const graphId = values["graph_id"];
+    // Lenient Number() would accept "", "0x10", or "1e2"; require plain decimals.
     const depthValue = values["maximum_depth"];
-    const maximumDepth = depthValue === undefined ? undefined : Number(depthValue);
-    if (maximumDepth !== undefined && !Number.isSafeInteger(maximumDepth)) {
-      throw invalidArgument("maximum_depth must be a safe integer.");
+    if (depthValue !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(depthValue)) {
+      throw invalidArgument("maximum_depth must be a plain decimal integer.");
+    }
+    const pathsValue = values["maximum_paths"];
+    if (pathsValue !== undefined && !/^[1-9][0-9]{0,2}$/.test(pathsValue)) {
+      throw invalidArgument("maximum_paths must be a plain decimal integer.");
     }
     const paths = context.graph.findPath({
       source_state_id: sourceStateId,
       target_state_id: targetStateId,
       ...(graphId === undefined ? {} : { graph_id: graphId }),
-      ...(maximumDepth === undefined ? {} : { maximum_depth: maximumDepth }),
+      ...(depthValue === undefined ? {} : { maximum_depth: Number(depthValue) }),
+      ...(pathsValue === undefined ? {} : { maximum_paths: Number(pathsValue) }),
     });
     writeJson(response, 200, { paths } as unknown as JsonObject);
     return;
@@ -723,7 +738,10 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     }
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
-    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const input = await readJsonBody(
+      request,
+      Math.max(context.maximumJsonBodyBytes, MAXIMUM_WIKI_BODY_BYTES),
+    );
     const command = parseCommandObject(
       input,
       ["kind", "title", "slug", "summary", "markdown", "labels", "related_resources", "created_by"],
@@ -741,7 +759,10 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const nodeId = decodeResourceSegment(wikiRevisionMatch[1] as string, "wiki node ID");
-    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const input = await readJsonBody(
+      request,
+      Math.max(context.maximumJsonBodyBytes, MAXIMUM_WIKI_BODY_BYTES),
+    );
     const command = parseCommandObject(
       input,
       [
@@ -771,6 +792,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   if (wikiBacklinksMatch !== null) {
     assertMethod(request, "GET");
     assertNoRequestBody(request);
+    readSingleValueParameters(url, ["limit", "cursor"]);
     const nodeId = decodeResourceSegment(wikiBacklinksMatch[1] as string, "wiki node ID");
     writeJson(
       response,
@@ -1649,7 +1671,16 @@ async function sendObject(
       }
       written += chunk.byteLength;
       if (!response.write(chunk)) {
-        await Promise.race([once(response, "drain"), once(response, "close")]);
+        // Detach the losing waiter, or every stalled chunk leaks a listener.
+        const settled = new AbortController();
+        try {
+          await Promise.race([
+            once(response, "drain", { signal: settled.signal }).catch(() => {}),
+            once(response, "close", { signal: settled.signal }).catch(() => {}),
+          ]);
+        } finally {
+          settled.abort();
+        }
       }
       if (response.destroyed) {
         return;

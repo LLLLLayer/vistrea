@@ -1,5 +1,6 @@
 import {
   DataError,
+  PROTOCOL_SCHEMA_IDS,
   type ImportPackResult,
   type JsonObject,
   type ObjectStore,
@@ -62,11 +63,13 @@ export class HubPackSync {
   readonly #workspace: WorkspaceDataSource;
   readonly #objects: ObjectStore;
   readonly #exchange: PackExchangeService;
+  readonly #validator: ProtocolValidator;
   readonly #timeoutMilliseconds: number;
 
   constructor(options: HubPackSyncOptions) {
     this.#workspace = options.workspace;
     this.#objects = options.objects;
+    this.#validator = options.validator;
     this.#exchange = new PackExchangeService({
       data: options.workspace,
       objects: options.objects,
@@ -82,7 +85,7 @@ export class HubPackSync {
     if (!Array.isArray(items)) {
       throw new DataError("integrity_error", "The Hub returned an invalid ref listing.");
     }
-    return { remote_refs: items as readonly Ref[] };
+    return { remote_refs: items.map((item) => this.#validateRemoteRef(item)) };
   }
 
   /**
@@ -106,7 +109,7 @@ export class HubPackSync {
       bytes,
       PACK_MEDIA_TYPE,
     );
-    const imported = JSON.parse(value.toString("utf8")) as ImportPackResult;
+    const imported = validateImportResult(value);
 
     const advanced: Ref[] = [];
     const remaining: ImportPackResult["conflicting_refs"][number][] = [];
@@ -124,7 +127,7 @@ export class HubPackSync {
           "utf8",
         );
         const updated = await this.#requestJson(command.remote, "POST", "refs:update", body);
-        advanced.push(updated as Ref);
+        advanced.push(this.#validateRemoteRef(updated));
       } else {
         remaining.push(conflict);
       }
@@ -233,10 +236,7 @@ export class HubPackSync {
         retryable: true,
       });
     }
-    const raw = Buffer.from(await response.arrayBuffer());
-    if (raw.byteLength > MAXIMUM_PACK_BYTES) {
-      throw new DataError("resource_exhausted", "The Hub response exceeds the transfer limit.");
-    }
+    const raw = await readResponseWithLimit(response, MAXIMUM_PACK_BYTES);
     if (!response.ok) {
       let code = `http_${response.status}`;
       let message = "The Hub rejected the request.";
@@ -265,4 +265,81 @@ export class HubPackSync {
     }
     return Buffer.concat(chunks);
   }
+
+  /** Remote refs are untrusted input; anything off-schema is an integrity failure. */
+  #validateRemoteRef(value: unknown): Ref {
+    try {
+      this.#validator.assert(PROTOCOL_SCHEMA_IDS.ref, value);
+    } catch {
+      throw new DataError("integrity_error", "The Hub returned an invalid ref.");
+    }
+    return value as Ref;
+  }
+}
+
+function validateImportResult(raw: Buffer): ImportPackResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch {
+    throw new DataError("integrity_error", "The Hub returned an invalid import report.");
+  }
+  const report = parsed as Partial<ImportPackResult> | null;
+  const stringArrays = [
+    report?.imported_commit_ids,
+    report?.existing_commit_ids,
+    report?.imported_object_hashes,
+    report?.existing_object_hashes,
+    report?.unchanged_ref_names,
+  ];
+  if (
+    report === null ||
+    typeof report !== "object" ||
+    (report.mode !== "full" && report.mode !== "thin") ||
+    stringArrays.some(
+      (values) => !Array.isArray(values) || values.some((value) => typeof value !== "string"),
+    ) ||
+    !Array.isArray(report.created_refs) ||
+    !Array.isArray(report.conflicting_refs) ||
+    report.conflicting_refs.some(
+      (conflict) =>
+        typeof conflict?.name !== "string" ||
+        typeof conflict?.pack_commit_id !== "string" ||
+        typeof conflict?.local_commit_id !== "string",
+    )
+  ) {
+    throw new DataError("integrity_error", "The Hub returned an invalid import report.");
+  }
+  return report as ImportPackResult;
+}
+
+/** Streams the response body so the transfer limit bounds memory, not just the result. */
+async function readResponseWithLimit(response: Response, maximumBytes: number): Promise<Buffer> {
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maximumBytes) {
+    throw new DataError("resource_exhausted", "The Hub response exceeds the transfer limit.");
+  }
+  if (response.body === null) {
+    return Buffer.alloc(0);
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const reader = response.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel().catch(() => {});
+        throw new DataError("resource_exhausted", "The Hub response exceeds the transfer limit.");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks);
 }

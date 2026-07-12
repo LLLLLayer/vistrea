@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import {
   parseStrictJson,
@@ -12,6 +12,9 @@ const MAXIMUM_TIMEOUT_MILLISECONDS = 300_000;
 const DEFAULT_MAXIMUM_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAXIMUM_RESPONSE_BYTES = 128 * 1024 * 1024;
 const MAXIMUM_REQUEST_BYTES = 64 * 1024;
+// Deep Wiki markdown may hold 262144 code points, which JSON escaping can
+// expand several-fold; wiki writes get their own request budget.
+const MAXIMUM_WIKI_REQUEST_BYTES = 2 * 1024 * 1024;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SNAPSHOT_ID_PATTERN =
   /^snapshot_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -120,6 +123,7 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "GetBuildDiff",
   "ExportPack",
   "ImportPack",
+  "GetObject",
 ] as const;
 
 export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
@@ -754,7 +758,7 @@ export class HostLocalApiClient {
       case "FindScreenPath": {
         const query = assertExactObject(
           input,
-          ["source_state_id", "target_state_id", "graph_id", "maximum_depth"],
+          ["source_state_id", "target_state_id", "graph_id", "maximum_depth", "maximum_paths"],
           "Screen path query",
           true,
         );
@@ -775,6 +779,13 @@ export class HostLocalApiClient {
         if (depth !== undefined && (!Number.isSafeInteger(depth) || (depth as number) < 0)) {
           throw invalidInput();
         }
+        const maximumPaths = query["maximum_paths"];
+        if (
+          maximumPaths !== undefined &&
+          (!Number.isSafeInteger(maximumPaths) || (maximumPaths as number) < 1)
+        ) {
+          throw invalidInput();
+        }
         const parameters = new URLSearchParams();
         parameters.set("source_state_id", query["source_state_id"] as string);
         parameters.set("target_state_id", query["target_state_id"] as string);
@@ -783,6 +794,9 @@ export class HostLocalApiClient {
         }
         if (depth !== undefined) {
           parameters.set("maximum_depth", String(depth));
+        }
+        if (maximumPaths !== undefined) {
+          parameters.set("maximum_paths", String(maximumPaths));
         }
         const value = await this.#request(
           "GET",
@@ -800,7 +814,7 @@ export class HostLocalApiClient {
           "Wiki node input",
           true,
         );
-        const value = await this.#request("POST", "/v1/wiki/nodes", command, 201, options);
+        const value = await this.#request("POST", "/v1/wiki/nodes", command, 201, options, undefined, MAXIMUM_WIKI_REQUEST_BYTES);
         return validateIdentifiedResource(value, "wiki_node_id", WIKI_NODE_ID_PATTERN);
       }
       case "UpdateWikiNode": {
@@ -831,6 +845,8 @@ export class HostLocalApiClient {
           body,
           200,
           options,
+          undefined,
+          MAXIMUM_WIKI_REQUEST_BYTES,
         );
         return validateIdentifiedResource(value, "wiki_node_id", WIKI_NODE_ID_PATTERN);
       }
@@ -1238,7 +1254,7 @@ export class HostLocalApiClient {
         } catch {
           throw invalidInput();
         }
-        if (bytes.byteLength === 0) {
+        if (bytes.byteLength === 0 || bytes.toString("base64") !== packBase64) {
           throw invalidInput();
         }
         const value = await this.#requestBinary(
@@ -1266,6 +1282,14 @@ export class HostLocalApiClient {
           throw invalidHostResult();
         }
         return result;
+      }
+      case "GetObject": {
+        const query = assertExactObject(input, ["hash"], "Object lookup");
+        const hash = query["hash"];
+        if (typeof hash !== "string" || !OBJECT_HASH_PATTERN.test(hash)) {
+          throw invalidInput();
+        }
+        return await this.#requestObject(hash, options);
       }
       case "GetEventTimeline": {
         const query = normalizeEventTimelineInput(input);
@@ -1316,6 +1340,7 @@ export class HostLocalApiClient {
       readonly contentType: string;
       readonly headers: Readonly<Record<string, string>>;
     },
+    maximumBodyBytes: number = MAXIMUM_REQUEST_BYTES,
   ): Promise<JsonValue> {
     const timeoutMilliseconds = normalizeIntegerOption(
       options.timeoutMilliseconds ?? this.#timeoutMilliseconds,
@@ -1327,7 +1352,7 @@ export class HostLocalApiClient {
     let encodedBody: string | undefined;
     if (body !== undefined) {
       encodedBody = JSON.stringify(body);
-      if (Buffer.byteLength(encodedBody, "utf8") > MAXIMUM_REQUEST_BYTES) {
+      if (Buffer.byteLength(encodedBody, "utf8") > maximumBodyBytes) {
         throw new HostClientError(
           "resource_exhausted",
           "The Host request exceeds the local adapter limit.",
@@ -1408,6 +1433,148 @@ export class HostLocalApiClient {
       options.signal?.removeEventListener("abort", cancel);
     }
   }
+
+  /** Downloads one content-addressed object and proves its digest. */
+  async #requestObject(hash: string, options: HostRequestOptions): Promise<JsonObject> {
+    const timeoutMilliseconds = normalizeIntegerOption(
+      options.timeoutMilliseconds ?? this.#timeoutMilliseconds,
+      1,
+      MAXIMUM_TIMEOUT_MILLISECONDS,
+    );
+    const requestId = normalizeContextId(options.requestId, "request");
+    const traceId = normalizeContextId(options.traceId, "trace");
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMilliseconds);
+    timeout.unref();
+    const cancel = (): void => controller.abort();
+    if (options.signal?.aborted === true) {
+      cancel();
+    } else {
+      options.signal?.addEventListener("abort", cancel, { once: true });
+    }
+    try {
+      const response = await fetch(`${this.#baseUrl}/v1/objects/${encodeURIComponent(hash)}`, {
+        method: "GET",
+        redirect: "error",
+        signal: controller.signal,
+        headers: {
+          authorization: `Bearer ${this.#bearerToken}`,
+          ...(requestId === undefined ? {} : { "x-vistrea-request-id": requestId }),
+          ...(traceId === undefined ? {} : { "x-vistrea-trace-id": traceId }),
+        },
+      });
+      if (response.status !== 200) {
+        let value: JsonValue;
+        try {
+          value = await readBoundedJsonResponse(response, this.#maximumResponseBytes);
+        } catch (error) {
+          if (error instanceof HostClientError || controller.signal.aborted) {
+            throw error;
+          }
+          throw new HostClientError(
+            "integrity_error",
+            "The Host response body failed integrity verification.",
+          );
+        }
+        throw parseHostError(value, response.status, this.#bearerToken);
+      }
+      const mediaType = response.headers.get("content-type");
+      if (mediaType === null || !MEDIA_TYPE_PATTERN.test(mediaType)) {
+        await cancelResponseBody(response);
+        throw new HostClientError(
+          "integrity_error",
+          "The Host returned an invalid object content type.",
+        );
+      }
+      const bytes = await readBoundedBytesResponse(response, this.#maximumResponseBytes);
+      const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      if (digest !== hash) {
+        throw new HostClientError(
+          "integrity_error",
+          "The Host object bytes do not match the requested hash.",
+        );
+      }
+      return {
+        hash,
+        media_type: mediaType,
+        byte_size: bytes.byteLength,
+        bytes_base64: bytes.toString("base64"),
+      };
+    } catch (error) {
+      if (error instanceof HostClientError) {
+        throw error;
+      }
+      if (timedOut) {
+        throw new HostClientError("timeout", "The Host request timed out.", {
+          retryable: true,
+        });
+      }
+      if (options.signal?.aborted === true) {
+        throw new HostClientError("cancelled", "The Host request was cancelled.");
+      }
+      throw new HostClientError("unavailable", "The Host Local API is unavailable.", {
+        retryable: true,
+      });
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", cancel);
+    }
+  }
+}
+
+/** The byte-body sibling of readBoundedJsonResponse for object downloads. */
+async function readBoundedBytesResponse(
+  response: Response,
+  maximumBytes: number,
+): Promise<Buffer> {
+  const contentEncoding = response.headers.get("content-encoding");
+  if (contentEncoding !== null && contentEncoding.toLowerCase() !== "identity") {
+    await cancelResponseBody(response);
+    throw new HostClientError(
+      "integrity_error",
+      "The Host returned an unsupported content encoding.",
+      { httpStatus: response.status },
+    );
+  }
+  const declaredLength = response.headers.get("content-length");
+  let expectedByteLength: number | undefined;
+  if (declaredLength !== null) {
+    if (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength)) {
+      await cancelResponseBody(response);
+      throw new HostClientError("integrity_error", "The Host returned an invalid body length.");
+    }
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length > maximumBytes) {
+      await cancelResponseBody(response);
+      throw responseTooLarge();
+    }
+    expectedByteLength = length;
+  }
+  if (response.body === null) {
+    throw new HostClientError("integrity_error", "The Host returned an empty object body.");
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+    if (!(chunk instanceof Uint8Array) || chunk.byteLength > maximumBytes - total) {
+      await cancelResponseBody(response);
+      throw responseTooLarge();
+    }
+    const copy = Buffer.from(chunk);
+    chunks.push(copy);
+    total += copy.byteLength;
+  }
+  if (expectedByteLength !== undefined && total !== expectedByteLength) {
+    throw new HostClientError(
+      "integrity_error",
+      "The Host response body length does not match Content-Length.",
+    );
+  }
+  return Buffer.concat(chunks, total);
 }
 
 async function readBoundedJsonResponse(
@@ -1576,7 +1743,7 @@ function validateWorkspaceStatus(value: JsonValue): JsonObject {
   const status = requireObject(value);
   assertKeys(
     status,
-    ["status", "runtime_connected", "runtime_events", "workspace_id", "message"],
+    ["status", "runtime_connected", "runtime_events", "tuning_reversions", "workspace_id", "message"],
     true,
   );
   if (
@@ -1612,6 +1779,19 @@ function validateWorkspaceStatus(value: JsonValue): JsonObject {
           (record["persisted_through_sequence"] as number) < 0)) ||
       (record["error_code"] !== undefined &&
         (typeof record["error_code"] !== "string" || record["error_code"].length > 64))
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  const reversions = status["tuning_reversions"];
+  if (reversions !== undefined) {
+    const record = requireObject(reversions);
+    assertKeys(record, ["recorded", "failed"]);
+    if (
+      !Number.isSafeInteger(record["recorded"]) ||
+      (record["recorded"] as number) < 0 ||
+      !Number.isSafeInteger(record["failed"]) ||
+      (record["failed"] as number) < 0
     ) {
       throw invalidHostResult();
     }

@@ -8,6 +8,7 @@ import {
 import net, { type Server, type Socket } from "node:net";
 
 import type { ByteStream } from "../../data/api/index.js";
+import { SecureUuidV7IdGenerator } from "../design/uuid-v7.js";
 import {
   BoundedJsonLineChannel,
   JsonLineFailure,
@@ -20,6 +21,7 @@ import type {
   RuntimeCaptureResult,
 } from "./snapshot-engine.js";
 
+const CONNECTION_IDS = new SecureUuidV7IdGenerator();
 const SNAPSHOT_CAPABILITY = "runtime.snapshot";
 const EVENTS_CAPABILITY = "runtime.events";
 const TUNING_CAPABILITY = "design.tuning";
@@ -511,7 +513,9 @@ class HostRuntimeConnection {
       : undefined;
     const tuningEnabled = capabilities.includes(TUNING_CAPABILITY);
 
-    const connectionId = randomUUID();
+    // Tuning applications persist this value into TuningApplication records,
+    // whose schema requires a typed UUIDv7 — never a bare UUID.
+    const connectionId = CONNECTION_IDS.next("connection");
     const enabledCapabilities = [
       ...(tuningEnabled ? [TUNING_CAPABILITY] : []),
       ...(eventEpoch === undefined ? [] : [EVENTS_CAPABILITY]),

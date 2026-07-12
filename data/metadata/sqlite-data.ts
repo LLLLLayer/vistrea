@@ -43,8 +43,8 @@ import { createEmptyDataState } from "../internal/state.js";
 import {
   cloneFrozen,
   cloneValue,
-  SequenceClock,
-  SequenceIdGenerator,
+  SystemClock,
+  SystemIdGenerator,
 } from "../internal/support.js";
 import {
   collectEmbeddedObjectHashes,
@@ -132,8 +132,10 @@ export class SQLiteDataStore implements WorkspaceDataSource {
     }
     this.databasePath = options.databasePath;
     this.#validator = options.validator;
-    this.clock = options.clock ?? new SequenceClock();
-    this.#ids = options.ids ?? new SequenceIdGenerator();
+    // A durable Workspace records real capture times and restart-safe
+    // identities; deterministic clocks and IDs are injected only by tests.
+    this.clock = options.clock ?? new SystemClock();
+    this.#ids = options.ids ?? new SystemIdGenerator();
     const migrations =
       options.migrations ?? discoverSQLiteMigrations(options.migrationsDirectory);
     let database: Database.Database | undefined;

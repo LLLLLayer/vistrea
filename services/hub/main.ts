@@ -31,7 +31,16 @@ for (let index = 0; index < args.length; index += 1) {
 }
 const workspaceRoot = values.get("--workspace");
 const projectId = values.get("--project");
-if (workspaceRoot === undefined || !path.isAbsolute(workspaceRoot) || projectId === undefined) {
+const hostValue = values.get("--host") ?? "127.0.0.1";
+const portValue = values.get("--port") ?? "0";
+if (
+  workspaceRoot === undefined ||
+  !path.isAbsolute(workspaceRoot) ||
+  projectId === undefined ||
+  (hostValue !== "127.0.0.1" && hostValue !== "::1") ||
+  !/^(?:0|[1-9][0-9]{0,4})$/.test(portValue) ||
+  Number(portValue) > 65_535
+) {
   process.stderr.write(USAGE);
   process.exit(2);
 }
@@ -41,8 +50,8 @@ const validator = await createRepositoryProtocolValidator({
 });
 const workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
 const hub = await startHubServer({
-  host: (values.get("--host") as HubBindAddress | undefined) ?? "127.0.0.1",
-  port: Number(values.get("--port") ?? 0),
+  host: hostValue as HubBindAddress,
+  port: Number(portValue),
   projectId,
   workspace: workspace.data,
   objects: workspace.objects,

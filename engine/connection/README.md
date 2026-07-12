@@ -60,4 +60,4 @@ sorted comma-separated enabled capabilities
 
 `computeLoopbackClientProof` and `computeLoopbackHostProof` are the Node reference implementations for this adapter-owned handshake. Wire envelopes do not redefine `RuntimeSnapshot` or `ObjectRef`; canonical values pass through unchanged and remain subject to protocol validation in `CaptureSnapshotUseCase`.
 
-Runtime discovery, physical-device tunneling, resilient reconnect, live native capture, and event streaming remain planned. Device actions remain owned by WDA/UIAutomator automation adapters.
+Live native capture is verified through the real iOS and Android vertical loops, and negotiated Runtime event streaming is verified on both platforms through this module's event pump (`event-engine.ts`) with client-declared epochs, durable acknowledgement, and reconnect resume. Runtime discovery, physical-device tunneling, and resilient reconnect remain planned. Device actions remain owned by WDA/UIAutomator automation adapters.

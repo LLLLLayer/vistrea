@@ -211,6 +211,25 @@ test("transition observations dedup by action signature and count occurrences", 
   assert.ok(paths.length >= 1);
   assert.deepEqual(paths[0]?.state_ids, [first.source_state_id, first.target_state_id]);
 
+  // The path search is bounded: shortest paths first, never more than asked.
+  const bounded = engine.findPath({
+    source_state_id: first.source_state_id,
+    target_state_id: first.target_state_id,
+    maximum_paths: 1,
+  });
+  assert.equal(bounded.length, 1);
+  assert.deepEqual(bounded[0]?.state_ids, [first.source_state_id, first.target_state_id]);
+  await assert.rejects(
+    Promise.resolve().then(() =>
+      engine.findPath({
+        source_state_id: first.source_state_id,
+        target_state_id: first.target_state_id,
+        maximum_paths: 101,
+      }),
+    ),
+    (error: unknown) => isDataError(error) && error.code === "invalid_argument",
+  );
+
   const state = engine.getState(first.source_state_id);
   assert.equal(state.screen_state_id, first.source_state_id);
 

@@ -28,6 +28,8 @@ interface ParsedInvocation {
   readonly input: JsonObject;
   /** Deferred input construction for commands that read local files. */
   readonly loadInput?: () => Promise<JsonObject>;
+  /** Post-processing for commands that write local files; returns the envelope data. */
+  readonly saveOutput?: (result: JsonObject) => Promise<JsonObject>;
   readonly timeoutMilliseconds?: number;
   readonly help?: true;
 }
@@ -83,15 +85,15 @@ export async function runVistreaCli(
           "graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]",
           "graph show --project <project_id> --application <application_id>",
           "graph get-state <screen_state_id>",
-          "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>]",
+          "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]",
           "wiki create --json <command>",
           "wiki update <wiki_node_id> --json <command>",
           "wiki get <wiki_node_id>",
           "wiki search [--text <phrase>] [--kinds a,b] [--labels a,b] [--statuses a,b] [--limit n] [--cursor c]",
           "wiki link --json <command>",
           "wiki unlink <wiki_link_id> --revision <n>",
-          "wiki backlinks <wiki_node_id>",
-          "wiki related --kind <resource_kind> --id <resource_id>",
+          "wiki backlinks <wiki_node_id> [--limit n] [--cursor c]",
+          "wiki related --kind <resource_kind> --id <resource_id> [--limit n] [--cursor c]",
           "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual]",
           "validate graph --project <project_id> --application <application_id>",
           "validate get-run <validation_run_id>",
@@ -102,6 +104,7 @@ export async function runVistreaCli(
           "validate get-build-diff <build_diff_id>",
           "pack export --json <command>",
           "pack import --file <path>",
+          "object get --hash <sha256:...> --output <path>",
         ],
         format: "json",
       });
@@ -118,7 +121,11 @@ export async function runVistreaCli(
       requestId: context.requestId,
       traceId: context.traceId,
     });
-    writeEnvelope(runtime, context, result);
+    const data =
+      invocation.saveOutput === undefined
+        ? result
+        : await invocation.saveOutput(result as JsonObject);
+    writeEnvelope(runtime, context, data);
     return 0;
   } catch (error) {
     const safeError = isHostClientError(error)
@@ -373,23 +380,48 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       timeoutMilliseconds,
     );
   }
-  if (command[0] === "wiki" && command[1] === "backlinks" && command.length === 3) {
+  if (command[0] === "wiki" && command[1] === "backlinks" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const cursor = values.get("--cursor");
     return invocation(
       "GetWikiBacklinks",
-      { wiki_node_id: command[2] as string },
+      {
+        wiki_node_id: command[2] as string,
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
       timeoutMilliseconds,
     );
   }
   if (command[0] === "wiki" && command[1] === "related") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--kind", "--id"].includes(key)) {
+      if (!["--kind", "--id", "--limit", "--cursor"].includes(key)) {
         throw invalidArguments();
       }
     }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const cursor = values.get("--cursor");
     return invocation(
       "GetRelatedWikiNodes",
-      { kind: requireOption(values, "--kind"), id: requireOption(values, "--id") },
+      {
+        kind: requireOption(values, "--kind"),
+        id: requireOption(values, "--id"),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
       timeoutMilliseconds,
     );
   }
@@ -524,13 +556,17 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "graph" && command[1] === "find-path") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--from", "--to", "--graph", "--max-depth"].includes(key)) {
+      if (!["--from", "--to", "--graph", "--max-depth", "--max-paths"].includes(key)) {
         throw invalidArguments();
       }
     }
     const graphId = values.get("--graph");
     const depth = values.get("--max-depth");
     if (depth !== undefined && !/^[0-9]{1,4}$/.test(depth)) {
+      throw invalidArguments();
+    }
+    const maxPaths = values.get("--max-paths");
+    if (maxPaths !== undefined && !/^[1-9][0-9]{0,2}$/.test(maxPaths)) {
       throw invalidArguments();
     }
     return invocation(
@@ -540,9 +576,34 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
         target_state_id: requireOption(values, "--to"),
         ...(graphId === undefined ? {} : { graph_id: graphId }),
         ...(depth === undefined ? {} : { maximum_depth: Number(depth) }),
+        ...(maxPaths === undefined ? {} : { maximum_paths: Number(maxPaths) }),
       },
       timeoutMilliseconds,
     );
+  }
+  if (command[0] === "object" && command[1] === "get") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--hash", "--output"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const outputPath = requireOption(values, "--output");
+    return {
+      operation: "GetObject",
+      input: { hash: requireOption(values, "--hash") },
+      saveOutput: async (result) => {
+        const encoded = result["bytes_base64"];
+        if (typeof encoded !== "string") {
+          throw new HostClientError("integrity_error", "The Host returned an invalid object body.");
+        }
+        // "wx" refuses to overwrite whatever already lives at the target.
+        await fs.writeFile(outputPath, Buffer.from(encoded, "base64"), { flag: "wx" });
+        const { bytes_base64: _encoded, ...summary } = result;
+        return { ...summary, output: outputPath };
+      },
+      ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
+    };
   }
   throw invalidArguments();
 }
