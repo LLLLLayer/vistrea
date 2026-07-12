@@ -22,11 +22,14 @@ import dev.vistrea.runtime.connection.RuntimeEventRecorder
 import dev.vistrea.runtime.connection.RuntimeObjectPayload
 import dev.vistrea.runtime.connection.RuntimeSnapshotCapturePayload
 import dev.vistrea.runtime.connection.RuntimeSnapshotCaptureProvider
+import dev.vistrea.runtime.connection.RuntimeTuningApplying
 import java.nio.file.Path
 import kotlin.system.exitProcess
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
@@ -55,6 +58,19 @@ private class FixtureCaptureProvider(
     }
 }
 
+private class ScriptedTuningController : RuntimeTuningApplying {
+    private val lock = Mutex()
+    private val alphaByStableId = mutableMapOf("demo.home.root" to 1.0)
+
+    override suspend fun currentAlpha(stableId: String): Double? = lock.withLock {
+        alphaByStableId[stableId]
+    }
+
+    override suspend fun setAlpha(stableId: String, value: Double) {
+        lock.withLock { alphaByStableId[stableId] = value }
+    }
+}
+
 fun main(arguments: Array<String>) {
     try {
         val endpoint = parseEndpoint(arguments)
@@ -78,6 +94,11 @@ fun main(arguments: Array<String>) {
                 ),
                 captureProvider = FixtureCaptureProvider(loadPayload(Path.of(fixturePath))),
                 eventRecorder = recorder,
+                tuningController = if (System.getenv("VISTREA_RUNTIME_TUNING") == "scripted") {
+                    ScriptedTuningController()
+                } else {
+                    null
+                },
             )
             runBlocking {
                 val script = if (recorder == null) {

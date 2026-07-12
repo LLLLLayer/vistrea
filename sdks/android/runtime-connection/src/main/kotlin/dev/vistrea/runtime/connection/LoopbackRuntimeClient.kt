@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -54,10 +55,19 @@ private val EVENT_KINDS_BY_WIRE_NAME = mapOf(
     "screen_changed" to dev.vistrea.protocol.v1.RuntimeEventKind.SCREEN_CHANGED,
 )
 
+private const val MINIMUM_TUNING_TTL_MILLISECONDS = 100L
+private const val MAXIMUM_TUNING_TTL_MILLISECONDS = 3_600_000L
+
 private data class RuntimeHandshakeContext(
     val connectionAttemptId: String,
     val hostNonce: String,
     val clientNonce: String,
+)
+
+private data class ActiveTuningState(
+    val application: kotlinx.serialization.json.JsonObject,
+    val restoreEntries: List<RuntimeTuningRestoreEntry>,
+    val ttlJob: Job?,
 )
 
 internal data class ValidatedRuntimeObject(
@@ -81,6 +91,7 @@ class LoopbackRuntimeClient(
     private val configuration: LoopbackRuntimeClientConfiguration,
     private val captureProvider: RuntimeSnapshotCaptureProvider,
     private val eventRecorder: RuntimeEventRecorder? = null,
+    private val tuningController: RuntimeTuningApplying? = null,
 ) {
     @Volatile
     var state: RuntimeConnectionState = RuntimeConnectionState.DISCONNECTED
@@ -94,10 +105,15 @@ class LoopbackRuntimeClient(
     var eventStreamingEnabled: Boolean = false
         private set
 
+    @Volatile
+    var tuningEnabled: Boolean = false
+        private set
+
     private val lifecycleLock = Any()
     private val captureLock = Any()
     private val socketLock = Any()
     private val eventLock = Any()
+    private val tuningLock = Any()
     private val sendMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val terminal = CompletableDeferred<Unit>()
@@ -107,6 +123,10 @@ class LoopbackRuntimeClient(
     @Volatile
     private var eventSubscriptionId: String? = null
     private var eventPumpJob: Job? = null
+
+    @Volatile
+    private var lastCapturedSnapshotId: String? = null
+    private val activeTunings = mutableMapOf<String, ActiveTuningState>()
     @Volatile
     private var socket: Socket? = null
 
@@ -284,14 +304,15 @@ class LoopbackRuntimeClient(
         val clientNonce = RuntimeConnectionAuthentication.makeNonce()
         val versions = listOf(RuntimeConnectionAuthentication.VERSION)
         val recorderEpoch = eventRecorder?.epoch()
-        val capabilities = if (recorderEpoch == null) {
-            listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
-        } else {
-            listOf(
-                RuntimeConnectionAuthentication.EVENTS_CAPABILITY,
-                RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY,
-            )
-        }
+        val capabilities = buildList {
+            if (tuningController != null) {
+                add(RuntimeConnectionAuthentication.TUNING_CAPABILITY)
+            }
+            if (recorderEpoch != null) {
+                add(RuntimeConnectionAuthentication.EVENTS_CAPABILITY)
+            }
+            add(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
+        }.sorted()
         val proof = RuntimeConnectionAuthentication.clientProof(
             key = configuration.authorizationKey,
             connectionAttemptId = challenge.connectionAttemptId,
@@ -359,18 +380,17 @@ class LoopbackRuntimeClient(
     }
 
     private suspend fun acceptWelcome(welcome: WireHostWelcome, context: RuntimeHandshakeContext) {
-        val normalizedCapabilities = RuntimeConnectionAuthentication.normalizeCapabilities(
+        val enabledSet = RuntimeConnectionAuthentication.normalizeCapabilities(
             welcome.enabledCapabilities,
-        )
-        val snapshotOnly = listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
-        val snapshotAndEvents = listOf(
-            RuntimeConnectionAuthentication.EVENTS_CAPABILITY,
-            RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY,
-        )
-        val allowedCapabilitySets = if (eventRecorder == null) {
-            listOf(snapshotOnly)
-        } else {
-            listOf(snapshotOnly, snapshotAndEvents)
+        ).toSet()
+        val offered = buildSet {
+            add(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
+            if (eventRecorder != null) {
+                add(RuntimeConnectionAuthentication.EVENTS_CAPABILITY)
+            }
+            if (tuningController != null) {
+                add(RuntimeConnectionAuthentication.TUNING_CAPABILITY)
+            }
         }
         val proofIsValid = RuntimeConnectionAuthentication.verifyHostProof(
             proof = welcome.hostProof,
@@ -389,12 +409,13 @@ class LoopbackRuntimeClient(
             welcome.selectedVersion != RuntimeConnectionAuthentication.VERSION ||
             welcome.enabledCapabilities.distinct().size != welcome.enabledCapabilities.size ||
             welcome.enabledCapabilities.any { !RuntimeConnectionAuthentication.isCapability(it) } ||
-            normalizedCapabilities !in allowedCapabilitySets ||
+            RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY !in enabledSet ||
+            !offered.containsAll(enabledSet) ||
             !proofIsValid
         ) {
             throw RuntimeConnectionException(RuntimeConnectionErrorCode.AUTHENTICATION_FAILED)
         }
-        val eventsEnabled = normalizedCapabilities == snapshotAndEvents
+        val eventsEnabled = RuntimeConnectionAuthentication.EVENTS_CAPABILITY in enabledSet
         if (eventsEnabled) {
             val recorder = eventRecorder
             if (
@@ -411,6 +432,7 @@ class LoopbackRuntimeClient(
         sessionLimits = limits
         connectionId = welcome.connectionId
         eventStreamingEnabled = eventsEnabled
+        tuningEnabled = RuntimeConnectionAuthentication.TUNING_CAPABILITY in enabledSet
         socket?.soTimeout = 0
         synchronized(lifecycleLock) {
             if (state != RuntimeConnectionState.AUTHENTICATING) {
@@ -462,6 +484,12 @@ class LoopbackRuntimeClient(
                     )
                     "unsubscribe_events" -> unsubscribeEvents(
                         RuntimeWireCodec.decode<WireUnsubscribeEvents>(line.source),
+                    )
+                    "apply_tuning" -> applyTuning(
+                        RuntimeWireCodec.decode<WireApplyTuning>(line.source),
+                    )
+                    "revert_tuning" -> revertTuning(
+                        RuntimeWireCodec.decode<WireRevertTuning>(line.source),
                     )
                     "disconnect" -> {
                         val disconnect = RuntimeWireCodec.decode<WireDisconnect>(line.source)
@@ -733,6 +761,139 @@ class LoopbackRuntimeClient(
         job?.cancel(CancellationException("Runtime event subscription closed by Host."))
     }
 
+    private suspend fun applyTuning(message: WireApplyTuning) {
+        val controller = tuningController
+        val boundConnectionId = connectionId
+        val ttl = message.command.previewTtlMs
+        if (
+            message.type != "apply_tuning" ||
+            !REQUEST_ID_PATTERN.matches(message.requestId) ||
+            !tuningEnabled ||
+            controller == null ||
+            boundConnectionId == null ||
+            (ttl != null && ttl !in MINIMUM_TUNING_TTL_MILLISECONDS..MAXIMUM_TUNING_TTL_MILLISECONDS)
+        ) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        val outcome = try {
+            RuntimeTuningProcessor.apply(
+                patch = message.command.patch,
+                expectedSnapshotId = message.command.expectedSnapshotId,
+                lastCapturedSnapshotId = lastCapturedSnapshotId,
+                connectionId = boundConnectionId,
+                controller = controller,
+            )
+        } catch (_: RuntimeConnectionException) {
+            send(
+                WireTuningError(
+                    type = "tuning_error",
+                    requestId = message.requestId,
+                    code = "conflict",
+                ),
+            )
+            return
+        }
+        var application = outcome.application
+        if (outcome.isActive) {
+            val applicationId = (application["tuning_application_id"] as? JsonPrimitive)
+                ?.takeIf(JsonPrimitive::isString)?.content
+                ?: throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+            var ttlJob: Job? = null
+            if (ttl != null) {
+                application = kotlinx.serialization.json.JsonObject(
+                    application + ("preview_expires_at" to JsonPrimitive(
+                        RuntimeTuningProcessor.previewExpiryTimestamp(ttl),
+                    )),
+                )
+                ttlJob = scope.launch(start = CoroutineStart.LAZY) {
+                    delay(ttl)
+                    expireTuning(applicationId)
+                }
+            }
+            synchronized(tuningLock) {
+                activeTunings[applicationId] = ActiveTuningState(
+                    application = application,
+                    restoreEntries = outcome.restoreEntries,
+                    ttlJob = ttlJob,
+                )
+            }
+            ttlJob?.start()
+        }
+        send(
+            WireTuningResult(
+                type = "tuning_result",
+                requestId = message.requestId,
+                application = application,
+            ),
+        )
+    }
+
+    private suspend fun revertTuning(message: WireRevertTuning) {
+        if (
+            message.type != "revert_tuning" ||
+            !REQUEST_ID_PATTERN.matches(message.requestId) ||
+            !tuningEnabled
+        ) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        val active = synchronized(tuningLock) {
+            activeTunings.remove(message.tuningApplicationId)
+        }
+        if (active == null) {
+            send(
+                WireTuningError(
+                    type = "tuning_error",
+                    requestId = message.requestId,
+                    code = "conflict",
+                ),
+            )
+            return
+        }
+        active.ttlJob?.cancel()
+        restoreTuningEntries(active.restoreEntries)
+        send(
+            WireTuningResult(
+                type = "revert_result",
+                requestId = message.requestId,
+                application = RuntimeTuningProcessor.terminalApplication(
+                    active.application,
+                    reason = "explicit_revert",
+                ),
+            ),
+        )
+    }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private suspend fun expireTuning(applicationId: String) {
+        if (state != RuntimeConnectionState.READY) {
+            return
+        }
+        val active = synchronized(tuningLock) {
+            activeTunings.remove(applicationId)
+        } ?: return
+        restoreTuningEntries(active.restoreEntries)
+        try {
+            send(
+                WireTuningReverted(
+                    type = "tuning_reverted",
+                    application = RuntimeTuningProcessor.terminalApplication(
+                        active.application,
+                        reason = "ttl_expiry",
+                    ),
+                ),
+            )
+        } catch (error: Exception) {
+            // The preview is already restored; a vanished connection needs no report.
+        }
+    }
+
+    private suspend fun restoreTuningEntries(entries: List<RuntimeTuningRestoreEntry>) {
+        val controller = tuningController ?: return
+        for (entry in entries.reversed()) {
+            controller.setAlpha(entry.stableId, entry.originalAlpha)
+        }
+    }
+
     private suspend fun cancelCapture(message: WireCaptureCancel) {
         if (message.type != "capture_cancel" || !REQUEST_ID_PATTERN.matches(message.requestId)) {
             throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
@@ -746,6 +907,7 @@ class LoopbackRuntimeClient(
         val limits = sessionLimits
             ?: throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
         coroutineContext.ensureActive()
+        lastCapturedSnapshotId = payload.snapshot.snapshotId.value
         send(
             WireCaptureResult(
                 type = "capture_result",
@@ -912,6 +1074,20 @@ class LoopbackRuntimeClient(
             eventPumpJob.also { eventPumpJob = null }
         }
         pump?.cancel()
+        val tunings = synchronized(tuningLock) {
+            activeTunings.values.toList().also { activeTunings.clear() }
+        }
+        tunings.forEach { it.ttlJob?.cancel() }
+        if (tuningController != null && tunings.any { it.restoreEntries.isNotEmpty() }) {
+            // Restoration must outlive the cancelled connection scope so no
+            // preview survives a disconnect or close. The controller owns its
+            // own main-thread dispatch.
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+                for (active in tunings) {
+                    restoreTuningEntries(active.restoreEntries)
+                }
+            }
+        }
         closeTransportSocket()
         sessionLimits = null
         scope.cancel()

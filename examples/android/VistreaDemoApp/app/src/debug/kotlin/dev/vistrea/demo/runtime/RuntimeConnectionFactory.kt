@@ -12,6 +12,7 @@ import dev.vistrea.protocol.v1.ProjectId
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureAdapter
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureConfiguration
 import dev.vistrea.runtime.android.AndroidViewRuntimeSnapshotCaptureProvider
+import dev.vistrea.runtime.android.AndroidViewRuntimeTuningController
 import dev.vistrea.protocol.v1.RuntimeEventKind
 import dev.vistrea.protocol.v1.StableId
 import dev.vistrea.runtime.connection.LoopbackRuntimeClient
@@ -68,6 +69,9 @@ internal object RuntimeConnectionFactory {
                 ),
                 captureProvider = provider,
                 eventRecorder = eventRecorder,
+                tuningController = AndroidViewRuntimeTuningController(
+                    rootViewProvider = { activity.window.decorView },
+                ),
             )
             DebugRuntimeConnectionController(client, eventRecorder)
         } catch (_: Exception) {

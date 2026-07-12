@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 internal data class WireHostChallenge(
@@ -260,6 +261,54 @@ internal data class WireEventsClosed(
     @SerialName("subscription_id")
     val subscriptionId: String,
     val code: String? = null,
+)
+
+@Serializable
+internal data class WireApplyTuning(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    val command: WireApplyTuningCommand,
+)
+
+@Serializable
+internal data class WireApplyTuningCommand(
+    val patch: JsonElement,
+    @SerialName("expected_snapshot_id")
+    val expectedSnapshotId: String,
+    @SerialName("preview_ttl_ms")
+    val previewTtlMs: Long? = null,
+)
+
+@Serializable
+internal data class WireRevertTuning(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    @SerialName("tuning_application_id")
+    val tuningApplicationId: String,
+)
+
+@Serializable
+internal data class WireTuningResult(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    val application: JsonElement,
+)
+
+@Serializable
+internal data class WireTuningError(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    val code: String,
+)
+
+@Serializable
+internal data class WireTuningReverted(
+    val type: String,
+    val application: JsonElement,
 )
 
 internal object RuntimeWireCodec {
