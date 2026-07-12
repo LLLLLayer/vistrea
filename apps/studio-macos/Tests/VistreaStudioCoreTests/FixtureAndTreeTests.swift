@@ -43,4 +43,22 @@ final class FixtureAndTreeTests: XCTestCase {
             }
         }
     }
+
+    func testPresentationExposesCanonicalScenarioExtension() throws {
+        let source = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: source) as? [String: Any]
+        )
+        object["extensions"] = ["vistrea.scenario_id": "demo.navigation.basic"]
+        let snapshot = try RuntimeSnapshotCodec.decode(
+            JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        )
+
+        let presentation = try SnapshotPresentation(snapshot: snapshot)
+
+        XCTAssertEqual(presentation.id, snapshot.snapshotID.rawValue)
+        XCTAssertEqual(presentation.scenarioID, "demo.navigation.basic")
+    }
 }

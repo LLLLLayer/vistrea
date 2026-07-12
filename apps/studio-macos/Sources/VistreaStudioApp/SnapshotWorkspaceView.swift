@@ -344,12 +344,19 @@ private struct NodeDetailsPane: View {
             if let snapshot = model.selectedSnapshot, let node = model.selectedNode {
                 List {
                     Section("Runtime Context") {
+                        LabeledContent("Snapshot", value: snapshot.id)
+                        if let scenarioID = snapshot.scenarioID {
+                            LabeledContent("Scenario", value: scenarioID)
+                        }
                         LabeledContent("Application", value: snapshot.applicationID)
                         LabeledContent("Version", value: snapshot.applicationVersion)
                         LabeledContent("Platform", value: snapshot.platform.uppercased())
                         LabeledContent("Device", value: snapshot.device)
                         LabeledContent("Environment", value: snapshot.environment)
                         LabeledContent("Build", value: snapshot.buildID)
+                        if let sourceGitSHA = snapshot.sourceGitSHA {
+                            LabeledContent("Source Git SHA", value: sourceGitSHA)
+                        }
                     }
                     Section("UI Node") {
                         ForEach(node.fields) { field in

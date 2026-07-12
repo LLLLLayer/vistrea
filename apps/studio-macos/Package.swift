@@ -9,6 +9,10 @@ let package = Package(
     ],
     products: [
         .executable(name: "VistreaStudio", targets: ["VistreaStudioApp"]),
+        .executable(
+            name: "VistreaStudioAcceptanceProbe",
+            targets: ["VistreaStudioAcceptanceProbe"]
+        ),
         .library(name: "VistreaStudioCore", targets: ["VistreaStudioCore"]),
     ],
     dependencies: [
@@ -23,6 +27,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "VistreaStudioApp",
+            dependencies: ["VistreaStudioCore"]
+        ),
+        .executableTarget(
+            name: "VistreaStudioAcceptanceProbe",
             dependencies: ["VistreaStudioCore"]
         ),
         .testTarget(

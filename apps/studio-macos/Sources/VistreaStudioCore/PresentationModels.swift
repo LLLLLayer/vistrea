@@ -309,6 +309,7 @@ public struct ScreenshotPresentation: Equatable, Sendable {
 
 public struct SnapshotPresentation: Equatable, Sendable {
     public let id: String
+    public let scenarioID: String?
     public let capturedAt: String
     public let applicationID: String
     public let applicationVersion: String
@@ -322,6 +323,11 @@ public struct SnapshotPresentation: Equatable, Sendable {
 
     public init(snapshot: RuntimeSnapshot) throws {
         id = snapshot.snapshotID.rawValue
+        if case let .string(value) = snapshot.extensions["vistrea.scenario_id"] {
+            scenarioID = value
+        } else {
+            scenarioID = nil
+        }
         capturedAt = snapshot.capturedAt.wallTime.rawValue
         applicationID = snapshot.runtimeContext.applicationID
         applicationVersion = snapshot.runtimeContext.applicationVersion

@@ -6,6 +6,7 @@ The first native SwiftUI Snapshot workspace is implemented as a standalone Swift
 
 - independent Host and Runtime connection status;
 - a persisted Snapshot list;
+- selected Snapshot identity and canonical `vistrea.scenario_id` context;
 - canonical Runtime Snapshot decoding through `VistreaRuntimeModels`;
 - screenshot Object loading with explicit missing-object placeholders;
 - iterative reconstruction of canonical flat UI nodes into a View Tree outline;
@@ -64,3 +65,10 @@ swift build --package-path apps/studio-macos --product VistreaStudio
 ```
 
 See [Studio interaction design](../../docs/product/STUDIO_INTERACTIONS.md) and [Engine use cases](../../docs/interfaces/ENGINE_API.md).
+
+`VistreaStudioAcceptanceProbe` is a non-UI end-to-end verifier used by the real
+iOS vertical acceptance. It exercises this same bounded Host client, canonical
+decoder, Object integrity path, and presentation projection before the native
+window launch smoke test. Credentials and the expected Snapshot ID are accepted
+only through environment variables; its JSON output contains evidence identity
+and counts, never credentials.
