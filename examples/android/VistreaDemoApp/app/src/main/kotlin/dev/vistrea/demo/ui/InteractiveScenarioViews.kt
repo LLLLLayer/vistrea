@@ -6,6 +6,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.widget.TextView
 import dev.vistrea.demo.contract.ScenarioFixture
+import dev.vistrea.demo.runtime.RuntimeEventReporting
 
 internal object InteractiveScenarioViews {
     fun form(activity: Activity, fixture: ScenarioFixture) = activity.screenColumn().apply {
@@ -50,24 +51,34 @@ internal object InteractiveScenarioViews {
         addView(activity.title(fixture.title))
         addView(activity.body(fixture.purpose))
         var banner: TextView? = null
+        val bannerNodeId = fixture.requireNodeId("demo.toast.success")
         val submit = activity.stableButton(
             "Submit locally",
             fixture.requireNodeId("demo.success.submit"),
         )
         submit.setOnClickListener {
-            banner?.let(::removeView)
+            banner?.let {
+                removeView(it)
+                RuntimeEventReporting.reporter?.transientDismissed(bannerNodeId)
+            }
             val visibleBanner = activity.stableText(
                 "Saved successfully",
-                fixture.requireNodeId("demo.toast.success"),
+                bannerNodeId,
                 Palette.SUCCESS,
             )
             banner = visibleBanner
             addView(visibleBanner, 2)
+            RuntimeEventReporting.reporter?.transientPresented(
+                bannerNodeId,
+                "Saved successfully",
+                SUCCESS_DURATION_MS,
+            )
             visibleBanner.postDelayed(
                 {
                     if (banner === visibleBanner) {
                         removeView(visibleBanner)
                         banner = null
+                        RuntimeEventReporting.reporter?.transientDismissed(bannerNodeId)
                     }
                 },
                 SUCCESS_DURATION_MS,

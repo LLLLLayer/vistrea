@@ -12,10 +12,14 @@ import dev.vistrea.protocol.v1.ProjectId
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureAdapter
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureConfiguration
 import dev.vistrea.runtime.android.AndroidViewRuntimeSnapshotCaptureProvider
+import dev.vistrea.protocol.v1.RuntimeEventKind
+import dev.vistrea.protocol.v1.StableId
 import dev.vistrea.runtime.connection.LoopbackRuntimeClient
 import dev.vistrea.runtime.connection.LoopbackRuntimeClientConfiguration
 import dev.vistrea.runtime.connection.LoopbackRuntimeEndpoint
 import dev.vistrea.runtime.connection.RuntimeBuildConfiguration
+import dev.vistrea.runtime.connection.RuntimeEventDraft
+import dev.vistrea.runtime.connection.RuntimeEventRecorder
 import java.io.FileInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +27,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 internal object RuntimeConnectionFactory {
     fun hasConfiguration(intent: Intent): Boolean =
@@ -53,6 +59,7 @@ internal object RuntimeConnectionFactory {
                 rootViewProvider = { activity.window.decorView },
                 scenarioIdProvider = scenarioIdProvider,
             )
+            val eventRecorder = RuntimeEventRecorder()
             val client = LoopbackRuntimeClient(
                 configuration = LoopbackRuntimeClientConfiguration(
                     endpoint = LoopbackRuntimeEndpoint(values.host, values.port),
@@ -60,8 +67,9 @@ internal object RuntimeConnectionFactory {
                     buildConfiguration = RuntimeBuildConfiguration.DEBUG,
                 ),
                 captureProvider = provider,
+                eventRecorder = eventRecorder,
             )
-            DebugRuntimeConnectionController(client)
+            DebugRuntimeConnectionController(client, eventRecorder)
         } catch (_: Exception) {
             null
         } finally {
@@ -164,14 +172,17 @@ private object OneShotRuntimeAuthorization {
 
 private class DebugRuntimeConnectionController(
     private val client: LoopbackRuntimeClient,
+    recorder: RuntimeEventRecorder,
 ) : RuntimeConnectionController {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val reporter = RecorderEventReporter(recorder, scope)
     private var runJob: Job? = null
 
     override fun start() {
         if (runJob != null) {
             return
         }
+        RuntimeEventReporting.reporter = reporter
         runJob = scope.launch {
             try {
                 client.runUntilClosed()
@@ -182,9 +193,47 @@ private class DebugRuntimeConnectionController(
     }
 
     override fun stop() {
+        if (RuntimeEventReporting.reporter === reporter) {
+            RuntimeEventReporting.reporter = null
+        }
         client.close()
         runJob?.cancel()
         runJob = null
         scope.cancel()
     }
+}
+
+/** Bridges main-thread demo observations into the bounded Debug recorder. */
+private class RecorderEventReporter(
+    private val recorder: RuntimeEventRecorder,
+    private val scope: CoroutineScope,
+) : RuntimeEventReporter {
+    override fun transientPresented(stableNodeId: String, text: String, durationMs: Long) {
+        submit(
+            RuntimeEventDraft(
+                kind = RuntimeEventKind.TRANSIENT_PRESENTED,
+                stableId = stableIdOrNull(stableNodeId),
+                durationMs = durationMs.toDouble(),
+                payload = buildJsonObject { put("text", JsonPrimitive(text)) },
+            ),
+        )
+    }
+
+    override fun transientDismissed(stableNodeId: String) {
+        submit(
+            RuntimeEventDraft(
+                kind = RuntimeEventKind.TRANSIENT_DISMISSED,
+                stableId = stableIdOrNull(stableNodeId),
+            ),
+        )
+    }
+
+    private fun submit(draft: RuntimeEventDraft) {
+        scope.launch {
+            runCatching { recorder.record(draft) }
+        }
+    }
+
+    private fun stableIdOrNull(value: String): StableId? =
+        runCatching { StableId(value) }.getOrNull()
 }

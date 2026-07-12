@@ -10,18 +10,25 @@ import dev.vistrea.protocol.v1.ObjectRef
 import dev.vistrea.protocol.v1.RuntimeSnapshotJson
 import dev.vistrea.protocol.v1.ScreenshotEvidence
 import dev.vistrea.protocol.v1.SystemChrome
+import dev.vistrea.protocol.v1.RuntimeEventKind
+import dev.vistrea.protocol.v1.StableId
 import dev.vistrea.runtime.connection.LoopbackRuntimeClient
 import dev.vistrea.runtime.connection.LoopbackRuntimeClientConfiguration
 import dev.vistrea.runtime.connection.LoopbackRuntimeEndpoint
 import dev.vistrea.runtime.connection.RuntimeBuildConfiguration
 import dev.vistrea.runtime.connection.RuntimeCaptureReason
+import dev.vistrea.runtime.connection.RuntimeEventDraft
+import dev.vistrea.runtime.connection.RuntimeEventRecorder
 import dev.vistrea.runtime.connection.RuntimeObjectPayload
 import dev.vistrea.runtime.connection.RuntimeSnapshotCapturePayload
 import dev.vistrea.runtime.connection.RuntimeSnapshotCaptureProvider
 import java.nio.file.Path
 import kotlin.system.exitProcess
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 private class FixtureCaptureProvider(
     private val payload: RuntimeSnapshotCapturePayload,
@@ -57,6 +64,11 @@ fun main(arguments: Array<String>) {
             ?: throw IllegalArgumentException("Missing Runtime configuration.")
         val tokenBytes = token.toByteArray(Charsets.UTF_8)
         try {
+            val recorder = if (System.getenv("VISTREA_RUNTIME_EVENTS") == "scripted") {
+                RuntimeEventRecorder()
+            } else {
+                null
+            }
             val client = LoopbackRuntimeClient(
                 configuration = LoopbackRuntimeClientConfiguration(
                     endpoint = endpoint,
@@ -65,8 +77,43 @@ fun main(arguments: Array<String>) {
                     buildConfiguration = RuntimeBuildConfiguration.DEBUG,
                 ),
                 captureProvider = FixtureCaptureProvider(loadPayload(Path.of(fixturePath))),
+                eventRecorder = recorder,
             )
-            runBlocking { client.runUntilClosed() }
+            runBlocking {
+                val script = if (recorder == null) {
+                    null
+                } else {
+                    recorder.record(
+                        RuntimeEventDraft(
+                            kind = RuntimeEventKind.TRANSIENT_PRESENTED,
+                            stableId = StableId("demo.toast.success"),
+                            durationMs = 2_000.0,
+                            payload = buildJsonObject {
+                                put("text", JsonPrimitive("Saved successfully"))
+                            },
+                        ),
+                    )
+                    recorder.record(
+                        RuntimeEventDraft(
+                            kind = RuntimeEventKind.TRANSIENT_DISMISSED,
+                            stableId = StableId("demo.toast.success"),
+                        ),
+                    )
+                    // Keep a slow deterministic stream flowing so the Host can
+                    // observe live batches after its subscription starts.
+                    launch {
+                        repeat(20) {
+                            delay(200)
+                            recorder.record(RuntimeEventDraft(kind = RuntimeEventKind.LAYOUT_CHANGED))
+                        }
+                    }
+                }
+                try {
+                    client.runUntilClosed()
+                } finally {
+                    script?.cancel()
+                }
+            }
         } finally {
             tokenBytes.fill(0)
         }

@@ -33,6 +33,7 @@ internal object RuntimeConnectionAuthentication {
     const val ALGORITHM = "HmacSHA256"
     const val METHOD = "hmac-sha256"
     const val SNAPSHOT_CAPABILITY = "runtime.snapshot"
+    const val EVENTS_CAPABILITY = "runtime.events"
     val VERSION = RuntimeConnectionProtocolVersion(major = 1, minor = 0)
 
     fun clientProof(

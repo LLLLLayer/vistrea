@@ -40,7 +40,19 @@ private const val MAXIMUM_OBJECT_INDEX = MAXIMUM_CAPTURE_OBJECTS - 1
 private const val MAXIMUM_CHUNK_BYTES = 4 * 1_024 * 1_024
 private const val MAXIMUM_JSON_SAFE_INTEGER = 9_007_199_254_740_991L
 private const val MAXIMUM_REMOTE_MESSAGE_BYTES = 4_096
+private const val MAXIMUM_EVENT_KINDS = 16
+private const val DEFAULT_EVENT_BATCH_LIMIT = 256
+private const val MAXIMUM_EVENT_BATCH_LIMIT = 1_024
 private val REQUEST_ID_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+private val EVENT_KINDS_BY_WIRE_NAME = mapOf(
+    "node_appeared" to dev.vistrea.protocol.v1.RuntimeEventKind.NODE_APPEARED,
+    "node_disappeared" to dev.vistrea.protocol.v1.RuntimeEventKind.NODE_DISAPPEARED,
+    "layout_changed" to dev.vistrea.protocol.v1.RuntimeEventKind.LAYOUT_CHANGED,
+    "state_changed" to dev.vistrea.protocol.v1.RuntimeEventKind.STATE_CHANGED,
+    "transient_presented" to dev.vistrea.protocol.v1.RuntimeEventKind.TRANSIENT_PRESENTED,
+    "transient_dismissed" to dev.vistrea.protocol.v1.RuntimeEventKind.TRANSIENT_DISMISSED,
+    "screen_changed" to dev.vistrea.protocol.v1.RuntimeEventKind.SCREEN_CHANGED,
+)
 
 private data class RuntimeHandshakeContext(
     val connectionAttemptId: String,
@@ -68,6 +80,7 @@ internal data class ValidatedRuntimeCapture(
 class LoopbackRuntimeClient(
     private val configuration: LoopbackRuntimeClientConfiguration,
     private val captureProvider: RuntimeSnapshotCaptureProvider,
+    private val eventRecorder: RuntimeEventRecorder? = null,
 ) {
     @Volatile
     var state: RuntimeConnectionState = RuntimeConnectionState.DISCONNECTED
@@ -77,14 +90,23 @@ class LoopbackRuntimeClient(
     var connectionId: String? = null
         private set
 
+    @Volatile
+    var eventStreamingEnabled: Boolean = false
+        private set
+
     private val lifecycleLock = Any()
     private val captureLock = Any()
     private val socketLock = Any()
+    private val eventLock = Any()
     private val sendMutex = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val terminal = CompletableDeferred<Unit>()
     private val lineDecoder = BoundedStrictJsonLineDecoder(configuration.maximumInboundLineBytes)
     private val captureJobs = mutableMapOf<String, Job>()
+
+    @Volatile
+    private var eventSubscriptionId: String? = null
+    private var eventPumpJob: Job? = null
     @Volatile
     private var socket: Socket? = null
 
@@ -261,7 +283,15 @@ class LoopbackRuntimeClient(
 
         val clientNonce = RuntimeConnectionAuthentication.makeNonce()
         val versions = listOf(RuntimeConnectionAuthentication.VERSION)
-        val capabilities = listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
+        val recorderEpoch = eventRecorder?.epoch()
+        val capabilities = if (recorderEpoch == null) {
+            listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
+        } else {
+            listOf(
+                RuntimeConnectionAuthentication.EVENTS_CAPABILITY,
+                RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY,
+            )
+        }
         val proof = RuntimeConnectionAuthentication.clientProof(
             key = configuration.authorizationKey,
             connectionAttemptId = challenge.connectionAttemptId,
@@ -283,6 +313,13 @@ class LoopbackRuntimeClient(
                 selectedAuthMethod = RuntimeConnectionAuthentication.METHOD,
                 clientNonce = clientNonce,
                 challengeResponse = proof,
+                eventEpoch = recorderEpoch?.let {
+                    WireEventEpoch(
+                        eventEpochId = it.eventEpochId,
+                        oldestRetainedSequence = it.oldestRetainedSequence,
+                        nextSequence = it.nextSequence,
+                    )
+                },
             ),
         )
         val context = RuntimeHandshakeContext(
@@ -321,10 +358,20 @@ class LoopbackRuntimeClient(
         }
     }
 
-    private fun acceptWelcome(welcome: WireHostWelcome, context: RuntimeHandshakeContext) {
+    private suspend fun acceptWelcome(welcome: WireHostWelcome, context: RuntimeHandshakeContext) {
         val normalizedCapabilities = RuntimeConnectionAuthentication.normalizeCapabilities(
             welcome.enabledCapabilities,
         )
+        val snapshotOnly = listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY)
+        val snapshotAndEvents = listOf(
+            RuntimeConnectionAuthentication.EVENTS_CAPABILITY,
+            RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY,
+        )
+        val allowedCapabilitySets = if (eventRecorder == null) {
+            listOf(snapshotOnly)
+        } else {
+            listOf(snapshotOnly, snapshotAndEvents)
+        }
         val proofIsValid = RuntimeConnectionAuthentication.verifyHostProof(
             proof = welcome.hostProof,
             key = configuration.authorizationKey,
@@ -342,15 +389,28 @@ class LoopbackRuntimeClient(
             welcome.selectedVersion != RuntimeConnectionAuthentication.VERSION ||
             welcome.enabledCapabilities.distinct().size != welcome.enabledCapabilities.size ||
             welcome.enabledCapabilities.any { !RuntimeConnectionAuthentication.isCapability(it) } ||
-            normalizedCapabilities != listOf(RuntimeConnectionAuthentication.SNAPSHOT_CAPABILITY) ||
+            normalizedCapabilities !in allowedCapabilitySets ||
             !proofIsValid
         ) {
             throw RuntimeConnectionException(RuntimeConnectionErrorCode.AUTHENTICATION_FAILED)
+        }
+        val eventsEnabled = normalizedCapabilities == snapshotAndEvents
+        if (eventsEnabled) {
+            val recorder = eventRecorder
+            if (
+                recorder == null ||
+                welcome.eventEpoch?.eventEpochId != recorder.epoch().eventEpochId
+            ) {
+                throw RuntimeConnectionException(RuntimeConnectionErrorCode.NEGOTIATION_FAILED)
+            }
+        } else if (welcome.eventEpoch != null) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.NEGOTIATION_FAILED)
         }
         val limits = validateSessionPolicy(welcome.sessionPolicy)
         lineDecoder.updateMaximumLineBytes(limits.maximumLineBytes)
         sessionLimits = limits
         connectionId = welcome.connectionId
+        eventStreamingEnabled = eventsEnabled
         socket?.soTimeout = 0
         synchronized(lifecycleLock) {
             if (state != RuntimeConnectionState.AUTHENTICATING) {
@@ -393,6 +453,15 @@ class LoopbackRuntimeClient(
                     )
                     "capture_cancel" -> cancelCapture(
                         RuntimeWireCodec.decode<WireCaptureCancel>(line.source),
+                    )
+                    "subscribe_events" -> subscribeEvents(
+                        RuntimeWireCodec.decode<WireSubscribeEvents>(line.source),
+                    )
+                    "acknowledge_events" -> acknowledgeEvents(
+                        RuntimeWireCodec.decode<WireAcknowledgeEvents>(line.source),
+                    )
+                    "unsubscribe_events" -> unsubscribeEvents(
+                        RuntimeWireCodec.decode<WireUnsubscribeEvents>(line.source),
                     )
                     "disconnect" -> {
                         val disconnect = RuntimeWireCodec.decode<WireDisconnect>(line.source)
@@ -514,6 +583,154 @@ class LoopbackRuntimeClient(
                 RuntimeConnectionException(RuntimeConnectionErrorCode.UNAVAILABLE),
             )
         }
+    }
+
+    @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod", "ReturnCount", "LongMethod")
+    private suspend fun subscribeEvents(message: WireSubscribeEvents) {
+        val recorder = eventRecorder
+        if (
+            message.type != "subscribe_events" ||
+            !REQUEST_ID_PATTERN.matches(message.requestId) ||
+            !eventStreamingEnabled ||
+            recorder == null ||
+            eventSubscriptionId != null ||
+            message.eventKinds.isEmpty() ||
+            message.eventKinds.size > MAXIMUM_EVENT_KINDS ||
+            message.eventKinds.distinct().size != message.eventKinds.size
+        ) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        val limit = message.maxBatchSize ?: DEFAULT_EVENT_BATCH_LIMIT
+        if (limit !in 1..MAXIMUM_EVENT_BATCH_LIMIT) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        val requestedKinds = message.eventKinds.map { EVENT_KINDS_BY_WIRE_NAME[it] }
+        if (requestedKinds.any { it == null }) {
+            send(
+                WireSubscribeError(
+                    type = "subscribe_error",
+                    requestId = message.requestId,
+                    code = "unsupported",
+                ),
+            )
+            return
+        }
+
+        val epoch = recorder.epoch()
+        val cursor = when (message.start.mode) {
+            "after_sequence" -> message.start.sequence
+                ?: throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+            "oldest_retained" -> (epoch.oldestRetainedSequence - 1).coerceAtLeast(0)
+            "tail" -> epoch.nextSequence - 1
+            else -> throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        if (
+            message.eventEpochId != epoch.eventEpochId ||
+            (message.start.mode == "after_sequence" && cursor + 1 < epoch.oldestRetainedSequence)
+        ) {
+            // The requested epoch or range is no longer resolvable; report the
+            // recoverable boundary instead of silently skipping evidence.
+            send(
+                WireSubscribeError(
+                    type = "subscribe_error",
+                    requestId = message.requestId,
+                    code = "conflict",
+                    oldestAvailableSequence = epoch.oldestRetainedSequence,
+                    nextSequence = epoch.nextSequence,
+                ),
+            )
+            return
+        }
+
+        val subscriptionId = RuntimeConnectionAuthentication.makeNonce()
+        val kinds = requestedKinds.filterNotNull().toSet()
+        synchronized(eventLock) {
+            eventSubscriptionId = subscriptionId
+            eventPumpJob = scope.launch(start = CoroutineStart.LAZY) {
+                pumpEvents(recorder, subscriptionId, cursor, kinds, limit)
+            }
+        }
+        send(
+            WireSubscribeResult(
+                type = "subscribe_result",
+                requestId = message.requestId,
+                subscriptionId = subscriptionId,
+            ),
+        )
+        synchronized(eventLock) { eventPumpJob }?.start()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun pumpEvents(
+        recorder: RuntimeEventRecorder,
+        subscriptionId: String,
+        initialCursor: Long,
+        kinds: Set<dev.vistrea.protocol.v1.RuntimeEventKind>,
+        limit: Int,
+    ) {
+        var cursor = initialCursor
+        try {
+            while (state == RuntimeConnectionState.READY && eventSubscriptionId == subscriptionId) {
+                coroutineContext.ensureActive()
+                val batch = recorder.batchAfter(cursor, kinds, limit)
+                if (batch == null) {
+                    recorder.waitForEvents(after = cursor)
+                    continue
+                }
+                if (state != RuntimeConnectionState.READY || eventSubscriptionId != subscriptionId) {
+                    return
+                }
+                send(
+                    WireEventBatch(
+                        type = "event_batch",
+                        subscriptionId = subscriptionId,
+                        batch = batch,
+                    ),
+                )
+                cursor = batch.lastSequence.value
+            }
+        } catch (_: CancellationException) {
+            // Local unsubscribe or shutdown already owns the terminal state.
+        } catch (error: RuntimeConnectionException) {
+            if (state == RuntimeConnectionState.READY) {
+                shutdown(RuntimeConnectionState.FAILED, error)
+            }
+        } catch (_: Exception) {
+            if (state == RuntimeConnectionState.READY) {
+                shutdown(
+                    RuntimeConnectionState.FAILED,
+                    RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION),
+                )
+            }
+        }
+    }
+
+    private suspend fun acknowledgeEvents(message: WireAcknowledgeEvents) {
+        val recorder = eventRecorder
+        if (
+            message.type != "acknowledge_events" ||
+            !eventStreamingEnabled ||
+            recorder == null ||
+            message.subscriptionId != eventSubscriptionId ||
+            message.durableThroughSequence < 0
+        ) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        if (message.eventEpochId != recorder.epoch().eventEpochId) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        recorder.releaseThrough(message.durableThroughSequence)
+    }
+
+    private fun unsubscribeEvents(message: WireUnsubscribeEvents) {
+        if (message.type != "unsubscribe_events" || message.subscriptionId != eventSubscriptionId) {
+            throw RuntimeConnectionException(RuntimeConnectionErrorCode.PROTOCOL_VIOLATION)
+        }
+        val job = synchronized(eventLock) {
+            eventSubscriptionId = null
+            eventPumpJob.also { eventPumpJob = null }
+        }
+        job?.cancel(CancellationException("Runtime event subscription closed by Host."))
     }
 
     private suspend fun cancelCapture(message: WireCaptureCancel) {
@@ -690,6 +907,11 @@ class LoopbackRuntimeClient(
             captureJobs.values.toList().also { captureJobs.clear() }
         }
         jobs.forEach(Job::cancel)
+        val pump = synchronized(eventLock) {
+            eventSubscriptionId = null
+            eventPumpJob.also { eventPumpJob = null }
+        }
+        pump?.cancel()
         closeTransportSocket()
         sessionLimits = null
         scope.cancel()

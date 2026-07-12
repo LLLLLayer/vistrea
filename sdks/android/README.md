@@ -21,20 +21,21 @@ This directory currently contains a pure Kotlin/JVM protocol adapter for the can
 - optionally renders the observed root into canonical PNG bytes and returns a SHA-256 `ObjectRef` separately from transport and persistence;
 - fails closed on empty roots, off-main-thread capture, display mismatch, node limits, screenshot limits, and encoding failure.
 
-`runtime-connection/` implements the authenticated Snapshot-only loopback transport shared with the Node Host:
+`runtime-connection/` implements the authenticated loopback transport shared with the Node Host:
 
 - literal `127.0.0.1` or `::1` endpoints only;
 - HMAC-SHA256 mutual proof compatible with the Node reference implementation;
 - bounded fatal UTF-8 JSON lines with duplicate-key and unknown-key rejection;
 - negotiated line, object, and chunk limits;
 - exact Snapshot-to-`ObjectRef` association plus size and SHA-256 verification;
-- bounded concurrent captures, cancellation, clean close, and generic credential-free errors.
+- bounded concurrent captures, cancellation, clean close, and generic credential-free errors;
+- `runtime.events` negotiation when a `RuntimeEventRecorder` is attached: the hello declares the recorder epoch, `subscribe_events` streams strictly ordered `event_batch` frames with explicit dropped-range evidence, retained events release only after `acknowledge_events`, and unresolvable epochs or ranges answer `subscribe_error` conflicts.
 
 The current Snapshot slice intentionally supports only two exact field-mask combinations: `{trees}` with `screenshot: "none"`, or `{trees, screenshot}` with `screenshot: "reference"`. Duplicate, unknown, or unsatisfied paths produce `capture_error` without making the connection unusable. Capture completion, failure, and cancellation atomically claim the request before writing a terminal message, so the client makes a best-effort exactly-one choice among `capture_complete`, `capture_error`, and `capture_cancelled`; an unknown or late cancellation is a no-op, and a failed terminal write closes the session instead of attempting a second terminal message.
 
 The connection source is compiled only into the Android library's `debug` and `internal` variants. The `release` AAR has no Runtime client, configuration, authentication, wire, or capture-provider class. `runtime-android` similarly exposes `AndroidViewRuntimeSnapshotCaptureProvider` only from its `debug` and `internal` variants; its Release variant retains observation-only capture without a Host entry point.
 
-The Debug Demo Inspector and protected Host bootstrap exist under `examples/android/VistreaDemoApp/`. Protected Design Tuning, event capture, and the separate Compose Semantics adapter remain follow-up work.
+The Debug Demo Inspector and protected Host bootstrap exist under `examples/android/VistreaDemoApp/`; its Debug variant records transient banner presentation and dismissal through the bounded `RuntimeEventRecorder`, while the Release variant installs no reporter. Protected Design Tuning, automatic View event observation, and the separate Compose Semantics adapter remain follow-up work.
 
 ## Verification
 

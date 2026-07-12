@@ -24,6 +24,7 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.vistrea.protocol.v1.RuntimeIdentifierFactory
 import dev.vistrea.protocol.v1.AccessibilityProperties
 import dev.vistrea.protocol.v1.BuildId
 import dev.vistrea.protocol.v1.CapabilitySet
@@ -74,7 +75,6 @@ import dev.vistrea.protocol.v1.UiTreePayload
 import dev.vistrea.protocol.v1.VisualProperties
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
-import java.security.SecureRandom
 import java.time.Instant
 import java.util.ArrayDeque
 import java.util.Locale
@@ -86,8 +86,6 @@ private const val DEFAULT_MAXIMUM_SCREENSHOT_PIXELS = 20_000_000L
 private const val COLOR_COMPONENT_MAXIMUM = 255.0
 private const val FONT_NORMAL_WEIGHT = 400.0
 private const val FONT_WEIGHT_SPAN = 500.0
-private const val UUID_BYTE_COUNT = 16
-private const val UUID_TIMESTAMP_BYTE_COUNT = 6
 
 data class AndroidViewRuntimeCaptureConfiguration(
     val projectId: ProjectId,
@@ -772,70 +770,6 @@ private data class CaptureMoment(
     companion object {
         fun now(): CaptureMoment = CaptureMoment(Instant.now(), System.nanoTime())
     }
-}
-
-private object RuntimeIdentifierFactory {
-    private val random = SecureRandom()
-
-    fun make(prefix: String, time: Instant = Instant.now()): String {
-        val bytes = ByteArray(UUID_BYTE_COUNT)
-        val milliseconds = time.toEpochMilli().coerceAtLeast(0)
-        for (index in 0 until UUID_TIMESTAMP_BYTE_COUNT) {
-            bytes[UUID_TIMESTAMP_BYTE_COUNT - 1 - index] =
-                ((milliseconds shr (index * Byte.SIZE_BITS)) and BYTE_MASK.toLong()).toByte()
-        }
-        random.nextBytes(bytes, UUID_TIMESTAMP_BYTE_COUNT, UUID_BYTE_COUNT)
-        setVersionAndVariant(bytes)
-        return "${prefix}_${format(bytes)}"
-    }
-
-    fun deterministic(prefix: String, seed: String): String {
-        val bytes = MessageDigest.getInstance("SHA-256")
-            .digest(seed.toByteArray(Charsets.UTF_8))
-            .copyOf(UUID_BYTE_COUNT)
-        setVersionAndVariant(bytes)
-        return "${prefix}_${format(bytes)}"
-    }
-
-    private fun SecureRandom.nextBytes(bytes: ByteArray, fromIndex: Int, toIndex: Int) {
-        val suffix = ByteArray(toIndex - fromIndex)
-        nextBytes(suffix)
-        suffix.copyInto(bytes, destinationOffset = fromIndex)
-    }
-
-    private fun setVersionAndVariant(bytes: ByteArray) {
-        bytes[UUID_VERSION_BYTE_INDEX] =
-            ((bytes[UUID_VERSION_BYTE_INDEX].toInt() and VERSION_MASK) or VERSION_SEVEN).toByte()
-        bytes[UUID_VARIANT_BYTE_INDEX] =
-            ((bytes[UUID_VARIANT_BYTE_INDEX].toInt() and VARIANT_MASK) or VARIANT_RFC_4122).toByte()
-    }
-
-    private fun format(bytes: ByteArray): String {
-        val hex = bytes.joinToString(separator = "") { byte ->
-            "%02x".format(byte.toInt() and BYTE_MASK)
-        }
-        return listOf(
-            hex.substring(UUID_GROUP_ONE_START, UUID_GROUP_ONE_END),
-            hex.substring(UUID_GROUP_ONE_END, UUID_GROUP_TWO_END),
-            hex.substring(UUID_GROUP_TWO_END, UUID_GROUP_THREE_END),
-            hex.substring(UUID_GROUP_THREE_END, UUID_GROUP_FOUR_END),
-            hex.substring(UUID_GROUP_FOUR_END, UUID_HEX_LENGTH),
-        ).joinToString("-")
-    }
-
-    private const val VERSION_MASK = 0x0f
-    private const val VERSION_SEVEN = 0x70
-    private const val VARIANT_MASK = 0x3f
-    private const val VARIANT_RFC_4122 = 0x80
-    private const val BYTE_MASK = 0xff
-    private const val UUID_VERSION_BYTE_INDEX = 6
-    private const val UUID_VARIANT_BYTE_INDEX = 8
-    private const val UUID_GROUP_ONE_START = 0
-    private const val UUID_GROUP_ONE_END = 8
-    private const val UUID_GROUP_TWO_END = 12
-    private const val UUID_GROUP_THREE_END = 16
-    private const val UUID_GROUP_FOUR_END = 20
-    private const val UUID_HEX_LENGTH = 32
 }
 
 private data class RawInsets(

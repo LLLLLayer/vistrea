@@ -1,6 +1,7 @@
 package dev.vistrea.runtime.connection
 
 import dev.vistrea.protocol.v1.ObjectRef
+import dev.vistrea.protocol.v1.RuntimeEventBatch
 import dev.vistrea.protocol.v1.RuntimeSnapshot
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -23,6 +24,16 @@ internal data class WireHostChallenge(
 )
 
 @Serializable
+internal data class WireEventEpoch(
+    @SerialName("event_epoch_id")
+    val eventEpochId: String,
+    @SerialName("oldest_retained_sequence")
+    val oldestRetainedSequence: Long,
+    @SerialName("next_sequence")
+    val nextSequence: Long,
+)
+
+@Serializable
 internal data class WireClientHello(
     val type: String,
     @SerialName("connection_attempt_id")
@@ -40,6 +51,8 @@ internal data class WireClientHello(
     val clientNonce: String,
     @SerialName("challenge_response")
     val challengeResponse: String,
+    @SerialName("event_epoch")
+    val eventEpoch: WireEventEpoch? = null,
 )
 
 @Serializable
@@ -55,6 +68,8 @@ internal data class WireHostWelcome(
     val hostProof: String,
     @SerialName("session_policy")
     val sessionPolicy: WireSessionPolicy,
+    @SerialName("event_epoch")
+    val eventEpoch: WireEventEpoch? = null,
 )
 
 @Serializable
@@ -170,6 +185,81 @@ internal data class WireCaptureError(
     val requestId: String,
     val code: String,
     val message: String,
+)
+
+@Serializable
+internal data class WireEventStart(
+    val mode: String,
+    val sequence: Long? = null,
+)
+
+@Serializable
+internal data class WireSubscribeEvents(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    @SerialName("event_epoch_id")
+    val eventEpochId: String,
+    @SerialName("event_kinds")
+    val eventKinds: List<String>,
+    val start: WireEventStart,
+    @SerialName("max_batch_size")
+    val maxBatchSize: Int? = null,
+)
+
+@Serializable
+internal data class WireAcknowledgeEvents(
+    val type: String,
+    @SerialName("subscription_id")
+    val subscriptionId: String,
+    @SerialName("event_epoch_id")
+    val eventEpochId: String,
+    @SerialName("durable_through_sequence")
+    val durableThroughSequence: Long,
+)
+
+@Serializable
+internal data class WireUnsubscribeEvents(
+    val type: String,
+    @SerialName("subscription_id")
+    val subscriptionId: String,
+)
+
+@Serializable
+internal data class WireSubscribeResult(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    @SerialName("subscription_id")
+    val subscriptionId: String,
+)
+
+@Serializable
+internal data class WireSubscribeError(
+    val type: String,
+    @SerialName("request_id")
+    val requestId: String,
+    val code: String,
+    @SerialName("oldest_available_sequence")
+    val oldestAvailableSequence: Long? = null,
+    @SerialName("next_sequence")
+    val nextSequence: Long? = null,
+)
+
+@Serializable
+internal data class WireEventBatch(
+    val type: String,
+    @SerialName("subscription_id")
+    val subscriptionId: String,
+    val batch: RuntimeEventBatch,
+)
+
+@Serializable
+internal data class WireEventsClosed(
+    val type: String,
+    @SerialName("subscription_id")
+    val subscriptionId: String,
+    val code: String? = null,
 )
 
 internal object RuntimeWireCodec {
