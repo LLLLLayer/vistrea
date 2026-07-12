@@ -13,7 +13,7 @@ import { startLocalHost, type LocalHostHandle } from "../../apps/host/index.js";
 import { PROTOCOL_SCHEMA_IDS, type RuntimeSnapshot } from "../../data/api/index.js";
 import { MemoryDataStore, createRepositoryProtocolValidator } from "../../data/memory/index.js";
 import { AdbAutomationProvider, AutomationEngine } from "../../engine/automation/index.js";
-import { ScreenGraphEngine } from "../../engine/exploration/index.js";
+import { ExplorationEngine, ScreenGraphEngine } from "../../engine/exploration/index.js";
 
 const repositoryRoot = process.cwd();
 const optInEnvironment = "VISTREA_RUN_ANDROID_REAL_AUTOMATION";
@@ -371,6 +371,48 @@ test(
     );
     assert.equal(asArray(paths["paths"], "graph paths").length, 1);
 
+    // Deterministic exploration drives the same real device autonomously:
+    // from Home it must rediscover both known states, add the Detail screen,
+    // and physically return along system back.
+    const graphEngine = new ScreenGraphEngine({ workspace: automationWorkspace, validator });
+    const hostHandle = resources.host;
+    const explorationCapture = {
+      captureSnapshot: async (): Promise<RuntimeSnapshot> => {
+        const captured = await captureSnapshotThroughApi(hostHandle, knownSecrets);
+        const copy = { ...captured };
+        delete copy["screenshot"];
+        const unit = automationWorkspace.beginUnitOfWork("write");
+        unit.snapshots.put(copy as unknown as RuntimeSnapshot);
+        unit.commit();
+        return copy as unknown as RuntimeSnapshot;
+      },
+    };
+    const exploration = new ExplorationEngine({
+      workspace: automationWorkspace,
+      capture: explorationCapture,
+      automation,
+      graph: graphEngine,
+    });
+    const report = await exploration.explore({
+      automation_session_id: session.automation_session_id,
+      maximum_actions: 8,
+      settle_milliseconds: settleMilliseconds,
+    });
+    assert.equal(report.stopped_reason, "frontier_exhausted");
+    assert.equal(report.discovered_state_ids.length, 3);
+    const exploredGraph = graphEngine.getGraph({
+      project_id: runtimeContext["project_id"] as string,
+      application_id: runtimeContext["application_id"] as string,
+    });
+    assert.equal(exploredGraph.states.length, 3);
+    assert.ok(exploredGraph.transitions.length >= 4);
+    const version = exploration.tagGraphVersion({
+      project_id: runtimeContext["project_id"] as string,
+      application_id: runtimeContext["application_id"] as string,
+      tag_name: "acceptance/explored",
+    });
+    assert.equal(version.state_count, 3);
+
     automation.closeSession(session.automation_session_id);
     await resources.host.close();
     resources.host = undefined;
@@ -389,6 +431,10 @@ test(
         graph_states: 2,
         graph_transitions: 2,
         path_found: "passed",
+        exploration_states: report.discovered_state_ids.length,
+        exploration_actions: report.action_count,
+        exploration_stopped: report.stopped_reason,
+        exploration_version_tag: version.tag_name,
       }),
     );
   },

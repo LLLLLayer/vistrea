@@ -14,3 +14,13 @@ export {
   type StructuralIdentity,
   type TransitionActionCommand,
 } from "./screen-graph-engine.js";
+export {
+  ExplorationEngine,
+  type ExecutedExplorationStep,
+  type ExplorationCapturePort,
+  type ExplorationEngineDependencies,
+  type ExplorationReport,
+  type ExploreCommand,
+  type TagGraphVersionCommand,
+  type TaggedGraphVersion,
+} from "./exploration-engine.js";

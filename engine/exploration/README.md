@@ -10,6 +10,13 @@ Screen State identity, deduplication, and Screen Graph materialization over pers
 - maintains one coherent materialized `ScreenGraph` per project and application under a deterministic graph identity, revalidating the complete document against the canonical schema and semantic rules on every write;
 - reads states, materialized graphs, and acyclic transition paths through the `ScreenGraphRepository` port.
 
-Action candidate generation, dangerous-operation filtering, deterministic BFS/DFS exploration, AI-assisted planning, and state restoration remain later slices.
+`ExplorationEngine` adds bounded deterministic exploration and path versioning on top:
+
+- walks the running application depth-first over real executed actions: tap candidates come only from nodes the captured tree declares tappable, in sorted stable-identifier order, and system back physically returns after a branch is exhausted;
+- captures before and after every action, deduplicates both endpoint states, and records every Transition, so repeated runs create nothing new and only accumulate occurrence evidence;
+- stops on the explicit action budget, an exhausted frontier, or a stuck back gesture, and never generates dangerous or forbidden actions;
+- freezes the current materialized graph under `tag` version selectors (`tagGraphVersion`) and diffs two frozen materializations (`compareGraphVersions`) so partial and complete coverage runs compare precisely.
+
+The identity and exploration design is recorded in [ADR-0007](../../docs/decisions/0007-screen-state-identity-and-device-automation.md). AI-assisted planning and state restoration remain later slices.
 
 The engine depends on shared protocol models and Data API ports, not UIKit, Android View, device automation providers, or a product frontend.
