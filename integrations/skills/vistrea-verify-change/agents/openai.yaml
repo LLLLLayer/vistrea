@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify a change with Vistrea"
+  short_description: "Run validators, triage findings, and diff build coverage"
+  default_prompt: "Use $vistrea-verify-change to validate the latest runtime evidence and report the quality gate result."

@@ -7,13 +7,17 @@ Implemented Skills:
 - `vistrea-inspect-runtime`: check Runtime readiness, capture canonical UI
   evidence, and inspect or retrieve the same persisted Snapshot through CLI or
   MCP
+- `vistrea-review-design`: register a design baseline, map regions to live
+  nodes, run comparisons, and manage the Review Issue lifecycle to verified
+  fixes
+- `vistrea-tune-ui`: apply and revert allowlisted visual previews on the live
+  Runtime with TTL and exact applied/rejected partitions
+- `vistrea-verify-change`: run the core validators and the CI gate, triage or
+  suppress findings, and diff observed coverage between builds
 
 Planned Skills:
 
-- `vistrea-explore-ui`: explore a bounded application area and update the Deep Wiki
-- `vistrea-review-design`: open a Screen State and create issues against a design baseline
-- `vistrea-tune-ui`: apply reversible visual changes, produce a Tuning Patch, and re-verify
-- `vistrea-verify-change`: validate affected paths and compare build versions
+- `vistrea-explore-ui`: drive bounded deterministic exploration and update the Deep Wiki once the Host exposes exploration sessions
 
 Create additional real packages only after callable interfaces and workflows exist:
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review a design with Vistrea"
+  short_description: "Compare runtime UI against a design baseline and manage Review Issues"
+  default_prompt: "Use $vistrea-review-design to compare the current screen against the design baseline and record the deviations as Review Issues."

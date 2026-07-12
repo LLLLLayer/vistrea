@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tune UI reversibly with Vistrea"
+  short_description: "Apply and revert allowlisted visual previews on the live Runtime"
+  default_prompt: "Use $vistrea-tune-ui to preview the requested visual change reversibly on the connected app and report the applied result."
