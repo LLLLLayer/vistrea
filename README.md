@@ -76,7 +76,7 @@ The native iOS UIKit and Android View Demo Apps implement the same 12 required c
 
 ## Recommended implementation sequence
 
-1. Add Runtime events plus protected design review and reversible tuning.
+1. Add protected design review and reversible tuning over the verified Snapshot and event evidence.
 2. Add WDA/UIAutomator actions, exploration, and Screen State identity.
 3. Persist Canvas and Deep Wiki knowledge, then add validation and build diff.
 4. Expand CLI, MCP, Skills, and CI with those Engine use cases.
@@ -88,7 +88,7 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 
 Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View. A production local Host, macOS Snapshot Studio, strict CLI, stdio MCP server, and `vistrea-inspect-runtime` Skill consume the same persisted Snapshot path. This does not yet implement Runtime events, device automation, exploration, design tuning, full Canvas or Deep Wiki workflows, `.vistrea-pack`, CI validation, or Vistrea Hub.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and both Runtime SDKs now stream negotiated, acknowledged Runtime event batches into the same Host. A production local Host, macOS Snapshot Studio with an event timeline, strict CLI, stdio MCP server, and `vistrea-inspect-runtime` Skill consume the same persisted Snapshot and event path. This does not yet implement device automation, exploration, design tuning, full Canvas or Deep Wiki workflows, CI validation, or Vistrea Hub.
 
 Run the current executable checks with:
 

@@ -17,7 +17,7 @@ Two roadmap boundaries are tracked independently:
 - **Phase 0: contracts and local data foundation — Verified.** Phase 0A1, Phase 0A2, the Phase 0B local Data foundation, and portable `.vistrea-pack` export/import are verified, which completes the Phase 0 boundary. Readable Markdown/HTML exports remain a later exchange slice.
 - **Phase 1: native Snapshot loop — Verified for iOS UIKit and Android View.** Both real native Demo Apps can connect to the production Host, capture a canonical Snapshot and PNG, render the evidence through Studio, read the same Snapshot through CLI, persist it through SQLite and the content-addressed Object Store, and reopen identical data.
 
-The verified Snapshot loops do not imply that the complete product is implemented. Runtime events, device automation, exploration, Screen State identity, design review, protected tuning, full Canvas and Deep Wiki workflows, validation, build diff, CI orchestration, and Vistrea Hub remain later slices.
+The verified Snapshot loops do not imply that the complete product is implemented. Device automation, exploration, Screen State identity, design review, protected tuning, full Canvas and Deep Wiki workflows, validation, build diff, CI orchestration, and Vistrea Hub remain later slices.
 
 ## Workstream status
 
@@ -31,10 +31,11 @@ The verified Snapshot loops do not imply that the complete product is implemente
 | Content-addressed Object Store | `objects-1` | Verified | Encoded-byte SHA-256 identity, atomic publication, integrity checks, range reads, retention, recovery, and symlink-safe paths | 11 Object Store contracts in the 30-test Host contract suite; commit `08359d1` |
 | Portable exchange | `data-exchange-1` | Verified | Full and thin `.vistrea-pack` exporter/importer over the shared Commit and ObjectRef identity, protocol pack schema and fixtures, deterministic bytes, and `LocalDataWorkspace.exchange` composition; readable exports remain later | 7 exchange contracts in the 37-test Host contract suite plus a cross-Workspace integration; commit `b801349` |
 | Snapshot Engine and production local Host | `local-host-1` | Verified | Capture/Get/List, Object-before-metadata ordering, authenticated Runtime transport, Local API, Runtime session routing, production Workspace composition, and private connection descriptor | 30 Host contracts and 28 Host integrations; commits `87490c4`, `70a6c8f`, `6198de1`, and `28915b7` |
-| iOS Runtime SDK and Demo App | `uikit-runtime-loop-1` | In progress | Canonical models, all shared scenarios, UIKit hierarchy/PNG capture, Debug Inspector, hardened Runtime connection, and verified first Snapshot loop exist; events and protected tuning remain | 17 Swift tests in Debug and Release, 4 Node/Swift interop tests, real iOS E2E; commits `4c67fb2`, `be60c0b`, `7671364`, and `74967a6` |
-| Android Runtime SDK and Demo App | `android-view-runtime-loop-1` | In progress | Canonical models, all shared scenarios, View/ViewGroup capture, Debug Inspector, protected Runtime connection, Release exclusion, and verified first Snapshot loop exist; events and protected tuning remain | 4 Node/Kotlin interop tests, 5 API 36.1 instrumentation tests, release-boundary verification, and real Android E2E; commit `1925b3a` |
-| Vistrea Studio | `snapshot-studio-1` | In progress | Native SwiftUI Host status, capture/list, screenshot, 2D tree, node details, scenario/build/source context, fixture mode, and production acceptance probe; broader product modes remain | 21 Studio tests and Release build; commits `6ccf9f2` and `534517d` |
-| Agent integrations | `snapshot-agent-adapters-1` | In progress | Strict JSON CLI and official-SDK stdio MCP expose status plus Snapshot capture/list/get through one authenticated Host client; `vistrea-inspect-runtime` composes inspection | 2 Agent adapter integration tests; commits `2e1d157` and `3dcef77` |
+| Runtime events pipeline | `runtime-events-1` | Verified | Negotiated `runtime.events` capability with client-declared epochs, Host event pump with durable acknowledgement and reconnect resume, SQLite persistence, `/v1/events` timeline through Local API/CLI/MCP, Studio timeline pane, and bounded iOS/Android recorders with Demo transient reporting | Transport, pump, and composed-Host integrations plus Node/Swift and Node/Kotlin event interop; commits `e34d6da`, `7824f29`, `d11dd52`, and `fa9bf88` |
+| iOS Runtime SDK and Demo App | `uikit-runtime-loop-1` | In progress | Canonical models, all shared scenarios, UIKit hierarchy/PNG capture, Debug Inspector, hardened Runtime connection, verified first Snapshot loop, and negotiated event streaming with Demo transient reporting exist; protected tuning and automatic UIKit event observation remain | 20 Swift tests in Debug and Release, 5 Node/Swift interop tests, real iOS E2E; commits `4c67fb2`, `be60c0b`, `7671364`, `74967a6`, and `7824f29` |
+| Android Runtime SDK and Demo App | `android-view-runtime-loop-1` | In progress | Canonical models, all shared scenarios, View/ViewGroup capture, Debug Inspector, protected Runtime connection, Release exclusion, verified first Snapshot loop, and negotiated event streaming with Demo transient reporting exist; protected tuning and automatic View event observation remain | 5 Node/Kotlin interop tests, recorder unit tests, 5 API 36.1 instrumentation tests, release-boundary verification, and real Android E2E; commits `1925b3a` and `d11dd52` |
+| Vistrea Studio | `snapshot-studio-1` | In progress | Native SwiftUI Host status, capture/list, screenshot, 2D tree, node details, scenario/build/source context, Runtime event timeline pane, fixture mode, and production acceptance probe; broader product modes remain | 22 Studio tests and Release build; commits `6ccf9f2`, `534517d`, and `fa9bf88` |
+| Agent integrations | `snapshot-agent-adapters-1` | In progress | Strict JSON CLI and official-SDK stdio MCP expose status, Snapshot capture/list/get, and the Runtime event timeline through one authenticated Host client; `vistrea-inspect-runtime` composes inspection | 2 Agent adapter integration tests including the events round trip; commits `2e1d157`, `3dcef77`, and `e34d6da` |
 | Automation and exploration | `interfaces-draft-1` | Planned | WDA/UIAutomator contracts and scenario expectations only | No provider or exploration implementation |
 | Design review and tuning | `protocol-v1` | Planned | Protocol models, fixtures, interface behavior, and Studio interaction design only | No live comparison, issue, or protected tuning loop |
 | Canvas and Deep Wiki | `protocol-v1` | Planned | Protocol models, Data ports, and product interaction design only | No complete product persistence or UI workflow |
@@ -87,6 +88,10 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `28915b7` | Hardened Host and iOS capture cancellation races and unsupported field-mask handling. |
 | `1925b3a` | Connected the protected Android Runtime to Host with Release exclusion and race-safe cancellation. |
 | `b801349` | Added portable full/thin `.vistrea-pack` exchange and completed the Phase 0 boundary. |
+| `e34d6da` | Added negotiated Runtime event transport, the durable Host event pump, and timeline surfaces. |
+| `7824f29` | Streamed iOS Runtime events through the bounded recorder and Demo transient reporting. |
+| `d11dd52` | Streamed Android Runtime events through the bounded recorder and Demo transient reporting. |
+| `fa9bf88` | Added the persisted Runtime event timeline pane to Studio. |
 
 ## Native vertical-loop evidence
 
@@ -149,12 +154,18 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-12 | Portable `.vistrea-pack` exchange contracts | `pnpm test:host-contract` | 37 of 37 tests passed, including 7 pack contracts: full round trip, deterministic bytes, thin prerequisites, tamper and truncation rejection, ref-conflict reporting, payload rejection, and command validation |
 | 2026-07-12 | Cross-Workspace pack transfer | `pnpm test:host-integration` | 29 of 29 tests passed, including one full pack moved between two production local Workspaces through `LocalDataWorkspace.exchange` |
 | 2026-07-12 | Complete executable check after exchange | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 29 Host integrations, and 14 Scenario tests passed |
+| 2026-07-12 | Runtime event transport, pump, and composed Host | `pnpm test:host-integration` | 39 of 39 tests passed, including subscription negotiation, ordered acknowledged batches, epoch conflicts, pump resume after reconnect, and the composed Host persisting a live TCP event stream |
+| 2026-07-12 | Agent event surfaces | `pnpm test:host-integration` (agent adapters) | CLI `events list` and MCP `vistrea_get_event_timeline` returned identical persisted timelines |
+| 2026-07-12 | iOS Runtime events | `swift test --package-path sdks/ios` in Debug and Release; Node/Swift interop | 20 of 20 tests passed in each configuration; the Swift client streamed pre-recorded transients and live batches with acknowledgements to the Node Host |
+| 2026-07-12 | Android Runtime events | `./gradlew :runtime-connection:testDebugUnitTest`; Node/Kotlin interop; Demo `assembleDebug assembleRelease test lintDebug`; release boundary script | Recorder units, scripted event interop, Demo builds/tests/lint, and the Release boundary all passed |
+| 2026-07-12 | Studio event timeline | `swift test --package-path apps/studio-macos`; Release build | 22 of 22 tests and the Release build passed |
+| 2026-07-12 | Complete executable check after Runtime events | `pnpm check` | 84 fixtures, 24 protocol contracts, 37 Host contracts, 39 Host integrations, and 14 Scenario tests passed |
 
 ## Known follow-up gaps
 
 - Readable Markdown/HTML exports (`exportReadable`) and compressed pack payload support remain later exchange slices.
 - Compressed Object fixtures do not yet include executable gzip/zstd and byte-range vectors.
-- Runtime Event Batch production capture and event timeline are not implemented.
+- Automatic UIKit and Android View event observation is not implemented; the verified event slice reports transients through explicit Demo instrumentation of the bounded recorders.
 - WDA and UIAutomator providers, action safety enforcement, exploration, recovery, and Screen State deduplication are not implemented.
 - Design reference comparison, Review Issue workflow, protected allowlisted tuning, Tuning Patch re-verification, and design-oriented Studio modes are not implemented.
 - Full Screen State Canvas, Deep Wiki persistence/search/history, product versioning workflows, validation, and build diff are not implemented.
@@ -163,7 +174,6 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 
 ## Next milestones
 
-1. Add production Runtime Event Batch capture and expose the event timeline through Host and Studio.
-2. Implement one design-reference comparison, one Review Issue flow, and one protected allowlisted tuning property with apply/revert and re-verification.
-3. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
-4. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
+1. Implement one design-reference comparison, one Review Issue flow, and one protected allowlisted tuning property with apply/revert and re-verification.
+2. Add real WDA/UIAutomator actions, safety policy, bounded exploration, and Screen State identity before building the full Canvas and Deep Wiki workflows.
+3. Expand validation, build diff, Agent operations, CI, and optional Hub synchronization only after those local workflows are stable.
