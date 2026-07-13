@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.store.search",
+  "title": "Catalog search with typed and cleared queries",
+  "purpose": "Expose a search field whose typed query filters the deterministic catalog and whose cleared query restores it, so text-input automation has a canonical target.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.search",
+    "seed": 2200,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.search.field",
+      "role": "text-field"
+    },
+    {
+      "node_id": "demo.search.results",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.search.result_primary",
+      "role": "list-item"
+    },
+    {
+      "node_id": "demo.search.empty_notice",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.search",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.search.field",
+        "demo.search.results",
+        "demo.search.result_primary"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.search-filtered",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.search.field",
+        "demo.search.result_primary"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.search-empty",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.search.field",
+        "demo.search.empty_notice"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.search.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.search",
+      "to_state_id": "demo.state.search"
+    },
+    {
+      "step_id": "demo.search.type-matching",
+      "action": {
+        "kind": "type_text",
+        "target_node_id": "demo.search.field",
+        "input_alias": "QUERY_MATCHING"
+      },
+      "from_state_id": "demo.state.search",
+      "to_state_id": "demo.state.search-filtered"
+    },
+    {
+      "step_id": "demo.search.clear-matching",
+      "action": {
+        "kind": "clear_text",
+        "target_node_id": "demo.search.field"
+      },
+      "from_state_id": "demo.state.search-filtered",
+      "to_state_id": "demo.state.search"
+    },
+    {
+      "step_id": "demo.search.type-unmatched",
+      "action": {
+        "kind": "type_text",
+        "target_node_id": "demo.search.field",
+        "input_alias": "QUERY_UNMATCHED"
+      },
+      "from_state_id": "demo.state.search",
+      "to_state_id": "demo.state.search-empty"
+    },
+    {
+      "step_id": "demo.search.clear-unmatched",
+      "action": {
+        "kind": "clear_text",
+        "target_node_id": "demo.search.field"
+      },
+      "from_state_id": "demo.state.search-empty",
+      "to_state_id": "demo.state.search"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.store.search.snapshot.all",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.search.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.search.snapshot.filtered",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.search.type-matching",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.search.snapshot.empty",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.search.type-unmatched",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.search.screenshot.all",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.search.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.search.graph.full",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.search.clear-unmatched",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.store.search.snapshot-filtered",
+        "profile": "baseline",
+        "after_step_id": "demo.search.type-matching",
+        "state_id": "demo.state.search-filtered",
+        "required_node_ids": [
+          "demo.search.result_primary"
+        ],
+        "excluded_node_ids": [
+          "demo.search.empty_notice"
+        ]
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.store.search.transition.filter",
+          "step_id": "demo.search.type-matching",
+          "from_state_id": "demo.state.search",
+          "to_state_id": "demo.state.search-filtered",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.store.search.transition.clear",
+          "step_id": "demo.search.clear-matching",
+          "from_state_id": "demo.state.search-filtered",
+          "to_state_id": "demo.state.search",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": [
+        {
+          "expectation_id": "demo.store.search.identity.filtered-differs",
+          "left_profile": "baseline",
+          "right_profile": "baseline",
+          "left_state_id": "demo.state.search",
+          "right_state_id": "demo.state.search-filtered",
+          "outcome": "different-state",
+          "normalized_fields": []
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

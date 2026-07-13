@@ -231,6 +231,50 @@
         "validation",
         "build-diff"
       ]
+    },
+    {
+      "scenario_id": "demo.store.navigation",
+      "file": "fixtures/v1/demo.store.navigation.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.store.search",
+      "file": "fixtures/v1/demo.store.search.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.store.sheet",
+      "file": "fixtures/v1/demo.store.sheet.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.store.cart-states",
+      "file": "fixtures/v1/demo.store.cart-states.json",
+      "required": true,
+      "coverage": [
+        "snapshot",
+        "exploration"
+      ]
+    },
+    {
+      "scenario_id": "demo.mixed.declarative",
+      "file": "fixtures/v1/demo.mixed.declarative.json",
+      "required": true,
+      "coverage": [
+        "snapshot"
+      ]
     }
   ],
   "vertical_loops": [

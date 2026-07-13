@@ -18,9 +18,9 @@ test("the repository scenario suite passes schema and semantic validation", asyn
   const result = await validateScenarioSuite();
 
   assert.equal(result.ok, true, JSON.stringify(result.issues, null, 2));
-  assert.equal(result.scenarioCount, 12);
+  assert.equal(result.scenarioCount, 17);
   assert.equal(result.profileCount, 6);
-  assert.equal(result.artifactCount, 66);
+  assert.equal(result.artifactCount, 87);
   assert.deepEqual(result.coverage, [...requiredCoverage].sort());
 });
 

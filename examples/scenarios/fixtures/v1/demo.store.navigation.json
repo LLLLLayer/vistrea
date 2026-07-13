@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.store.navigation",
+  "title": "Storefront deep navigation",
+  "purpose": "Expose a tabbed storefront whose catalog, detail, and reviews stack gives exploration a deep deterministic graph, and whose scrolled catalog keeps one structural identity.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.store-shop",
+    "seed": 2100,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.store.tab_shop",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.store.tab_profile",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.store.catalog_list",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.store.catalog_item_primary",
+      "role": "list-item"
+    },
+    {
+      "node_id": "demo.store.detail_add_to_cart",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.store.detail_open_reviews",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.store.review_item_primary",
+      "role": "list-item"
+    },
+    {
+      "node_id": "demo.store.profile_header",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.store-shop",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.store.tab_shop",
+        "demo.store.catalog_list",
+        "demo.store.catalog_item_primary"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.store-detail",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.store.detail_add_to_cart",
+        "demo.store.detail_open_reviews"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.store-reviews",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.store.review_item_primary"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.store-profile",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.store.profile_header"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.store.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.store-shop",
+      "to_state_id": "demo.state.store-shop"
+    },
+    {
+      "step_id": "demo.store.open-detail",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.store.catalog_item_primary"
+      },
+      "from_state_id": "demo.state.store-shop",
+      "to_state_id": "demo.state.store-detail"
+    },
+    {
+      "step_id": "demo.store.open-reviews",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.store.detail_open_reviews"
+      },
+      "from_state_id": "demo.state.store-detail",
+      "to_state_id": "demo.state.store-reviews"
+    },
+    {
+      "step_id": "demo.store.back-detail",
+      "action": {
+        "kind": "back"
+      },
+      "from_state_id": "demo.state.store-reviews",
+      "to_state_id": "demo.state.store-detail"
+    },
+    {
+      "step_id": "demo.store.back-shop",
+      "action": {
+        "kind": "back"
+      },
+      "from_state_id": "demo.state.store-detail",
+      "to_state_id": "demo.state.store-shop"
+    },
+    {
+      "step_id": "demo.store.scroll-catalog",
+      "action": {
+        "kind": "swipe",
+        "duration_ms": 400
+      },
+      "from_state_id": "demo.state.store-shop",
+      "to_state_id": "demo.state.store-shop"
+    },
+    {
+      "step_id": "demo.store.open-profile",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.store.tab_profile"
+      },
+      "from_state_id": "demo.state.store-shop",
+      "to_state_id": "demo.state.store-profile"
+    },
+    {
+      "step_id": "demo.store.back-to-shop-tab",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.store.tab_shop"
+      },
+      "from_state_id": "demo.state.store-profile",
+      "to_state_id": "demo.state.store-shop"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.store.navigation.snapshot.shop",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.store.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.navigation.snapshot.shop-scrolled",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.store.scroll-catalog",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.navigation.snapshot.detail",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.store.open-detail",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.navigation.screenshot.shop",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.store.launch",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.navigation.graph.full",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.store.back-to-shop-tab",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.store.navigation.snapshot-shop",
+        "profile": "baseline",
+        "after_step_id": "demo.store.launch",
+        "state_id": "demo.state.store-shop",
+        "required_node_ids": [
+          "demo.store.catalog_list",
+          "demo.store.catalog_item_primary"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.store.transition.open-detail",
+          "step_id": "demo.store.open-detail",
+          "from_state_id": "demo.state.store-shop",
+          "to_state_id": "demo.state.store-detail",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.store.transition.open-reviews",
+          "step_id": "demo.store.open-reviews",
+          "from_state_id": "demo.state.store-detail",
+          "to_state_id": "demo.state.store-reviews",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.store.transition.open-profile",
+          "step_id": "demo.store.open-profile",
+          "from_state_id": "demo.state.store-shop",
+          "to_state_id": "demo.state.store-profile",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": [
+        {
+          "expectation_id": "demo.store.identity.scrolled-catalog-is-one-screen",
+          "left_profile": "baseline",
+          "right_profile": "baseline",
+          "left_state_id": "demo.state.store-shop",
+          "right_state_id": "demo.state.store-shop",
+          "outcome": "same-state",
+          "normalized_fields": [
+            "demo.store.catalog_list.content"
+          ]
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

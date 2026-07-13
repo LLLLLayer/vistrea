@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.mixed.declarative",
+  "title": "Declarative UI hosted inside the native shell",
+  "purpose": "Expose one screen rendered by SwiftUI on iOS and Jetpack Compose on Android with identical stable nodes, proving both declarative capture paths on shared contract content.",
+  "required": true,
+  "coverage": [
+    "snapshot"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot"
+      ],
+      "limitations": [
+        "SwiftUI content is captured from accessibility elements and is only observable while an accessibility runtime is active; a dormant capture reports ios.capture.content-not-observable and is refused as identity evidence."
+      ]
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot"
+      ],
+      "limitations": [
+        "Compose semantics expose no per-node visual facts; the screenshot remains the visual truth for this screen."
+      ]
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.mixed",
+    "seed": 2500,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.mixed.header",
+      "role": "label"
+    },
+    {
+      "node_id": "demo.mixed.featured_card",
+      "role": "container"
+    },
+    {
+      "node_id": "demo.mixed.action",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.mixed.status",
+      "role": "label"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.mixed",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.mixed.header",
+        "demo.mixed.featured_card",
+        "demo.mixed.action",
+        "demo.mixed.status"
+      ],
+      "dynamic_fields": [
+        {
+          "node_id": "demo.mixed.status",
+          "field": "text",
+          "normalization": "value-kind"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.mixed.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.mixed",
+      "to_state_id": "demo.state.mixed"
+    },
+    {
+      "step_id": "demo.mixed.toggle",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.mixed.action"
+      },
+      "from_state_id": "demo.state.mixed",
+      "to_state_id": "demo.state.mixed"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.mixed.declarative.snapshot.initial",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.mixed.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.mixed.declarative.snapshot.toggled",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.mixed.toggle",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.mixed.declarative.screenshot.initial",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.mixed.launch",
+      "comparison": "platform-visual",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.mixed.declarative.snapshot-initial",
+        "profile": "baseline",
+        "after_step_id": "demo.mixed.launch",
+        "state_id": "demo.state.mixed",
+        "required_node_ids": [
+          "demo.mixed.header",
+          "demo.mixed.action",
+          "demo.mixed.status"
+        ],
+        "excluded_node_ids": []
+      }
+    ]
+  },
+  "extensions": {}
+}

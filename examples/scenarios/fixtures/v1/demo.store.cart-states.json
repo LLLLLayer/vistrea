@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.store.cart-states",
+  "title": "Cart empty and populated structural states",
+  "purpose": "Expose one cart screen whose empty and populated structures are legitimately different states, giving identity curation real material instead of synthetic graphs.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.cart-empty",
+    "seed": 2400,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.cart.empty_notice",
+      "role": "label"
+    },
+    {
+      "node_id": "demo.cart.add_sample",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.cart.item_primary",
+      "role": "list-item"
+    },
+    {
+      "node_id": "demo.cart.checkout",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.cart-empty",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.cart.empty_notice",
+        "demo.cart.add_sample"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.cart-populated",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.cart.item_primary",
+        "demo.cart.checkout"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.cart.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.cart-empty",
+      "to_state_id": "demo.state.cart-empty"
+    },
+    {
+      "step_id": "demo.cart.add-sample",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.cart.add_sample"
+      },
+      "from_state_id": "demo.state.cart-empty",
+      "to_state_id": "demo.state.cart-populated"
+    },
+    {
+      "step_id": "demo.cart.remove-item",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.cart.item_primary"
+      },
+      "from_state_id": "demo.state.cart-populated",
+      "to_state_id": "demo.state.cart-empty"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.store.cart-states.snapshot.empty",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.cart.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.cart-states.snapshot.populated",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.cart.add-sample",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.cart-states.screenshot.populated",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.cart.add-sample",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.cart-states.graph.full",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.cart.remove-item",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.store.cart-states.snapshot-empty",
+        "profile": "baseline",
+        "after_step_id": "demo.cart.launch",
+        "state_id": "demo.state.cart-empty",
+        "required_node_ids": [
+          "demo.cart.empty_notice"
+        ],
+        "excluded_node_ids": [
+          "demo.cart.checkout"
+        ]
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.store.cart-states.transition.add",
+          "step_id": "demo.cart.add-sample",
+          "from_state_id": "demo.state.cart-empty",
+          "to_state_id": "demo.state.cart-populated",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.store.cart-states.transition.remove",
+          "step_id": "demo.cart.remove-item",
+          "from_state_id": "demo.state.cart-populated",
+          "to_state_id": "demo.state.cart-empty",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": [
+        {
+          "expectation_id": "demo.store.cart-states.identity.empty-differs",
+          "left_profile": "baseline",
+          "right_profile": "baseline",
+          "left_state_id": "demo.state.cart-empty",
+          "right_state_id": "demo.state.cart-populated",
+          "outcome": "different-state",
+          "normalized_fields": []
+        }
+      ]
+    }
+  },
+  "extensions": {}
+}

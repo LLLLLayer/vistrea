@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "scenario_id": "demo.store.sheet",
+  "title": "Sort options bottom sheet",
+  "purpose": "Expose a bottom sheet that blocks the frontier until chosen or dismissed, so overlay-dismiss automation has a canonical target.",
+  "required": true,
+  "coverage": [
+    "snapshot",
+    "exploration"
+  ],
+  "platform_support": {
+    "ios": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    },
+    "android": {
+      "status": "required",
+      "capabilities": [
+        "runtime.snapshot",
+        "automation.actions",
+        "exploration.graph"
+      ],
+      "limitations": []
+    }
+  },
+  "profiles": [
+    "baseline"
+  ],
+  "reset": {
+    "entry_state_id": "demo.state.sheet-base",
+    "seed": 2300,
+    "external_services": false
+  },
+  "stable_nodes": [
+    {
+      "node_id": "demo.sheet.open",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.sheet.container",
+      "role": "dialog"
+    },
+    {
+      "node_id": "demo.sheet.option_primary",
+      "role": "button"
+    },
+    {
+      "node_id": "demo.sheet.dismiss",
+      "role": "button"
+    }
+  ],
+  "states": [
+    {
+      "state_id": "demo.state.sheet-base",
+      "kind": "screen",
+      "required_node_ids": [
+        "demo.sheet.open"
+      ],
+      "dynamic_fields": []
+    },
+    {
+      "state_id": "demo.state.sheet-open",
+      "kind": "overlay",
+      "required_node_ids": [
+        "demo.sheet.container",
+        "demo.sheet.option_primary",
+        "demo.sheet.dismiss"
+      ],
+      "dynamic_fields": []
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "demo.sheet.launch",
+      "action": {
+        "kind": "launch"
+      },
+      "from_state_id": "demo.state.sheet-base",
+      "to_state_id": "demo.state.sheet-base"
+    },
+    {
+      "step_id": "demo.sheet.present",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.sheet.open"
+      },
+      "from_state_id": "demo.state.sheet-base",
+      "to_state_id": "demo.state.sheet-open"
+    },
+    {
+      "step_id": "demo.sheet.choose",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.sheet.option_primary"
+      },
+      "from_state_id": "demo.state.sheet-open",
+      "to_state_id": "demo.state.sheet-base"
+    },
+    {
+      "step_id": "demo.sheet.present-again",
+      "action": {
+        "kind": "tap",
+        "target_node_id": "demo.sheet.open"
+      },
+      "from_state_id": "demo.state.sheet-base",
+      "to_state_id": "demo.state.sheet-open"
+    },
+    {
+      "step_id": "demo.sheet.dismiss",
+      "action": {
+        "kind": "dismiss",
+        "target_node_id": "demo.sheet.dismiss"
+      },
+      "from_state_id": "demo.state.sheet-open",
+      "to_state_id": "demo.state.sheet-base"
+    }
+  ],
+  "expected_artifacts": [
+    {
+      "artifact_key": "demo.store.sheet.snapshot.base",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.sheet.launch",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.sheet.snapshot.open",
+      "kind": "runtime-snapshot",
+      "profile": "baseline",
+      "after_step_id": "demo.sheet.present",
+      "comparison": "protocol-canonical",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.sheet.screenshot.open",
+      "kind": "screenshot",
+      "profile": "baseline",
+      "after_step_id": "demo.sheet.present",
+      "comparison": "platform-visual",
+      "required": true
+    },
+    {
+      "artifact_key": "demo.store.sheet.graph.full",
+      "kind": "screen-graph",
+      "profile": "baseline",
+      "after_step_id": "demo.sheet.dismiss",
+      "comparison": "semantic-normalized",
+      "required": true
+    }
+  ],
+  "expectations": {
+    "snapshots": [
+      {
+        "expectation_id": "demo.store.sheet.snapshot-open",
+        "profile": "baseline",
+        "after_step_id": "demo.sheet.present",
+        "state_id": "demo.state.sheet-open",
+        "required_node_ids": [
+          "demo.sheet.container",
+          "demo.sheet.dismiss"
+        ],
+        "excluded_node_ids": []
+      }
+    ],
+    "exploration": {
+      "expected_transitions": [
+        {
+          "transition_id": "demo.store.sheet.transition.present",
+          "step_id": "demo.sheet.present",
+          "from_state_id": "demo.state.sheet-base",
+          "to_state_id": "demo.state.sheet-open",
+          "status": "observed"
+        },
+        {
+          "transition_id": "demo.store.sheet.transition.dismiss",
+          "step_id": "demo.sheet.dismiss",
+          "from_state_id": "demo.state.sheet-open",
+          "to_state_id": "demo.state.sheet-base",
+          "status": "observed"
+        }
+      ],
+      "blocked_actions": [],
+      "identity_expectations": []
+    }
+  },
+  "extensions": {}
+}

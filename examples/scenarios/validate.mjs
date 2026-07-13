@@ -18,7 +18,12 @@ export const requiredScenarioIds = Object.freeze([
   "demo.dynamic.normalization",
   "demo.safety.dangerous",
   "demo.version.new-feature",
-  "demo.version.regression"
+  "demo.version.regression",
+  "demo.store.navigation",
+  "demo.store.search",
+  "demo.store.sheet",
+  "demo.store.cart-states",
+  "demo.mixed.declarative"
 ]);
 
 export const requiredProfileIds = Object.freeze([
