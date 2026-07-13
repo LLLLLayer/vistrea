@@ -134,6 +134,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `1216dfd` | Focused the agent surface on exploration and assets with MCP toolsets and an installable Claude Code plugin. |
 | `671fec4` | Retired the MCP server per ADR-0008; the CLI with `VISTREA_CLI_TOOLSETS` focus is the single agent adapter. |
 | `25786b3` | Bootstrapped WebDriverAgent behind one pinned, fail-closed `pnpm wda` command with a Keychain-respecting signing ladder. |
+| `acde11d` | Moved the iOS driver bootstrap into the product CLI as `driver ios`, masked with the exploration toolset. |
 
 ## Native vertical-loop evidence
 
