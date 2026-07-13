@@ -34,10 +34,6 @@ export const VISTREA_CLI_TOOLSETS = {
 
 export type VistreaCliToolset = keyof typeof VISTREA_CLI_TOOLSETS;
 
-const ALL_COMMAND_GROUPS: ReadonlySet<string> = new Set(
-  Object.values(VISTREA_CLI_TOOLSETS).flat(),
-);
-
 /**
  * Parses the `VISTREA_CLI_TOOLSETS` environment value into the set of enabled
  * first command words. Undefined or empty means every surface; anything it
@@ -268,10 +264,12 @@ function parseArguments(
       help: true,
     };
   }
+  // Under a focus, anything outside the enabled surfaces is refused — known
+  // or not. Gating only registered group words would let a future command
+  // group silently bypass every focus configuration the day it is added.
   if (
     enabledGroups !== undefined &&
     command.length > 0 &&
-    ALL_COMMAND_GROUPS.has(command[0] as string) &&
     !enabledGroups.has(command[0] as string)
   ) {
     throw new HostClientError(

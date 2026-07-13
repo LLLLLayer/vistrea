@@ -116,6 +116,11 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   );
   const maskedDesign = await runCli(["design", "list-references"], focusedEnvironment);
   assert.equal(maskedDesign.exitCode, 6);
+  // Fail-closed extends to command words the toolset map has never heard of:
+  // a future command group must not bypass the focus the day it is added.
+  const maskedUnknown = await runCli(["collection", "publish"], focusedEnvironment);
+  assert.equal(maskedUnknown.exitCode, 6);
+  assert.equal(parseCliEnvelope(maskedUnknown.stdout).error?.["code"], "unsupported");
   const focusedStatus = await runCli(["workspace", "status"], focusedEnvironment);
   assert.equal(focusedStatus.exitCode, 0);
   const focusedHelp = await runCli(["help"], focusedEnvironment);
