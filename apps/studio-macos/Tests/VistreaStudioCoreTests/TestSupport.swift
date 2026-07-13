@@ -68,6 +68,12 @@ extension HostClient {
         throw HostClientError.fixtureUnavailable("This test double does not support identity curation.")
     }
 
+    func annotateScreenState(
+        _ command: AnnotateScreenStateCommand
+    ) async throws -> ScreenStateAnnotationResult {
+        throw HostClientError.fixtureUnavailable("This test double does not support state annotation.")
+    }
+
     func listDesignReferences() async throws -> DesignReferencePage {
         DesignReferencePage(items: [])
     }

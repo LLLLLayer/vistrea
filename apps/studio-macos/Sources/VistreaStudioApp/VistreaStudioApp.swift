@@ -31,14 +31,27 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     func showMainWindow() {
         guard window == nil else { return }
+        // Every structural width comes from StudioLayoutMetrics so the window
+        // minimum stays provably consistent with the panes it must hold.
         let rootView = SnapshotWorkspaceView(model: model)
-            .frame(minWidth: 980, minHeight: 640)
+            .frame(
+                minWidth: StudioLayoutMetrics.windowMinWidth,
+                minHeight: StudioLayoutMetrics.windowMinHeight
+            )
         let window = NSWindow(contentViewController: NSHostingController(rootView: rootView))
         window.title = "Vistrea Studio"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.minSize = NSSize(width: 980, height: 640)
+        window.minSize = NSSize(
+            width: StudioLayoutMetrics.windowMinWidth,
+            height: StudioLayoutMetrics.windowMinHeight
+        )
         window.setFrameAutosaveName("VistreaStudioSnapshotWorkspace")
-        window.setContentSize(NSSize(width: 1_280, height: 820))
+        window.setContentSize(
+            NSSize(
+                width: StudioLayoutMetrics.windowInitialWidth,
+                height: StudioLayoutMetrics.windowInitialHeight
+            )
+        )
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.window = window

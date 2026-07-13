@@ -571,8 +571,17 @@ public struct ScreenStateDetail: Decodable, Equatable, Sendable, Identifiable {
     public let canonicalSnapshotID: String
     public let firstSeen: String
     public let lastSeen: String
+    /// The operator- or agent-written annotation labels; empty when the
+    /// canonical document carries none.
+    public let labels: [String]
+    /// The one-sentence annotation summary, at most 280 characters.
+    public let summary: String?
 
     public var id: String { screenStateID }
+
+    /// True while the state represents a live product screen; only active
+    /// states accept curation and annotation writes.
+    public var isActive: Bool { status == "active" }
 
     public init(
         screenStateID: String,
@@ -582,7 +591,9 @@ public struct ScreenStateDetail: Decodable, Equatable, Sendable, Identifiable {
         status: String,
         canonicalSnapshotID: String,
         firstSeen: String,
-        lastSeen: String
+        lastSeen: String,
+        labels: [String] = [],
+        summary: String? = nil
     ) {
         self.screenStateID = screenStateID
         self.revision = revision
@@ -592,6 +603,8 @@ public struct ScreenStateDetail: Decodable, Equatable, Sendable, Identifiable {
         self.canonicalSnapshotID = canonicalSnapshotID
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
+        self.labels = labels
+        self.summary = summary
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -603,5 +616,21 @@ public struct ScreenStateDetail: Decodable, Equatable, Sendable, Identifiable {
         case canonicalSnapshotID = "canonical_snapshot_id"
         case firstSeen = "first_seen"
         case lastSeen = "last_seen"
+        case labels
+        case summary
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        screenStateID = try container.decode(String.self, forKey: .screenStateID)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(String.self, forKey: .kind)
+        status = try container.decode(String.self, forKey: .status)
+        canonicalSnapshotID = try container.decode(String.self, forKey: .canonicalSnapshotID)
+        firstSeen = try container.decode(String.self, forKey: .firstSeen)
+        lastSeen = try container.decode(String.self, forKey: .lastSeen)
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
     }
 }

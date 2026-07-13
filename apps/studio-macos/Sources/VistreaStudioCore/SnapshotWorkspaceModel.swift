@@ -116,6 +116,13 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var splitDecisionRevision: UInt64?
     @Published public private(set) var splitDecisionStateID: String?
 
+    // Screen State annotation state. The annotation editor takes the same
+    // begin/end decision shape as merge and split: the write is guarded by
+    // the graph revision the edit BEGAN against.
+    @Published public private(set) var isAnnotatingState = false
+    @Published public private(set) var annotationDecisionRevision: UInt64?
+    @Published public private(set) var annotationDecisionStateID: String?
+
     // Design comparison workbench state.
     @Published public private(set) var designReferencesPhase: EventTimelinePhase = .idle
     @Published public private(set) var designReferences: [DesignReferenceDetail] = []
@@ -1072,6 +1079,114 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         return true
     }
 
+    // MARK: - Screen State annotation
+
+    /// Begins one annotation edit for the selected Screen State against the
+    /// graph revision that is on screen right now. The annotation editor
+    /// calls this when it opens: a background reload advances
+    /// `canvasGraph.revision`, and submitting that newer revision would
+    /// launder a concurrent change into the user's edit instead of
+    /// conflicting with it.
+    public func beginAnnotationEdit() {
+        curationError = nil
+        graphConflictNote = nil
+        guard let graph = canvasGraph, let stateID = selectedCanvasStateID else {
+            annotationDecisionRevision = nil
+            annotationDecisionStateID = nil
+            curationError = "Select a Screen State on a loaded Canvas before editing its annotations."
+            return
+        }
+        annotationDecisionRevision = graph.revision
+        annotationDecisionStateID = stateID
+    }
+
+    /// Ends the annotation edit without submitting it.
+    public func endAnnotationEdit() {
+        annotationDecisionRevision = nil
+        annotationDecisionStateID = nil
+    }
+
+    /// Replaces the selected state's annotation labels and summary, guarded
+    /// by the revision the edit began against. An empty labels array clears
+    /// the labels and an empty summary clears the summary — both are
+    /// submitted explicitly, never omitted. A stale edit, and a revision
+    /// conflict the Host reports, both take the changed-elsewhere path.
+    /// Returns true when the annotation persisted.
+    public func annotateSelectedState(labels: [String], summary: String) async -> Bool {
+        guard !isAnnotatingState else {
+            return false
+        }
+        guard let graph = canvasGraph,
+              let projectID = lastCanvasProjectID,
+              let applicationID = lastCanvasApplicationID
+        else {
+            curationError = "The Screen Graph is not loaded. Refresh the Canvas before annotating a state."
+            return false
+        }
+        guard let stateID = selectedCanvasStateID else {
+            curationError = "Select a Screen State to annotate."
+            return false
+        }
+        guard let state = graph.states.first(where: { $0.id == stateID }) else {
+            curationError = "The selected Screen State is no longer part of the loaded Screen Graph."
+            return false
+        }
+        // A tombstone is a real, distinguishable reason — not a graph that
+        // changed elsewhere.
+        guard state.isActive else {
+            curationError =
+                "This Screen State was \(state.status) by identity curation. Only an active state can be annotated."
+            return false
+        }
+        if let validation = ScreenStateAnnotationForm.validationError(labels: labels, summary: summary) {
+            curationError = validation
+            return false
+        }
+        guard let decisionRevision = annotationDecisionRevision,
+              annotationDecisionStateID == stateID
+        else {
+            curationError =
+                "This annotation was not opened for the selected Screen State. Reopen the annotation editor and try again."
+            return false
+        }
+        guard decisionRevision == graph.revision else {
+            // The graph reloaded under the open editor. The user edited
+            // against a revision that is no longer the loaded one.
+            noteGraphChangedElsewhere()
+            rearmOpenCurationDecisions()
+            return false
+        }
+        isAnnotatingState = true
+        curationError = nil
+        graphConflictNote = nil
+        defer { isAnnotatingState = false }
+        do {
+            _ = try await client.annotateScreenState(
+                AnnotateScreenStateCommand(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    stateID: stateID,
+                    labels: labels,
+                    summary: summary,
+                    expectedGraphRevision: decisionRevision,
+                    annotatedBy: .studio
+                )
+            )
+        } catch {
+            await handleCurationFailure(
+                error,
+                projectID: projectID,
+                applicationID: applicationID
+            )
+            return false
+        }
+        annotationDecisionRevision = nil
+        annotationDecisionStateID = nil
+        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await selectCanvasState(id: stateID)
+        return true
+    }
+
     public func dismissCurationError() {
         curationError = nil
         graphConflictNote = nil
@@ -1105,6 +1220,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             mergeDecisionRevision = nil
             splitDecisionRevision = nil
             splitDecisionStateID = nil
+            annotationDecisionRevision = nil
+            annotationDecisionStateID = nil
             return
         }
         if mergeDecisionRevision != nil {
@@ -1112,6 +1229,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         if splitDecisionRevision != nil {
             splitDecisionRevision = revision
+        }
+        if annotationDecisionRevision != nil {
+            annotationDecisionRevision = revision
         }
     }
 

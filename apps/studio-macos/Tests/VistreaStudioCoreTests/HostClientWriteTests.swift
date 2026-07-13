@@ -351,6 +351,166 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(target["id"] as? String, screenStateID)
     }
 
+    func testAnnotateScreenStateEncodesClearingValuesAndDecodesResult() async throws {
+        let annotatedJSON = #"""
+        {"screen_graph_id":"graph_019f0000-0000-7000-8000-000000000001","graph_revision":4,
+         "state":{"screen_state_id":"\#(screenStateID)","protocol_version":{"major":1,"minor":0},
+          "revision":3,"title":"Home","kind":"screen","status":"active",
+          "canonical_snapshot_id":"\#(snapshotID)",
+          "observation_ids":["observation_019f0000-0000-7000-8000-000000000001"],
+          "identity":{"strategy":"structural"},
+          "first_seen":"2026-07-12T00:00:00Z","last_seen":"2026-07-12T00:00:05Z",
+          "labels":["entry","checkout"],"summary":"The landing screen.","extensions":{}}}
+        """#
+        let clearedJSON = #"""
+        {"screen_graph_id":"graph_019f0000-0000-7000-8000-000000000001","graph_revision":5,
+         "state":{"screen_state_id":"\#(screenStateID)","protocol_version":{"major":1,"minor":0},
+          "revision":4,"title":"Home","kind":"screen","status":"active",
+          "canonical_snapshot_id":"\#(snapshotID)",
+          "observation_ids":["observation_019f0000-0000-7000-8000-000000000001"],
+          "identity":{"strategy":"structural"},
+          "first_seen":"2026-07-12T00:00:00Z","last_seen":"2026-07-12T00:00:06Z","extensions":{}}}
+        """#
+        let transport = WriteRecordingTransport(responses: [
+            HostHTTPResponse(statusCode: 200, body: Data(annotatedJSON.utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(clearedJSON.utf8)),
+        ])
+        let client = try makeClient(transport)
+        let projectID = "project_019f0000-0000-7000-8000-000000000001"
+
+        let annotated = try await client.annotateScreenState(
+            AnnotateScreenStateCommand(
+                projectID: projectID,
+                applicationID: "dev.vistrea.demo",
+                stateID: screenStateID,
+                labels: ["entry", "checkout"],
+                summary: "The landing screen.",
+                expectedGraphRevision: 3,
+                annotatedBy: .studio
+            )
+        )
+        XCTAssertEqual(annotated.graphRevision, 4)
+        XCTAssertEqual(annotated.state.labels, ["entry", "checkout"])
+        XCTAssertEqual(annotated.state.summary, "The landing screen.")
+
+        // Clearing: the empty array and empty string are submitted, and a
+        // canonical state without the fields decodes back to empty/nil.
+        let cleared = try await client.annotateScreenState(
+            AnnotateScreenStateCommand(
+                projectID: projectID,
+                applicationID: "dev.vistrea.demo",
+                stateID: screenStateID,
+                labels: [],
+                summary: "",
+                expectedGraphRevision: 4,
+                annotatedBy: .studio
+            )
+        )
+        XCTAssertEqual(cleared.graphRevision, 5)
+        XCTAssertEqual(cleared.state.labels, [])
+        XCTAssertNil(cleared.state.summary)
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST"])
+        XCTAssertEqual(
+            requests.map { $0.url?.path },
+            ["/v1/screen-graph/state-annotations", "/v1/screen-graph/state-annotations"]
+        )
+        XCTAssertTrue(requests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Content-Type") == "application/json"
+        })
+        let annotateBody = try bodyObject(of: requests[0])
+        XCTAssertEqual(
+            Set(annotateBody.keys),
+            [
+                "project_id", "application_id", "state_id", "labels", "summary",
+                "expected_graph_revision", "annotated_by",
+            ]
+        )
+        XCTAssertEqual(annotateBody["state_id"] as? String, screenStateID)
+        XCTAssertEqual(annotateBody["labels"] as? [String], ["entry", "checkout"])
+        XCTAssertEqual(annotateBody["summary"] as? String, "The landing screen.")
+        XCTAssertEqual(annotateBody["expected_graph_revision"] as? Int, 3)
+        let actor = try XCTUnwrap(annotateBody["annotated_by"] as? [String: Any])
+        XCTAssertEqual(actor["kind"] as? String, "human")
+        XCTAssertEqual(actor["id"] as? String, "studio")
+        // The clearing write carries the explicit empty values; they are
+        // never silently omitted.
+        let clearBody = try bodyObject(of: requests[1])
+        XCTAssertEqual(clearBody["labels"] as? [String], [])
+        XCTAssertEqual(clearBody["summary"] as? String, "")
+    }
+
+    func testAnnotateScreenStateValidatesThePayloadBeforeTransport() async throws {
+        let transport = WriteRecordingTransport(responses: [])
+        let client = try makeClient(transport)
+        let projectID = "project_019f0000-0000-7000-8000-000000000001"
+
+        func command(
+            labels: [String]?,
+            summary: String?,
+            revision: UInt64 = 1
+        ) -> AnnotateScreenStateCommand {
+            AnnotateScreenStateCommand(
+                projectID: projectID,
+                applicationID: "dev.vistrea.demo",
+                stateID: screenStateID,
+                labels: labels,
+                summary: summary,
+                expectedGraphRevision: revision,
+                annotatedBy: .studio
+            )
+        }
+        func expectInvalidConfiguration(
+            _ command: AnnotateScreenStateCommand,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) async {
+            do {
+                _ = try await client.annotateScreenState(command)
+                XCTFail("Expected an invalid-configuration failure.", file: file, line: line)
+            } catch {
+                guard case HostClientError.invalidConfiguration = error else {
+                    return XCTFail(
+                        "Expected invalidConfiguration, received \(error)",
+                        file: file,
+                        line: line
+                    )
+                }
+            }
+        }
+
+        // Setting neither field is a caller mistake the Host would refuse.
+        await expectInvalidConfiguration(command(labels: nil, summary: nil))
+        // Duplicate, empty, and over-long labels; an over-long summary; a
+        // revision below 1.
+        await expectInvalidConfiguration(command(labels: ["a", "a"], summary: nil))
+        await expectInvalidConfiguration(command(labels: [""], summary: nil))
+        await expectInvalidConfiguration(
+            command(labels: [String(repeating: "l", count: 129)], summary: nil)
+        )
+        await expectInvalidConfiguration(
+            command(labels: nil, summary: String(repeating: "s", count: 281))
+        )
+        await expectInvalidConfiguration(command(labels: [], summary: "", revision: 0))
+        await XCTAssertThrowsInvalidIdentifier {
+            _ = try await client.annotateScreenState(
+                AnnotateScreenStateCommand(
+                    projectID: projectID,
+                    applicationID: "dev.vistrea.demo",
+                    stateID: "screenstate_invalid",
+                    labels: [],
+                    summary: "",
+                    expectedGraphRevision: 1,
+                    annotatedBy: .studio
+                )
+            )
+        }
+
+        let requests = await transport.requests
+        XCTAssertTrue(requests.isEmpty, "No rejected annotation may reach the transport.")
+    }
+
     func testWriteRoutesValidateIdentifiersBeforeTransport() async throws {
         let transport = WriteRecordingTransport(responses: [])
         let client = try makeClient(transport)

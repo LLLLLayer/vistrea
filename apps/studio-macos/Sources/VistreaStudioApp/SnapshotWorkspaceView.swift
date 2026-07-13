@@ -64,7 +64,11 @@ struct SnapshotWorkspaceView: View {
         case .content:
             HSplitView {
                 NavigationColumn(section: $section)
-                    .frame(minWidth: 145, idealWidth: 160, maxWidth: 200)
+                    .frame(
+                        minWidth: StudioLayoutMetrics.navigationMinWidth,
+                        idealWidth: StudioLayoutMetrics.navigationIdealWidth,
+                        maxWidth: StudioLayoutMetrics.navigationMaxWidth
+                    )
                 switch section {
                 case .canvas:
                     CanvasSection(model: model)
@@ -115,10 +119,13 @@ private struct CanvasSection: View {
         // onDisappear against the new identity's freshly started watch.
         HSplitView {
             CanvasPane(model: model)
-                .frame(minWidth: 300, idealWidth: 420)
+                .frame(
+                    minWidth: StudioLayoutMetrics.canvasPaneMinWidth,
+                    idealWidth: StudioLayoutMetrics.canvasPaneIdealWidth
+                )
             if model.selectedCanvasStateID != nil {
                 StateInspectorView(model: model)
-                    .frame(minWidth: 560)
+                    .frame(minWidth: StudioLayoutMetrics.inspectorMinWidth)
             }
         }
     }
@@ -127,30 +134,46 @@ private struct CanvasSection: View {
 /// The single-screen Inspector for the selected Screen State. Every pane in
 /// here — screenshot, 2D tree, node properties, 3D layers, and the design
 /// workbench — is driven by the state's canonical observation Snapshot.
+///
+/// The Inspector is responsive: with enough width the evidence panes and the
+/// state context column sit side by side; when the width it was actually
+/// given drops below `StudioLayoutMetrics.inspectorSideBySideMinWidth`, the
+/// context column collapses behind a header toggle and the Inspector shows
+/// one surface at a time instead of clipping values at the window edge.
 private struct StateInspectorView: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var isCompactContextVisible = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            HSplitView {
-                InspectorPanes(model: model)
-                    .frame(minWidth: 420)
-                VSplitView {
-                    CanvasStateDetailPanel(model: model)
-                        .frame(minHeight: 170)
-                    NodeDetailsPane(model: model)
-                        .frame(minHeight: 200)
-                    ReviewIssuesPane(model: model)
-                        .frame(minHeight: 120)
+        GeometryReader { proxy in
+            let arrangement = StudioLayoutMetrics.inspectorArrangement(forWidth: proxy.size.width)
+            VStack(spacing: 0) {
+                header(arrangement: arrangement)
+                Divider()
+                switch arrangement {
+                case .sideBySide:
+                    HSplitView {
+                        InspectorPanes(model: model)
+                            .frame(minWidth: StudioLayoutMetrics.inspectorPanesMinWidth)
+                        StateContextColumn(model: model)
+                            .frame(
+                                minWidth: StudioLayoutMetrics.contextColumnMinWidth,
+                                idealWidth: StudioLayoutMetrics.contextColumnIdealWidth,
+                                maxWidth: StudioLayoutMetrics.contextColumnMaxWidth
+                            )
+                    }
+                case .compact:
+                    if isCompactContextVisible {
+                        StateContextColumn(model: model)
+                    } else {
+                        InspectorPanes(model: model)
+                    }
                 }
-                .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
             }
         }
     }
 
-    private var header: some View {
+    private func header(arrangement: StudioLayoutMetrics.InspectorArrangement) -> some View {
         HStack(spacing: 8) {
             Label("Screen State Inspector", systemImage: "scope")
                 .font(.headline)
@@ -162,6 +185,12 @@ private struct StateInspectorView: View {
             }
             Spacer()
             snapshotCaption
+            if arrangement == .compact {
+                Toggle("Context", isOn: $isCompactContextVisible)
+                    .toggleStyle(.button)
+                    .help("The window is too narrow to show the state context beside the evidence panes. Toggle between them.")
+                    .accessibilityLabel("Show the Screen State context column")
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 9)
@@ -176,7 +205,7 @@ private struct StateInspectorView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 320)
+                .frame(maxWidth: StudioLayoutMetrics.headerCaptionMaxWidth)
                 .help("The observation Snapshot driving every Inspector pane.")
         }
     }
@@ -212,16 +241,24 @@ private struct EvidenceSection: View {
     var body: some View {
         HSplitView {
             SnapshotListPane(model: model)
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
+                .frame(
+                    minWidth: StudioLayoutMetrics.evidenceListMinWidth,
+                    idealWidth: StudioLayoutMetrics.evidenceListIdealWidth,
+                    maxWidth: StudioLayoutMetrics.evidenceListMaxWidth
+                )
             InspectorPanes(model: model)
-                .frame(minWidth: 420)
+                .frame(minWidth: StudioLayoutMetrics.inspectorPanesMinWidth)
             VSplitView {
                 NodeDetailsPane(model: model)
                     .frame(minHeight: 260)
                 ReviewIssuesPane(model: model)
                     .frame(minHeight: 140)
             }
-            .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
+            .frame(
+                minWidth: StudioLayoutMetrics.evidenceDetailMinWidth,
+                idealWidth: StudioLayoutMetrics.evidenceDetailIdealWidth,
+                maxWidth: StudioLayoutMetrics.evidenceDetailMaxWidth
+            )
         }
     }
 }
@@ -231,9 +268,12 @@ private struct CanvasPane: View {
     @State private var isExploreFormPresented = false
     @State private var isMergeSheetPresented = false
 
-    private static let columnWidth: CGFloat = 230
-    private static let rowHeight: CGFloat = 116
-    private static let cardSize = CGSize(width: 200, height: 92)
+    private static let columnWidth = StudioLayoutMetrics.canvasColumnWidth
+    private static let rowHeight = StudioLayoutMetrics.canvasRowHeight
+    private static let cardSize = CGSize(
+        width: StudioLayoutMetrics.canvasCardWidth,
+        height: StudioLayoutMetrics.canvasCardHeight
+    )
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -367,9 +407,31 @@ private struct CanvasPane: View {
                                 .foregroundStyle(.purple)
                         }
                     }
+                    if !positioned.state.labels.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(positioned.state.labels.prefix(3), id: \.self) { label in
+                                AnnotationLabelChip(label: label)
+                            }
+                            if positioned.state.labels.count > 3 {
+                                Text("+\(positioned.state.labels.count - 3)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .help(positioned.state.labels.joined(separator: ", "))
+                    }
+                    if let summary = positioned.state.summary {
+                        Text(summary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(summary)
+                    }
                 }
                 .padding(10)
                 .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
+                .clipped()
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(nsColor: .controlBackgroundColor))
@@ -472,7 +534,7 @@ private struct ExplorationFormView: View {
             }
         }
         .padding(14)
-        .frame(width: 360)
+        .frame(width: StudioLayoutMetrics.explorationFormWidth)
     }
 }
 
@@ -641,7 +703,7 @@ private struct MergeStatesSheet: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 440)
+        .frame(minWidth: StudioLayoutMetrics.curationSheetMinWidth)
         .onAppear {
             // The decision starts here, against the graph revision on screen.
             model.beginMergeDecision()
@@ -735,7 +797,7 @@ private struct SplitStateSheet: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 440)
+        .frame(minWidth: StudioLayoutMetrics.curationSheetMinWidth)
         .onAppear {
             // The decision starts here, against the graph revision on screen.
             model.beginSplitDecision()
@@ -756,53 +818,257 @@ private struct SplitStateSheet: View {
     }
 }
 
-/// The selected Screen State's persisted details plus its Deep Wiki links.
-private struct CanvasStateDetailPanel: View {
+/// A labeled context value that truncates in the middle instead of clipping
+/// at the column edge, with the full value in the tooltip.
+private struct ContextValueText: View {
+    let value: String
+    var monospaced = false
+
+    init(_ value: String, monospaced: Bool = false) {
+        self.value = value
+        self.monospaced = monospaced
+    }
+
+    var body: some View {
+        Text(value)
+            .font(monospaced ? .caption.monospaced() : .caption)
+            .multilineTextAlignment(.trailing)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(value)
+            .textSelection(.enabled)
+    }
+}
+
+/// One small annotation label chip, shared by the Canvas cards and the
+/// Inspector context column.
+private struct AnnotationLabelChip: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            .help(label)
+    }
+}
+
+/// The single state context column of the Inspector: the Screen State's
+/// persisted fields, its annotations, observations and curation actions,
+/// knowledge links, the Runtime Context of the state's canonical Snapshot,
+/// the selected node's properties and tuning entry, and the Review Issues —
+/// as sections of one scrollable column, not stacked panels.
+private struct StateContextColumn: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var linkFilter = ""
     @State private var isSplitSheetPresented = false
+    @State private var isEditingAnnotations = false
+    @State private var annotationLabelsText = ""
+    @State private var annotationSummaryText = ""
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Screen State")
-                        .font(.headline)
-                    Spacer()
-                    Button("Close", systemImage: "xmark.circle") {
-                        Task { await model.selectCanvasState(id: nil) }
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
+        VStack(spacing: 0) {
+            PaneHeader(title: "Screen State", systemImage: "scope") {
+                Button("Close", systemImage: "xmark.circle") {
+                    Task { await model.selectCanvasState(id: nil) }
                 }
-                switch model.canvasStatePhase {
-                case .idle:
-                    EmptyView()
-                case .loading:
-                    ProgressView("Loading the Screen State…")
-                        .controlSize(.small)
-                case let .failure(message):
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                case .content:
-                    if let detail = model.canvasStateDetail {
-                        stateFields(for: detail)
-                        Divider()
-                        observationSection(for: detail)
-                        linkedNodes
-                        Divider()
-                        linkControls
-                    }
-                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close the Screen State Inspector")
             }
-            .padding(12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    stateContent
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .sheet(isPresented: $isSplitSheetPresented) {
             SplitStateSheet(model: model)
         }
+        .onChange(of: model.selectedCanvasStateID) {
+            // A different state closes the open annotation editor: its
+            // decision belonged to the previous state.
+            if isEditingAnnotations {
+                model.endAnnotationEdit()
+                isEditingAnnotations = false
+            }
+        }
     }
+
+    @ViewBuilder
+    private var stateContent: some View {
+        switch model.canvasStatePhase {
+        case .idle:
+            EmptyView()
+        case .loading:
+            ProgressView("Loading the Screen State…")
+                .controlSize(.small)
+        case let .failure(message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        case .content:
+            if let detail = model.canvasStateDetail {
+                stateFields(for: detail)
+                Divider()
+                annotationSection(for: detail)
+                Divider()
+                observationSection(for: detail)
+                linkedNodes
+                Divider()
+                linkControls
+                Divider()
+                runtimeContextSection
+                nodeSection
+                Divider()
+                reviewIssuesSection
+            }
+        }
+    }
+
+    // MARK: Screen State fields
+
+    private func stateFields(for detail: ScreenStateDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Title") { ContextValueText(detail.title) }
+            LabeledContent("Kind") { ContextValueText(detail.kind) }
+            LabeledContent("Status") { ContextValueText(detail.status) }
+            LabeledContent("First seen") { ContextValueText(detail.firstSeen) }
+            LabeledContent("Last seen") { ContextValueText(detail.lastSeen) }
+            LabeledContent("Snapshot") {
+                ContextValueText(detail.canonicalSnapshotID, monospaced: true)
+            }
+        }
+        .font(.caption)
+    }
+
+    // MARK: Annotations
+
+    /// The state's annotation labels and one-sentence summary, with the
+    /// inline editor behind the Edit affordance. The edit begins against the
+    /// graph revision on screen; a reload underneath it conflicts at Save.
+    @ViewBuilder
+    private func annotationSection(for detail: ScreenStateDetail) -> some View {
+        Text("Annotations")
+            .font(.caption.weight(.semibold))
+        if isEditingAnnotations {
+            annotationEditor
+        } else {
+            if detail.labels.isEmpty, detail.summary == nil {
+                Text("No labels or summary describe this state yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !detail.labels.isEmpty {
+                AnnotationLabelFlow(labels: detail.labels)
+            }
+            if let summary = detail.summary {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            Button("Edit annotations", systemImage: "tag") {
+                annotationLabelsText = detail.labels.joined(separator: ", ")
+                annotationSummaryText = detail.summary ?? ""
+                // The edit decision starts here, against the graph revision
+                // on screen — exactly like the Merge and Split sheets.
+                model.beginAnnotationEdit()
+                isEditingAnnotations = true
+            }
+            .font(.caption)
+            .disabled(!detail.isActive)
+            .help(
+                detail.isActive
+                    ? "Edit the state's labels and summary."
+                    : "This state was \(detail.status) by identity curation. Only an active state can be annotated."
+            )
+        }
+    }
+
+    private var annotationEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Labels (comma-separated)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Labels", text: $annotationLabelsText)
+                .textFieldStyle(.roundedBorder)
+            Text("Summary")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("Summary", text: $annotationSummaryText, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.roundedBorder)
+            Text("\(trimmedSummary.count)/\(ScreenStateAnnotationForm.maximumSummaryLength)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(
+                    trimmedSummary.count > ScreenStateAnnotationForm.maximumSummaryLength
+                        ? Color.red
+                        : Color.secondary
+                )
+                .accessibilityLabel("Summary length \(trimmedSummary.count) of \(ScreenStateAnnotationForm.maximumSummaryLength) characters")
+            Text("Emptying a field clears it on the state.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            if let note = model.graphConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+            if let error = model.curationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    model.endAnnotationEdit()
+                    isEditingAnnotations = false
+                }
+                Button("Save") {
+                    Task {
+                        let saved = await model.annotateSelectedState(
+                            labels: parsedLabels,
+                            summary: trimmedSummary
+                        )
+                        if saved {
+                            isEditingAnnotations = false
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.isAnnotatingState
+                        || ScreenStateAnnotationForm.validationError(
+                            labels: parsedLabels,
+                            summary: trimmedSummary
+                        ) != nil
+                )
+            }
+        }
+    }
+
+    private var parsedLabels: [String] {
+        ScreenStateAnnotationForm.parseLabels(annotationLabelsText)
+    }
+
+    private var trimmedSummary: String {
+        annotationSummaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: Observations and curation
 
     /// The state's recorded observations, with the Split entry once at
     /// least two observations make a strict-subset split possible.
@@ -825,23 +1091,7 @@ private struct CanvasStateDetailPanel: View {
         Divider()
     }
 
-    private func stateFields(for detail: ScreenStateDetail) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            LabeledContent("Title", value: detail.title)
-            LabeledContent("Kind", value: detail.kind)
-            LabeledContent("Status", value: detail.status)
-            LabeledContent("First seen", value: detail.firstSeen)
-            LabeledContent("Last seen", value: detail.lastSeen)
-            LabeledContent("Snapshot") {
-                Text(detail.canonicalSnapshotID)
-                    .font(.caption.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-        }
-        .font(.caption)
-    }
+    // MARK: Knowledge links
 
     @ViewBuilder
     private var linkedNodes: some View {
@@ -856,6 +1106,7 @@ private struct CanvasStateDetailPanel: View {
                 Label("\(node.title) · \(node.kind)", systemImage: "book")
                     .font(.caption)
                     .lineLimit(1)
+                    .help("\(node.title) · \(node.kind)")
             }
         }
     }
@@ -879,6 +1130,7 @@ private struct CanvasStateDetailPanel: View {
                     Text(node.title)
                         .font(.caption)
                         .lineLimit(1)
+                        .help(node.title)
                     Spacer()
                     Button("Link") {
                         Task { await model.linkSelectedCanvasState(toWikiNode: node.id) }
@@ -893,6 +1145,149 @@ private struct CanvasStateDetailPanel: View {
                 .font(.caption)
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
+        }
+    }
+
+    // MARK: Runtime Context of the canonical Snapshot
+
+    @ViewBuilder
+    private var runtimeContextSection: some View {
+        if let snapshot = model.selectedSnapshot {
+            Text("Runtime Context")
+                .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent("Snapshot") { ContextValueText(snapshot.id, monospaced: true) }
+                if let scenarioID = snapshot.scenarioID {
+                    LabeledContent("Scenario") { ContextValueText(scenarioID) }
+                }
+                LabeledContent("Application") { ContextValueText(snapshot.applicationID) }
+                LabeledContent("Version") { ContextValueText(snapshot.applicationVersion) }
+                LabeledContent("Platform") { ContextValueText(snapshot.platform.uppercased()) }
+                LabeledContent("Device") { ContextValueText(snapshot.device) }
+                LabeledContent("Environment") { ContextValueText(snapshot.environment) }
+                LabeledContent("Build") { ContextValueText(snapshot.buildID, monospaced: true) }
+                if let sourceGitSHA = snapshot.sourceGitSHA {
+                    LabeledContent("Source Git SHA") {
+                        ContextValueText(sourceGitSHA, monospaced: true)
+                    }
+                }
+            }
+            .font(.caption)
+        }
+    }
+
+    // MARK: Selected node properties and tuning
+
+    @ViewBuilder
+    private var nodeSection: some View {
+        if let node = model.selectedNode {
+            Divider()
+            Text("UI Node")
+                .font(.caption.weight(.semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(node.fields) { field in
+                    LabeledContent(field.label) { ContextValueText(field.value) }
+                }
+            }
+            .font(.caption)
+            if node.stableID != nil {
+                Divider()
+                Text("Tuning Preview (Debug Runtime)")
+                    .font(.caption.weight(.semibold))
+                TuningPreviewControls(model: model, node: node)
+                Text("Active Previews")
+                    .font(.caption.weight(.semibold))
+                ActiveTuningList(model: model)
+            }
+        }
+    }
+
+    // MARK: Review Issues
+
+    @ViewBuilder
+    private var reviewIssuesSection: some View {
+        Text("Review Issues")
+            .font(.caption.weight(.semibold))
+        switch model.issuesPhase {
+        case .idle, .loading:
+            ProgressView("Loading Review Issues…")
+                .controlSize(.small)
+        case .empty:
+            Text("No Review Issues have been recorded yet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case let .failure(message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+        case .content:
+            ForEach(model.reviewIssues) { issue in
+                reviewIssueRow(for: issue)
+            }
+            if model.selectedIssueID != nil {
+                Divider()
+                ReviewIssueDetailPanel(model: model)
+            }
+        }
+    }
+
+    private func reviewIssueRow(for issue: ReviewIssueSummary) -> some View {
+        Button {
+            Task {
+                await model.selectReviewIssue(
+                    id: model.selectedIssueID == issue.id ? nil : issue.id
+                )
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(issue.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    Text(issue.state)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(issue.state == "resolved" ? Color.green : Color.orange)
+                    Text(issue.severity)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(issue.category)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(
+                        model.selectedIssueID == issue.id
+                            ? Color.accentColor.opacity(0.12)
+                            : Color.clear
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Review issue \(issue.title), state \(issue.state)")
+    }
+}
+
+/// Annotation label chips laid out in wrapping rows sized to the column.
+private struct AnnotationLabelFlow: View {
+    let labels: [String]
+
+    var body: some View {
+        // An adaptive grid wraps chips across rows without a custom Layout;
+        // each chip truncates inside its cell instead of widening the column.
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 56, maximum: 160), spacing: 4, alignment: .leading)],
+            alignment: .leading,
+            spacing: 4
+        ) {
+            ForEach(labels, id: \.self) { label in
+                AnnotationLabelChip(label: label)
+            }
         }
     }
 }
@@ -926,10 +1321,18 @@ private struct DesignReviewPane: View {
             Divider()
             HSplitView {
                 DesignReferenceColumn(model: model)
-                    .frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
+                    .frame(
+                        minWidth: StudioLayoutMetrics.designReferenceColumnMinWidth,
+                        idealWidth: StudioLayoutMetrics.designReferenceColumnIdealWidth,
+                        maxWidth: StudioLayoutMetrics.designReferenceColumnMaxWidth
+                    )
                 overlayColumn
                 DesignDifferenceColumn(model: model, isReviewMode: $isReviewMode)
-                    .frame(minWidth: 230, idealWidth: 270, maxWidth: 360)
+                    .frame(
+                        minWidth: StudioLayoutMetrics.designDifferenceColumnMinWidth,
+                        idealWidth: StudioLayoutMetrics.designDifferenceColumnIdealWidth,
+                        maxWidth: StudioLayoutMetrics.designDifferenceColumnMaxWidth
+                    )
             }
         }
         .task {
@@ -1817,7 +2220,7 @@ private struct WikiNodeCreateSheet: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 460)
+        .frame(minWidth: StudioLayoutMetrics.wikiSheetMinWidth)
     }
 }
 
@@ -1876,7 +2279,7 @@ private struct WikiNodeEditSheet: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 460)
+        .frame(minWidth: StudioLayoutMetrics.wikiSheetMinWidth)
         .task {
             await model.beginWikiEdit(nodeID: nodeID)
         }
@@ -2259,7 +2662,7 @@ private struct ContextBar: View {
                 }
             }
             .labelsHidden()
-            .frame(maxWidth: 340)
+            .frame(maxWidth: StudioLayoutMetrics.scopePickerMaxWidth)
             .help(scopeHelp)
             .accessibilityLabel("Application and version scope")
         }

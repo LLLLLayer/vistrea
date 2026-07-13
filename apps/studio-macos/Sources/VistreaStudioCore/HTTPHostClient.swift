@@ -472,6 +472,46 @@ public struct HTTPHostClient: HostClient, Sendable {
         )
     }
 
+    public func annotateScreenState(
+        _ command: AnnotateScreenStateCommand
+    ) async throws -> ScreenStateAnnotationResult {
+        try Self.validateGraphIdentity(projectID: command.projectID, applicationID: command.applicationID)
+        guard Self.isTypedIdentifier(command.stateID, prefix: "screenstate") else {
+            throw HostClientError.invalidIdentifier(command.stateID)
+        }
+        guard command.labels != nil || command.summary != nil else {
+            throw HostClientError.invalidConfiguration(
+                "An annotation sets labels, a summary, or both."
+            )
+        }
+        if let labels = command.labels {
+            // An empty array is the canonical "clear the labels" value; a
+            // present label must be a unique 1-through-128-character string.
+            guard Set(labels).count == labels.count,
+                  labels.allSatisfy({ !$0.isEmpty && $0.count <= 128 })
+            else {
+                throw HostClientError.invalidConfiguration(
+                    "Annotation labels must be unique strings of 1 through 128 characters."
+                )
+            }
+        }
+        if let summary = command.summary {
+            // The empty string is the canonical "clear the summary" value.
+            guard summary.count <= 280 else {
+                throw HostClientError.invalidConfiguration(
+                    "The annotation summary must contain at most 280 characters."
+                )
+            }
+        }
+        try Self.validateGraphRevision(command.expectedGraphRevision)
+        return try await sendJSON(
+            ScreenStateAnnotationResult.self,
+            path: ["v1", "screen-graph", "state-annotations"],
+            body: command,
+            expectedStatus: 200
+        )
+    }
+
     public func listDesignReferences() async throws -> DesignReferencePage {
         try await requestJSON(
             DesignReferencePage.self,

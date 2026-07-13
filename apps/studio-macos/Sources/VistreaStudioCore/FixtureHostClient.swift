@@ -59,6 +59,9 @@ public actor FixtureHostClient: HostClient {
     /// rejected; lets tests prove a stale decision was never submitted.
     public private(set) var mergeCount = 0
     public private(set) var splitCount = 0
+    /// How many annotation commands reached this Host, accepted or rejected;
+    /// lets tests prove a stale annotation decision was never submitted.
+    public private(set) var annotateCount = 0
     /// A deterministic counter so fixture-minted identifiers and timestamps
     /// stay reproducible across runs.
     private var mintedCount: UInt64 = 0
@@ -477,7 +480,9 @@ public actor FixtureHostClient: HostClient {
             canonicalSnapshotID: latestSnapshot()?.snapshotID.rawValue
                 ?? "snapshot_019f0000-0000-7000-8000-000000000000",
             firstSeen: "2026-07-12T00:00:00Z",
-            lastSeen: "2026-07-12T00:00:05Z"
+            lastSeen: "2026-07-12T00:00:05Z",
+            labels: state.labels,
+            summary: state.summary
         )
         screenStatesByID[id] = detail
         return detail
@@ -561,7 +566,9 @@ public actor FixtureHostClient: HostClient {
                     title: state.title,
                     kind: state.kind,
                     status: state.status,
-                    observationIDs: observationIDs
+                    observationIDs: observationIDs,
+                    labels: state.labels,
+                    summary: state.summary
                 )
                 survivorSummary = updated
                 return updated
@@ -572,7 +579,9 @@ public actor FixtureHostClient: HostClient {
                     title: state.title,
                     kind: state.kind,
                     status: "merged",
-                    observationIDs: state.observationIDs
+                    observationIDs: state.observationIDs,
+                    labels: state.labels,
+                    summary: state.summary
                 )
             }
             return state
@@ -662,7 +671,9 @@ public actor FixtureHostClient: HostClient {
                 title: state.title,
                 kind: state.kind,
                 status: state.status,
-                observationIDs: remainingIDs
+                observationIDs: remainingIDs,
+                labels: state.labels,
+                summary: state.summary
             )
         }
         states.append(newState)
@@ -682,6 +693,84 @@ public actor FixtureHostClient: HostClient {
                 kind: "split"
             ),
             state: newState
+        )
+    }
+
+    // MARK: - Screen State annotation
+
+    public func annotateScreenState(
+        _ command: AnnotateScreenStateCommand
+    ) async throws -> ScreenStateAnnotationResult {
+        annotateCount += 1
+        guard let graph = canvasGraph else {
+            throw Self.serverError(404, code: "not_found", message: "The Screen Graph does not exist yet.")
+        }
+        guard command.labels != nil || command.summary != nil else {
+            throw Self.serverError(
+                400,
+                code: "invalid_argument",
+                message: "An annotation sets labels, a summary, or both."
+            )
+        }
+        if let labels = command.labels {
+            guard Set(labels).count == labels.count,
+                  labels.allSatisfy({ !$0.isEmpty && $0.count <= 128 })
+            else {
+                throw Self.serverError(
+                    400,
+                    code: "invalid_argument",
+                    message: "Labels are unique strings of 1 to 128 characters."
+                )
+            }
+        }
+        if let summary = command.summary, summary.count > 280 {
+            throw Self.serverError(
+                400,
+                code: "invalid_argument",
+                message: "A summary is at most 280 characters."
+            )
+        }
+        guard command.expectedGraphRevision == graph.revision else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The Screen Graph revision does not match.",
+                retryable: true
+            )
+        }
+        guard let state = graph.states.first(where: { $0.id == command.stateID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The Screen State does not exist in the graph.")
+        }
+        guard state.isActive else {
+            throw Self.serverError(409, code: "conflict", message: "Only active Screen States can be curated.")
+        }
+        // An empty array clears the labels; an empty string clears the summary.
+        let labels = command.labels.map { $0.isEmpty ? [] : $0 } ?? state.labels
+        let summary = command.summary.map { $0.isEmpty ? nil : $0 } ?? state.summary
+        let annotated = CanvasStateSummary(
+            screenStateID: state.screenStateID,
+            title: state.title,
+            kind: state.kind,
+            status: state.status,
+            observationIDs: state.observationIDs,
+            labels: labels,
+            summary: summary
+        )
+        let updatedGraph = CanvasGraph(
+            screenGraphID: graph.screenGraphID,
+            revision: graph.revision + 1,
+            entryStateIDs: graph.entryStateIDs,
+            states: graph.states.map { $0.id == command.stateID ? annotated : $0 },
+            transitions: graph.transitions
+        )
+        canvasGraph = updatedGraph
+        // Drop the cached detail so the next getScreenState re-materializes
+        // it with the annotation the graph now carries.
+        screenStatesByID.removeValue(forKey: command.stateID)
+        return ScreenStateAnnotationResult(
+            screenGraphID: updatedGraph.screenGraphID,
+            graphRevision: updatedGraph.revision,
+            state: annotated
         )
     }
 
@@ -1090,6 +1179,9 @@ public struct UnavailableHostClient: HostClient {
     public func splitScreenState(
         _ command: SplitScreenStateCommand
     ) async throws -> IdentityCurationResult { throw error }
+    public func annotateScreenState(
+        _ command: AnnotateScreenStateCommand
+    ) async throws -> ScreenStateAnnotationResult { throw error }
     public func listDesignReferences() async throws -> DesignReferencePage { throw error }
     public func getDesignReference(id: String) async throws -> DesignReferenceDetail { throw error }
     public func listDesignComparisons(

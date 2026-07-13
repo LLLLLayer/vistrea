@@ -647,3 +647,125 @@ public enum CanvasLayout {
         return result
     }
 }
+
+/// Pure parsing, validation, and counting rules for the Screen State
+/// annotation editor. The Host contract allows unique labels of 1 through
+/// 128 characters and a summary of at most 280 characters; an empty labels
+/// array or empty summary string clears that field.
+public enum ScreenStateAnnotationForm {
+    public static let maximumSummaryLength = 280
+    public static let maximumLabelLength = 128
+
+    /// Parses the editor's comma-separated label field into the canonical
+    /// label list: split on commas, trim whitespace, drop empties, and keep
+    /// the first occurrence of a duplicate. An all-whitespace field parses to
+    /// the empty list — the canonical "clear the labels" value.
+    public static func parseLabels(_ text: String) -> [String] {
+        var seen = Set<String>()
+        return text
+            .split(separator: ",", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// The first contract violation in the drafted annotation, or nil when
+    /// the draft is submittable. Empty values are legal: they clear.
+    public static func validationError(labels: [String], summary: String) -> String? {
+        if labels.count != Set(labels).count {
+            return "Labels must be unique."
+        }
+        if labels.contains(where: { $0.isEmpty || $0.count > maximumLabelLength }) {
+            return "Each label must contain 1 through \(maximumLabelLength) characters."
+        }
+        if summary.count > maximumSummaryLength {
+            return "The summary must contain at most \(maximumSummaryLength) characters."
+        }
+        return nil
+    }
+
+    /// The live counter under the summary field; negative when over budget.
+    public static func remainingSummaryCharacters(_ summary: String) -> Int {
+        maximumSummaryLength - summary.count
+    }
+}
+
+/// Every structural width and height the Studio window layout uses, in one
+/// place. Views must take their pane minimums, ideals, and maximums from
+/// here so the window minimum and the responsive Inspector breakpoint stay
+/// provably consistent with the panes they contain.
+public enum StudioLayoutMetrics {
+    // The main window.
+    public static let windowMinWidth: CGFloat = 880
+    public static let windowMinHeight: CGFloat = 600
+    public static let windowInitialWidth: CGFloat = 1_280
+    public static let windowInitialHeight: CGFloat = 820
+
+    // The left navigation column.
+    public static let navigationMinWidth: CGFloat = 145
+    public static let navigationIdealWidth: CGFloat = 160
+    public static let navigationMaxWidth: CGFloat = 200
+
+    // The Screen State Canvas pane and its card grid.
+    public static let canvasPaneMinWidth: CGFloat = 300
+    public static let canvasPaneIdealWidth: CGFloat = 420
+    public static let canvasColumnWidth: CGFloat = 230
+    public static let canvasRowHeight: CGFloat = 152
+    public static let canvasCardWidth: CGFloat = 200
+    public static let canvasCardHeight: CGFloat = 128
+
+    // The single-screen Inspector: the evidence panes and the state context
+    // column. `inspectorMinWidth` is what the Inspector needs in compact
+    // mode, where the context column sits behind a toggle instead of beside
+    // the panes.
+    public static let inspectorPanesMinWidth: CGFloat = 400
+    public static let inspectorMinWidth: CGFloat = inspectorPanesMinWidth
+    public static let contextColumnMinWidth: CGFloat = 280
+    public static let contextColumnIdealWidth: CGFloat = 320
+    public static let contextColumnMaxWidth: CGFloat = 420
+
+    // The Evidence library list and its right details column.
+    public static let evidenceListMinWidth: CGFloat = 220
+    public static let evidenceListIdealWidth: CGFloat = 250
+    public static let evidenceListMaxWidth: CGFloat = 320
+    public static let evidenceDetailMinWidth: CGFloat = 250
+    public static let evidenceDetailIdealWidth: CGFloat = 300
+    public static let evidenceDetailMaxWidth: CGFloat = 380
+
+    // The Design Review workbench columns.
+    public static let designReferenceColumnMinWidth: CGFloat = 210
+    public static let designReferenceColumnIdealWidth: CGFloat = 240
+    public static let designReferenceColumnMaxWidth: CGFloat = 320
+    public static let designDifferenceColumnMinWidth: CGFloat = 230
+    public static let designDifferenceColumnIdealWidth: CGFloat = 270
+    public static let designDifferenceColumnMaxWidth: CGFloat = 360
+
+    // The context bar's scope picker and the Inspector header caption.
+    public static let scopePickerMaxWidth: CGFloat = 340
+    public static let headerCaptionMaxWidth: CGFloat = 320
+
+    // Fixed-size sheets and forms.
+    public static let curationSheetMinWidth: CGFloat = 440
+    public static let wikiSheetMinWidth: CGFloat = 460
+    public static let explorationFormWidth: CGFloat = 360
+
+    /// How the state Inspector arranges its evidence panes and context
+    /// column inside the width it was actually given.
+    public enum InspectorArrangement: Equatable, Sendable {
+        /// Wide enough for the panes and the context column side by side.
+        case sideBySide
+        /// Too narrow for both: the context column collapses behind a
+        /// toggle and the Inspector shows one surface at a time, instead of
+        /// truncating values mid-word and painting past the window edge.
+        case compact
+    }
+
+    /// The width at or above which the panes and the context column fit
+    /// side by side.
+    public static var inspectorSideBySideMinWidth: CGFloat {
+        inspectorPanesMinWidth + contextColumnMinWidth
+    }
+
+    public static func inspectorArrangement(forWidth width: CGFloat) -> InspectorArrangement {
+        width >= inspectorSideBySideMinWidth ? .sideBySide : .compact
+    }
+}

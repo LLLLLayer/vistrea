@@ -94,6 +94,74 @@ public struct SplitScreenStateCommand: Encodable, Equatable, Sendable {
     }
 }
 
+// MARK: - Screen State annotation command
+
+/// The `POST /v1/screen-graph/state-annotations` command body.
+///
+/// An annotation sets or clears a state's labels and one-sentence summary.
+/// Annotations are knowledge, not identity: they never move observations or
+/// change what a state matches, but they are guarded by the same materialized
+/// graph revision as curation so a concurrent write conflicts explicitly. An
+/// empty `labels` array or empty `summary` string clears that field; at least
+/// one of the two must be set.
+public struct AnnotateScreenStateCommand: Encodable, Equatable, Sendable {
+    public let projectID: String
+    public let applicationID: String
+    public let stateID: String
+    public let labels: [String]?
+    public let summary: String?
+    public let expectedGraphRevision: UInt64
+    public let annotatedBy: StudioActorRef
+
+    public init(
+        projectID: String,
+        applicationID: String,
+        stateID: String,
+        labels: [String]? = nil,
+        summary: String? = nil,
+        expectedGraphRevision: UInt64,
+        annotatedBy: StudioActorRef
+    ) {
+        self.projectID = projectID
+        self.applicationID = applicationID
+        self.stateID = stateID
+        self.labels = labels
+        self.summary = summary
+        self.expectedGraphRevision = expectedGraphRevision
+        self.annotatedBy = annotatedBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projectID = "project_id"
+        case applicationID = "application_id"
+        case stateID = "state_id"
+        case labels
+        case summary
+        case expectedGraphRevision = "expected_graph_revision"
+        case annotatedBy = "annotated_by"
+    }
+}
+
+/// The frozen `{screen_graph_id, graph_revision, state}` result of one
+/// annotation write. `state` is the full updated Screen State.
+public struct ScreenStateAnnotationResult: Decodable, Equatable, Sendable {
+    public let screenGraphID: String
+    public let graphRevision: UInt64
+    public let state: CanvasStateSummary
+
+    public init(screenGraphID: String, graphRevision: UInt64, state: CanvasStateSummary) {
+        self.screenGraphID = screenGraphID
+        self.graphRevision = graphRevision
+        self.state = state
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case screenGraphID = "screen_graph_id"
+        case graphRevision = "graph_revision"
+        case state
+    }
+}
+
 // MARK: - Identity curation result
 
 /// A lenient projection of the recorded StateIdentityDecision.

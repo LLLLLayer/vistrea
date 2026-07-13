@@ -324,6 +324,11 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
     /// The observations deduplicated into this state; identity curation
     /// splits move a strict subset of these into a new state.
     public let observationIDs: [String]
+    /// The operator- or agent-written annotation labels. Annotations are
+    /// knowledge, not identity: a canonical state may omit them entirely.
+    public let labels: [String]
+    /// The one-sentence annotation summary, at most 280 characters.
+    public let summary: String?
 
     public var id: String { screenStateID }
 
@@ -337,13 +342,17 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
         title: String,
         kind: String,
         status: String,
-        observationIDs: [String] = []
+        observationIDs: [String] = [],
+        labels: [String] = [],
+        summary: String? = nil
     ) {
         self.screenStateID = screenStateID
         self.title = title
         self.kind = kind
         self.status = status
         self.observationIDs = observationIDs
+        self.labels = labels
+        self.summary = summary
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -352,6 +361,8 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
         case kind
         case status
         case observationIDs = "observation_ids"
+        case labels
+        case summary
     }
 
     public init(from decoder: Decoder) throws {
@@ -361,6 +372,8 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
         kind = try container.decode(String.self, forKey: .kind)
         status = try container.decode(String.self, forKey: .status)
         observationIDs = try container.decodeIfPresent([String].self, forKey: .observationIDs) ?? []
+        labels = try container.decodeIfPresent([String].self, forKey: .labels) ?? []
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
     }
 }
 
@@ -515,6 +528,11 @@ public protocol HostClient: Sendable {
     // Canvas identity curation writes, guarded by the graph revision.
     func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult
     func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult
+
+    // Screen State annotation write, guarded by the same graph revision.
+    func annotateScreenState(
+        _ command: AnnotateScreenStateCommand
+    ) async throws -> ScreenStateAnnotationResult
 
     // Design comparison workbench.
     func listDesignReferences() async throws -> DesignReferencePage
