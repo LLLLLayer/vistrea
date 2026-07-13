@@ -419,6 +419,120 @@ public struct HTTPHostClient: HostClient, Sendable {
         )
     }
 
+    public func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult {
+        try Self.validateGraphIdentity(projectID: command.projectID, applicationID: command.applicationID)
+        guard (2...64).contains(command.stateIDs.count),
+              command.stateIDs.allSatisfy({ Self.isTypedIdentifier($0, prefix: "screenstate") })
+        else {
+            throw HostClientError.invalidIdentifier(command.stateIDs.joined(separator: ","))
+        }
+        if let intoStateID = command.intoStateID {
+            guard Self.isTypedIdentifier(intoStateID, prefix: "screenstate"),
+                  command.stateIDs.contains(intoStateID)
+            else {
+                throw HostClientError.invalidIdentifier(intoStateID)
+            }
+        }
+        try Self.validateGraphRevision(command.expectedGraphRevision)
+        try Self.validateJustification(command.justification)
+        return try await sendJSON(
+            IdentityCurationResult.self,
+            path: ["v1", "screen-graph", "state-merges"],
+            body: command,
+            expectedStatus: 201
+        )
+    }
+
+    public func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult {
+        try Self.validateGraphIdentity(projectID: command.projectID, applicationID: command.applicationID)
+        guard Self.isTypedIdentifier(command.stateID, prefix: "screenstate") else {
+            throw HostClientError.invalidIdentifier(command.stateID)
+        }
+        guard (1...256).contains(command.observationIDs.count),
+              command.observationIDs.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 128 })
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A split names between 1 and 256 observation IDs of up to 128 bytes each."
+            )
+        }
+        if let title = command.title {
+            guard !title.isEmpty, title.utf8.count <= 512 else {
+                throw HostClientError.invalidConfiguration(
+                    "The split title must contain 1 through 512 bytes."
+                )
+            }
+        }
+        try Self.validateGraphRevision(command.expectedGraphRevision)
+        try Self.validateJustification(command.justification)
+        return try await sendJSON(
+            IdentityCurationResult.self,
+            path: ["v1", "screen-graph", "state-splits"],
+            body: command,
+            expectedStatus: 201
+        )
+    }
+
+    public func listDesignReferences() async throws -> DesignReferencePage {
+        try await requestJSON(
+            DesignReferencePage.self,
+            method: "GET",
+            path: ["v1", "design-references"]
+        )
+    }
+
+    public func getDesignReference(id: String) async throws -> DesignReferenceDetail {
+        guard Self.isTypedIdentifier(id, prefix: "designref") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            DesignReferenceDetail.self,
+            method: "GET",
+            path: ["v1", "design-references", id]
+        )
+    }
+
+    public func listDesignComparisons(
+        designReferenceID: String?,
+        targetSnapshotID: String?
+    ) async throws -> DesignComparisonPage {
+        var query: [URLQueryItem] = []
+        if let designReferenceID {
+            guard Self.isTypedIdentifier(designReferenceID, prefix: "designref") else {
+                throw HostClientError.invalidIdentifier(designReferenceID)
+            }
+            query.append(URLQueryItem(name: "design_reference_id", value: designReferenceID))
+        }
+        if let targetSnapshotID {
+            guard (try? SnapshotID(validating: targetSnapshotID)) != nil else {
+                throw HostClientError.invalidIdentifier(targetSnapshotID)
+            }
+            query.append(URLQueryItem(name: "target_snapshot_id", value: targetSnapshotID))
+        }
+        return try await requestJSON(
+            DesignComparisonPage.self,
+            method: "GET",
+            path: ["v1", "design-comparisons"],
+            query: query
+        )
+    }
+
+    public func runDesignComparison(
+        _ command: DesignComparisonCommand
+    ) async throws -> DesignComparisonDetail {
+        guard Self.isTypedIdentifier(command.designReferenceID, prefix: "designref") else {
+            throw HostClientError.invalidIdentifier(command.designReferenceID)
+        }
+        guard (try? SnapshotID(validating: command.targetSnapshotID)) != nil else {
+            throw HostClientError.invalidIdentifier(command.targetSnapshotID)
+        }
+        return try await sendJSON(
+            DesignComparisonDetail.self,
+            path: ["v1", "design-comparisons"],
+            body: command,
+            expectedStatus: 201
+        )
+    }
+
     public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
         guard (1...500).contains(command.maximumActions) else {
             throw HostClientError.invalidConfiguration(
@@ -627,6 +741,36 @@ public struct HTTPHostClient: HostClient, Sendable {
         let digest = value.dropFirst("sha256:".count).utf8
         return digest.count == 64 && digest.allSatisfy { byte in
             (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+        }
+    }
+
+    /// Validates the Screen Graph identity pair every curation write names.
+    private static func validateGraphIdentity(projectID: String, applicationID: String) throws {
+        guard projectID.range(of: "^project_[0-9a-f-]{36}$", options: .regularExpression) != nil,
+              applicationID.range(
+                  of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$",
+                  options: .regularExpression
+              ) != nil
+        else {
+            throw HostClientError.invalidIdentifier("\(projectID)/\(applicationID)")
+        }
+    }
+
+    private static func validateGraphRevision(_ revision: UInt64) throws {
+        guard revision >= 1 else {
+            throw HostClientError.invalidConfiguration(
+                "The expected Screen Graph revision must be at least 1."
+            )
+        }
+    }
+
+    private static func validateJustification(_ justification: String?) throws {
+        if let justification {
+            guard !justification.isEmpty, justification.count <= 1_024 else {
+                throw HostClientError.invalidConfiguration(
+                    "The curation justification must contain 1 through 1024 characters."
+                )
+            }
         }
     }
 

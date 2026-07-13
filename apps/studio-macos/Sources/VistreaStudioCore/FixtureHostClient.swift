@@ -7,8 +7,10 @@ public actor FixtureHostClient: HostClient {
     private let objectsByHash: [String: Data]
     private let eventTimeline: EventTimeline
     private var reviewIssues: [ReviewIssueSummary]
-    private let canvasGraph: CanvasGraph?
+    private var canvasGraph: CanvasGraph?
     private var wikiDetails: [WikiNodeDetail]
+    private var designReferences: [DesignReferenceDetail]
+    private var designComparisons: [DesignComparisonDetail] = []
 
     private struct StoredTuningPatch {
         let summary: TuningPatchSummary
@@ -59,6 +61,7 @@ public actor FixtureHostClient: HostClient {
         reviewIssues: [ReviewIssueSummary] = [],
         canvasGraph: CanvasGraph? = nil,
         wikiNodes: [WikiNodeSummary] = [],
+        designReferences: [DesignReferenceDetail]? = nil,
         automationConfigured: Bool = true
     ) {
         self.status = status
@@ -80,6 +83,44 @@ public actor FixtureHostClient: HostClient {
                 labels: node.labels
             )
         }
+        self.designReferences = designReferences
+            ?? Self.defaultDesignReferences(snapshots: snapshots)
+    }
+
+    /// Mints one deterministic design reference per distinct screenshot so
+    /// the fixture-backed workbench has a real baseline. The asset is the
+    /// screenshot Object itself: the fixture never invents image bytes.
+    private static func defaultDesignReferences(
+        snapshots: [RuntimeSnapshot]
+    ) -> [DesignReferenceDetail] {
+        let latest = snapshots.max(by: {
+            $0.capturedAt.wallTime.rawValue < $1.capturedAt.wallTime.rawValue
+        })
+        guard let latest, let screenshot = latest.screenshot else {
+            return []
+        }
+        return [
+            DesignReferenceDetail(
+                designReferenceID: "designref_019f0000-0000-7000-8000-0000000000d1",
+                revision: 1,
+                kind: "design_artifact",
+                name: "Fixture design baseline",
+                artifact: DesignArtifactSummary(
+                    object: DesignObjectSummary(
+                        hash: screenshot.object.hash,
+                        mediaType: screenshot.object.mediaType
+                    )
+                ),
+                canvasSize: SizeSummary(
+                    width: screenshot.coverage.width,
+                    height: screenshot.coverage.height
+                ),
+                pixelSize: PixelSizeSummary(
+                    width: screenshot.pixelSize.width.rawValue,
+                    height: screenshot.pixelSize.height.rawValue
+                )
+            ),
+        ]
     }
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
@@ -468,6 +509,319 @@ public actor FixtureHostClient: HostClient {
         return WikiNodePage(items: related)
     }
 
+    // MARK: - Canvas identity curation
+
+    public func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult {
+        guard let graph = canvasGraph else {
+            throw Self.serverError(404, code: "not_found", message: "The Screen Graph does not exist yet.")
+        }
+        let stateIDs = command.stateIDs
+        guard stateIDs.count >= 2, Set(stateIDs).count == stateIDs.count else {
+            throw Self.serverError(400, code: "invalid_argument", message: "A merge names at least two distinct states.")
+        }
+        let survivorID = command.intoStateID ?? stateIDs[0]
+        guard stateIDs.contains(survivorID) else {
+            throw Self.serverError(400, code: "invalid_argument", message: "into_state_id must be one of state_ids.")
+        }
+        guard command.expectedGraphRevision == graph.revision else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The Screen Graph revision does not match.",
+                retryable: true
+            )
+        }
+        let named = graph.states.filter { stateIDs.contains($0.id) }
+        guard named.count == stateIDs.count, named.allSatisfy(\.isActive) else {
+            throw Self.serverError(409, code: "conflict", message: "Every merged state must exist and be active.")
+        }
+        let absorbedIDs = Set(stateIDs.filter { $0 != survivorID })
+        var survivorSummary: CanvasStateSummary?
+        let states = graph.states.map { state -> CanvasStateSummary in
+            if state.id == survivorID {
+                var observationIDs = state.observationIDs
+                for absorbed in named where absorbed.id != survivorID {
+                    for observationID in absorbed.observationIDs where !observationIDs.contains(observationID) {
+                        observationIDs.append(observationID)
+                    }
+                }
+                let updated = CanvasStateSummary(
+                    screenStateID: state.screenStateID,
+                    title: state.title,
+                    kind: state.kind,
+                    status: state.status,
+                    observationIDs: observationIDs
+                )
+                survivorSummary = updated
+                return updated
+            }
+            if absorbedIDs.contains(state.id) {
+                return CanvasStateSummary(
+                    screenStateID: state.screenStateID,
+                    title: state.title,
+                    kind: state.kind,
+                    status: "merged",
+                    observationIDs: state.observationIDs
+                )
+            }
+            return state
+        }
+        let transitions = graph.transitions.map { transition -> CanvasTransitionSummary in
+            let source = absorbedIDs.contains(transition.sourceStateID) ? survivorID : transition.sourceStateID
+            let target = absorbedIDs.contains(transition.targetStateID) ? survivorID : transition.targetStateID
+            guard source != transition.sourceStateID || target != transition.targetStateID else {
+                return transition
+            }
+            return CanvasTransitionSummary(
+                transitionID: transition.transitionID,
+                sourceStateID: source,
+                targetStateID: target,
+                occurrenceCount: transition.occurrenceCount
+            )
+        }
+        var entryStateIDs: [String] = []
+        for entry in graph.entryStateIDs {
+            let mapped = absorbedIDs.contains(entry) ? survivorID : entry
+            if !entryStateIDs.contains(mapped) {
+                entryStateIDs.append(mapped)
+            }
+        }
+        let updatedGraph = CanvasGraph(
+            screenGraphID: graph.screenGraphID,
+            revision: graph.revision + 1,
+            entryStateIDs: entryStateIDs,
+            states: states,
+            transitions: transitions
+        )
+        canvasGraph = updatedGraph
+        guard let survivorSummary else {
+            throw Self.serverError(409, code: "conflict", message: "Every merged state must exist and be active.")
+        }
+        return IdentityCurationResult(
+            screenGraphID: updatedGraph.screenGraphID,
+            graphRevision: updatedGraph.revision,
+            decision: IdentityDecisionSummary(
+                stateIdentityDecisionID: mintIdentifier("identitydecision"),
+                kind: "merge"
+            ),
+            state: survivorSummary
+        )
+    }
+
+    public func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult {
+        guard let graph = canvasGraph else {
+            throw Self.serverError(404, code: "not_found", message: "The Screen Graph does not exist yet.")
+        }
+        let movedIDs = command.observationIDs
+        guard !movedIDs.isEmpty, Set(movedIDs).count == movedIDs.count else {
+            throw Self.serverError(400, code: "invalid_argument", message: "A split names at least one observation once.")
+        }
+        guard command.expectedGraphRevision == graph.revision else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The Screen Graph revision does not match.",
+                retryable: true
+            )
+        }
+        guard let source = graph.states.first(where: { $0.id == command.stateID }), source.isActive else {
+            throw Self.serverError(409, code: "conflict", message: "The split state must exist and be active.")
+        }
+        guard movedIDs.allSatisfy(source.observationIDs.contains) else {
+            throw Self.serverError(400, code: "invalid_argument", message: "Every split observation must belong to the state.")
+        }
+        let remainingIDs = source.observationIDs.filter { !movedIDs.contains($0) }
+        guard !remainingIDs.isEmpty else {
+            throw Self.serverError(400, code: "invalid_argument", message: "A split must leave at least one observation behind.")
+        }
+        let newState = CanvasStateSummary(
+            screenStateID: mintIdentifier("screenstate"),
+            title: command.title ?? "\(source.title) (split)",
+            kind: source.kind,
+            status: "active",
+            observationIDs: movedIDs
+        )
+        var states = graph.states.map { state -> CanvasStateSummary in
+            guard state.id == command.stateID else {
+                return state
+            }
+            return CanvasStateSummary(
+                screenStateID: state.screenStateID,
+                title: state.title,
+                kind: state.kind,
+                status: state.status,
+                observationIDs: remainingIDs
+            )
+        }
+        states.append(newState)
+        let updatedGraph = CanvasGraph(
+            screenGraphID: graph.screenGraphID,
+            revision: graph.revision + 1,
+            entryStateIDs: graph.entryStateIDs,
+            states: states,
+            transitions: graph.transitions
+        )
+        canvasGraph = updatedGraph
+        return IdentityCurationResult(
+            screenGraphID: updatedGraph.screenGraphID,
+            graphRevision: updatedGraph.revision,
+            decision: IdentityDecisionSummary(
+                stateIdentityDecisionID: mintIdentifier("identitydecision"),
+                kind: "split"
+            ),
+            state: newState
+        )
+    }
+
+    // MARK: - Design comparison workbench
+
+    public func listDesignReferences() async throws -> DesignReferencePage {
+        DesignReferencePage(items: designReferences)
+    }
+
+    public func getDesignReference(id: String) async throws -> DesignReferenceDetail {
+        guard let reference = designReferences.first(where: { $0.id == id }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        return reference
+    }
+
+    public func listDesignComparisons(
+        designReferenceID: String?,
+        targetSnapshotID: String?
+    ) async throws -> DesignComparisonPage {
+        var items = designComparisons
+        if let designReferenceID {
+            items = items.filter { $0.designReferenceID == designReferenceID }
+        }
+        if let targetSnapshotID {
+            items = items.filter { $0.targetSnapshotID == targetSnapshotID }
+        }
+        return DesignComparisonPage(items: items.reversed())
+    }
+
+    /// Produces a deterministic comparison against the fixture Snapshot: one
+    /// frame difference on the first interactive stable-ID node, plus one
+    /// color difference when the pixel path genuinely has both binaries. A
+    /// requested pixel comparison the fixture cannot perform degrades to the
+    /// canonical `vistrea.pixel` unavailable verdict and `quality: partial`.
+    public func runDesignComparison(
+        _ command: DesignComparisonCommand
+    ) async throws -> DesignComparisonDetail {
+        guard let reference = designReferences.first(where: { $0.id == command.designReferenceID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard let snapshot = snapshotsByID[command.targetSnapshotID] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        var quality = "complete"
+        var differences: [DesignDifferenceSummary] = []
+        let target = Self.comparableNode(in: snapshot)
+        if let target {
+            differences.append(
+                DesignDifferenceSummary(
+                    differenceID: mintIdentifier("difference"),
+                    category: "frame",
+                    severity: "minor",
+                    delta: 8,
+                    expected: .rect(
+                        RectValueSummary(
+                            x: target.frame.x + 8,
+                            y: target.frame.y,
+                            width: target.frame.width,
+                            height: target.frame.height
+                        )
+                    ),
+                    actual: .rect(
+                        RectValueSummary(
+                            x: target.frame.x,
+                            y: target.frame.y,
+                            width: target.frame.width,
+                            height: target.frame.height
+                        )
+                    ),
+                    runtimeTarget: DesignRuntimeTargetSummary(
+                        nodeID: target.nodeID,
+                        stableID: target.stableID
+                    )
+                )
+            )
+        } else {
+            quality = "partial"
+        }
+        var pixel: PixelComparisonStatus?
+        if command.includePixel == true {
+            let screenshotHash = snapshot.screenshot?.object.hash
+            let assetHash = reference.artifact.object.hash
+            if snapshot.screenshot == nil {
+                pixel = PixelComparisonStatus(
+                    status: "unavailable",
+                    reason: "The target Snapshot has no screenshot."
+                )
+                quality = "partial"
+            } else if objectsByHash[assetHash] == nil || screenshotHash.flatMap({ objectsByHash[$0] }) == nil {
+                pixel = PixelComparisonStatus(
+                    status: "unavailable",
+                    reason: "The fixture Host does not bundle the design asset or screenshot bytes."
+                )
+                quality = "partial"
+            } else {
+                pixel = PixelComparisonStatus(status: "compared")
+                if let target {
+                    differences.append(
+                        DesignDifferenceSummary(
+                            differenceID: mintIdentifier("difference"),
+                            category: "color",
+                            severity: "minor",
+                            delta: 0.05,
+                            expected: .colorRGBA(
+                                ColorRGBAValueSummary(red: 0.2, green: 0.4, blue: 0.9, alpha: 1)
+                            ),
+                            actual: .colorRGBA(
+                                ColorRGBAValueSummary(red: 0.25, green: 0.45, blue: 0.85, alpha: 1)
+                            ),
+                            runtimeTarget: DesignRuntimeTargetSummary(
+                                nodeID: target.nodeID,
+                                stableID: target.stableID
+                            )
+                        )
+                    )
+                }
+            }
+        }
+        let comparison = DesignComparisonDetail(
+            comparisonID: mintIdentifier("comparison"),
+            revision: 1,
+            designReferenceID: reference.designReferenceID,
+            targetSnapshotID: command.targetSnapshotID,
+            quality: quality,
+            differences: differences,
+            completedAt: mintTimestamp(),
+            pixel: pixel
+        )
+        designComparisons.append(comparison)
+        return comparison
+    }
+
+    /// The first non-root inline node that carries both a stable ID and a
+    /// frame; the deterministic difference target.
+    private static func comparableNode(
+        in snapshot: RuntimeSnapshot
+    ) -> (nodeID: String, stableID: String, frame: Rect)? {
+        for tree in snapshot.trees {
+            for node in tree.payload.inlineNodes ?? [] {
+                guard node.parentID != nil,
+                      let stableID = node.stableID?.rawValue,
+                      let frame = node.frame
+                else {
+                    continue
+                }
+                return (node.nodeID.rawValue, stableID, frame)
+            }
+        }
+        return nil
+    }
+
     // MARK: - Exploration Operations
 
     public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
@@ -718,6 +1072,21 @@ public struct UnavailableHostClient: HostClient {
     public func getScreenState(id: String) async throws -> ScreenStateDetail { throw error }
     public func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary { throw error }
     public func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage { throw error }
+    public func mergeScreenStates(
+        _ command: MergeScreenStatesCommand
+    ) async throws -> IdentityCurationResult { throw error }
+    public func splitScreenState(
+        _ command: SplitScreenStateCommand
+    ) async throws -> IdentityCurationResult { throw error }
+    public func listDesignReferences() async throws -> DesignReferencePage { throw error }
+    public func getDesignReference(id: String) async throws -> DesignReferenceDetail { throw error }
+    public func listDesignComparisons(
+        designReferenceID: String?,
+        targetSnapshotID: String?
+    ) async throws -> DesignComparisonPage { throw error }
+    public func runDesignComparison(
+        _ command: DesignComparisonCommand
+    ) async throws -> DesignComparisonDetail { throw error }
     public func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
         throw error
     }

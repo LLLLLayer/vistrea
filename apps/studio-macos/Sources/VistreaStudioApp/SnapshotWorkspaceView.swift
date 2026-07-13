@@ -54,6 +54,8 @@ struct SnapshotWorkspaceView: View {
                             .tabItem { Label("Screenshot", systemImage: "photo") }
                         CanvasPane(model: model)
                             .tabItem { Label("Canvas", systemImage: "point.3.connected.trianglepath.dotted") }
+                        DesignReviewPane(model: model)
+                            .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
                         LayerInspector3DPane(model: model)
                             .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
                         WikiPane(model: model)
@@ -78,6 +80,7 @@ struct SnapshotWorkspaceView: View {
 private struct CanvasPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var isExploreFormPresented = false
+    @State private var isMergeSheetPresented = false
 
     private static let columnWidth: CGFloat = 230
     private static let rowHeight: CGFloat = 116
@@ -86,6 +89,12 @@ private struct CanvasPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaneHeader(title: "Screen State Canvas", systemImage: "point.3.connected.trianglepath.dotted") {
+                if model.mergeSelectionStateIDs.count >= 2 {
+                    Button("Merge…", systemImage: "arrow.triangle.merge") {
+                        isMergeSheetPresented = true
+                    }
+                    .disabled(model.isMergingStates)
+                }
                 Button("Explore", systemImage: "figure.walk") {
                     isExploreFormPresented = true
                 }
@@ -96,7 +105,11 @@ private struct CanvasPane: View {
             }
             Divider()
             ExplorationStatusView(model: model)
+            CurationStatusView(model: model)
             content
+        }
+        .sheet(isPresented: $isMergeSheetPresented) {
+            MergeStatesSheet(model: model)
         }
         .onDisappear {
             // The Host-side run continues; only the poll loop stops with
@@ -170,6 +183,8 @@ private struct CanvasPane: View {
                 }
             }
             ForEach(positions) { positioned in
+                let isActive = positioned.state.isActive
+                let isMergeSelected = model.mergeSelectionStateIDs.contains(positioned.id)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(positioned.state.title)
                         .font(.subheadline.weight(.semibold))
@@ -178,10 +193,20 @@ private struct CanvasPane: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 6) {
+                        if !isActive {
+                            Text(positioned.state.status)
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
                         if entryIDs.contains(positioned.id) {
                             Text("entry")
                                 .font(.caption2.weight(.medium))
                                 .foregroundStyle(.blue)
+                        }
+                        if isMergeSelected {
+                            Label("merge", systemImage: "checkmark.circle.fill")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.orange)
                         }
                         if positioned.id == selectedID, linkedSelected {
                             Label("linked", systemImage: "book")
@@ -199,20 +224,40 @@ private struct CanvasPane: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(
-                            positioned.id == selectedID
-                                ? Color.accentColor
-                                : entryIDs.contains(positioned.id) ? Color.blue : Color.secondary.opacity(0.4),
-                            lineWidth: positioned.id == selectedID || entryIDs.contains(positioned.id) ? 2 : 1
+                            isMergeSelected
+                                ? Color.orange
+                                : positioned.id == selectedID
+                                    ? Color.accentColor
+                                    : entryIDs.contains(positioned.id)
+                                        ? Color.blue
+                                        : Color.secondary.opacity(0.4),
+                            lineWidth: isMergeSelected || positioned.id == selectedID
+                                || entryIDs.contains(positioned.id) ? 2 : 1
                         )
                 )
+                .opacity(isActive ? 1 : 0.4)
                 .offset(
                     x: CGFloat(positioned.column) * Self.columnWidth,
                     y: CGFloat(positioned.row) * Self.rowHeight
                 )
+                .highPriorityGesture(
+                    TapGesture().modifiers(.command).onEnded {
+                        // Cmd-click toggles the merge selection; only active
+                        // states are selectable.
+                        model.toggleMergeSelection(stateID: positioned.id)
+                    }
+                )
                 .onTapGesture {
                     Task { await model.selectCanvasState(id: positioned.id) }
                 }
-                .accessibilityLabel("Screen state \(positioned.state.title)")
+                .help(
+                    isActive
+                        ? "Click for details; Cmd-click to select for merging."
+                        : "This state was \(positioned.state.status) by identity curation."
+                )
+                .accessibilityLabel(
+                    "Screen state \(positioned.state.title), \(positioned.state.status)"
+                )
             }
         }
         .frame(
@@ -343,10 +388,198 @@ private struct ExplorationStatusView: View {
     }
 }
 
+/// The Canvas identity-curation status line: the changed-elsewhere conflict
+/// note after a rejected merge or split, and the verbatim write error.
+private struct CurationStatusView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        if model.graphConflictNote != nil || model.curationError != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if let note = model.graphConflictNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
+                if let error = model.curationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("Dismiss") {
+                        model.dismissCurationError()
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .accessibilityLabel("Identity curation status")
+            Divider()
+        }
+    }
+}
+
+/// The Merge sheet: the survivor picker over the Cmd-click selection,
+/// defaulting to the first selected state, plus an optional justification.
+private struct MergeStatesSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var survivorID = ""
+    @State private var justification = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Merge Screen States")
+                .font(.headline)
+            Text("The selected states are one product screen. Observations move to the surviving state; the others become merged tombstones.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Survivor", selection: $survivorID) {
+                ForEach(model.mergeSelectionStateIDs, id: \.self) { stateID in
+                    Text(title(for: stateID)).tag(stateID)
+                }
+            }
+            TextField("Justification (optional)", text: $justification)
+                .textFieldStyle(.roundedBorder)
+            if let note = model.graphConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = model.curationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Merge") {
+                    Task {
+                        let merged = await model.mergeSelectedStates(
+                            into: survivorID.isEmpty ? nil : survivorID,
+                            justification: justification.isEmpty ? nil : justification
+                        )
+                        if merged {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isMergingStates || model.mergeSelectionStateIDs.count < 2)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 440)
+        .onAppear {
+            survivorID = model.mergeSelectionStateIDs.first ?? ""
+        }
+    }
+
+    private func title(for stateID: String) -> String {
+        model.canvasGraph?.states.first(where: { $0.id == stateID })?.title ?? stateID
+    }
+}
+
+/// The Split sheet: the state's observation checkboxes. At least one
+/// observation must move and at least one must stay behind.
+private struct SplitStateSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedObservationIDs: Set<String> = []
+    @State private var title = ""
+    @State private var justification = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Split Screen State")
+                .font(.headline)
+            Text("Move wrongly deduplicated observations into a new state. At least one observation must stay behind.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            let observationIDs = model.selectedCanvasStateObservationIDs
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(observationIDs, id: \.self) { observationID in
+                        Toggle(isOn: binding(for: observationID)) {
+                            Text(observationID)
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+            TextField("New state title (optional)", text: $title)
+                .textFieldStyle(.roundedBorder)
+            TextField("Justification (optional)", text: $justification)
+                .textFieldStyle(.roundedBorder)
+            if let note = model.graphConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = model.curationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Split") {
+                    let moved = observationIDs.filter(selectedObservationIDs.contains)
+                    Task {
+                        let split = await model.splitSelectedState(
+                            observationIDs: moved,
+                            title: title.isEmpty ? nil : title,
+                            justification: justification.isEmpty ? nil : justification
+                        )
+                        if split {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.isSplittingState
+                        || selectedObservationIDs.isEmpty
+                        || selectedObservationIDs.count >= observationIDs.count
+                )
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 440)
+    }
+
+    private func binding(for observationID: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedObservationIDs.contains(observationID) },
+            set: { isSelected in
+                if isSelected {
+                    selectedObservationIDs.insert(observationID)
+                } else {
+                    selectedObservationIDs.remove(observationID)
+                }
+            }
+        )
+    }
+}
+
 /// The selected Screen State's persisted details plus its Deep Wiki links.
 private struct CanvasStateDetailPanel: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var linkFilter = ""
+    @State private var isSplitSheetPresented = false
 
     var body: some View {
         ScrollView {
@@ -376,6 +609,7 @@ private struct CanvasStateDetailPanel: View {
                     if let detail = model.canvasStateDetail {
                         stateFields(for: detail)
                         Divider()
+                        observationSection(for: detail)
                         linkedNodes
                         Divider()
                         linkControls
@@ -384,6 +618,30 @@ private struct CanvasStateDetailPanel: View {
             }
             .padding(12)
         }
+        .sheet(isPresented: $isSplitSheetPresented) {
+            SplitStateSheet(model: model)
+        }
+    }
+
+    /// The state's recorded observations, with the Split entry once at
+    /// least two observations make a strict-subset split possible.
+    @ViewBuilder
+    private func observationSection(for detail: ScreenStateDetail) -> some View {
+        let observationIDs = model.selectedCanvasStateObservationIDs
+        Text("Observations (\(observationIDs.count))")
+            .font(.caption.weight(.semibold))
+        if observationIDs.count >= 2, detail.status == "active" {
+            Button("Split…", systemImage: "arrow.triangle.branch") {
+                isSplitSheetPresented = true
+            }
+            .font(.caption)
+            .disabled(model.isSplittingState)
+        } else {
+            Text("A state with a single observation cannot be split.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        Divider()
     }
 
     private func stateFields(for detail: ScreenStateDetail) -> some View {
@@ -455,6 +713,529 @@ private struct CanvasStateDetailPanel: View {
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
         }
+    }
+}
+
+/// The design comparison workbench: pick a persisted design reference, run a
+/// comparison against the selected Snapshot, and inspect the differences
+/// over the screenshot with the design asset overlaid.
+private struct DesignReviewPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var includePixel = false
+    @State private var overlayOpacity = 0.5
+    @State private var isReviewMode = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PaneHeader(title: "Design Review", systemImage: "square.on.square.dashed") {
+                Toggle("Include pixel comparison", isOn: $includePixel)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .disabled(model.isComparingDesign)
+                Button("Compare", systemImage: "sparkles.rectangle.stack") {
+                    Task { await model.runDesignComparison(includePixel: includePixel) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.isComparingDesign
+                        || model.selectedDesignReferenceID == nil
+                        || model.selectedSnapshotID == nil
+                )
+            }
+            Divider()
+            HSplitView {
+                DesignReferenceColumn(model: model)
+                    .frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
+                overlayColumn
+                DesignDifferenceColumn(model: model, isReviewMode: $isReviewMode)
+                    .frame(minWidth: 230, idealWidth: 270, maxWidth: 360)
+            }
+        }
+        .task {
+            guard model.designReferencesPhase == .idle else { return }
+            await model.loadDesignReferences()
+        }
+    }
+
+    private var overlayColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ComparisonCaptionsView(model: model)
+            ComparisonOverlayView(model: model, overlayOpacity: overlayOpacity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            HStack(spacing: 8) {
+                Text("Design overlay")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Slider(value: $overlayOpacity, in: 0...1) {
+                    Text("Design overlay opacity")
+                }
+                .controlSize(.small)
+                Text(overlayOpacity.formatted(.number.precision(.fractionLength(2))))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+        }
+    }
+}
+
+/// The persisted design references plus the past comparisons for the
+/// selected reference and Snapshot.
+private struct DesignReferenceColumn: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            referenceList
+            Divider()
+            comparisonHistory
+                .frame(height: 150)
+        }
+    }
+
+    @ViewBuilder
+    private var referenceList: some View {
+        switch model.designReferencesPhase {
+        case .idle, .loading:
+            ProgressView("Loading design references…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            Text("No design references have been added yet. Add one through the Host design routes.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.designReferences, selection: referenceSelection) { reference in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(reference.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                    Text(reference.kind)
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                    Text(
+                        "\(reference.canvasSize.width.formatted()) × \(reference.canvasSize.height.formatted()) pt · \(reference.pixelSize.width) × \(reference.pixelSize.height) px"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 2)
+                .tag(reference.id)
+                .accessibilityLabel("Design reference \(reference.name)")
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    @ViewBuilder
+    private var comparisonHistory: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Past comparisons")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            switch model.designComparisonsPhase {
+            case .idle:
+                Text("Select a design reference to list its comparisons.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+            case .loading:
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.horizontal, 10)
+            case .empty:
+                Text("No comparison has been run for this reference and Snapshot yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 10)
+            case .content:
+                List(model.designComparisons, selection: comparisonSelection) { comparison in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(comparison.completedAt)
+                            .font(.caption)
+                        Text("\(comparison.quality) · \(comparison.differences.count) difference\(comparison.differences.count == 1 ? "" : "s")")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .tag(comparison.id)
+                    .accessibilityLabel(
+                        "Comparison at \(comparison.completedAt), \(comparison.quality)"
+                    )
+                }
+                .listStyle(.sidebar)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var referenceSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedDesignReferenceID },
+            set: { id in
+                guard id != model.selectedDesignReferenceID else { return }
+                Task { await model.selectDesignReference(id: id) }
+            }
+        )
+    }
+
+    private var comparisonSelection: Binding<String?> {
+        Binding(
+            get: { model.designComparison?.id },
+            set: { id in
+                guard let id else { return }
+                model.selectDesignComparison(id: id)
+            }
+        )
+    }
+}
+
+/// The honest captions above the overlay: partial quality, the canonical
+/// `vistrea.pixel` verdict, asset-load degradation, and write errors.
+private struct ComparisonCaptionsView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        let captions = captionLines
+        if model.isComparingDesign || !captions.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if model.isComparingDesign {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Running the design comparison…")
+                            .font(.caption)
+                    }
+                }
+                ForEach(captions, id: \.text) { caption in
+                    Text(caption.text)
+                        .font(.caption)
+                        .foregroundStyle(caption.isError ? Color.red : Color.orange)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .accessibilityLabel("Design comparison status")
+            Divider()
+        }
+    }
+
+    private struct Caption: Hashable {
+        let text: String
+        let isError: Bool
+    }
+
+    private var captionLines: [Caption] {
+        var lines: [Caption] = []
+        if let error = model.designComparisonError {
+            lines.append(Caption(text: error, isError: true))
+        }
+        if let comparison = model.designComparison {
+            if comparison.quality == "partial" {
+                lines.append(
+                    Caption(
+                        text: "This comparison is partial: not every design region could be measured on the target Snapshot.",
+                        isError: false
+                    )
+                )
+            }
+            if let pixel = comparison.pixel {
+                if pixel.status == "compared" {
+                    lines.append(Caption(text: "Pixel comparison included.", isError: false))
+                } else {
+                    let reason = pixel.reason.map { ": \($0)" } ?? "."
+                    lines.append(
+                        Caption(text: "Pixel comparison \(pixel.status)\(reason)", isError: false)
+                    )
+                }
+            }
+            if let snapshotID = model.selectedSnapshotID, comparison.targetSnapshotID != snapshotID {
+                lines.append(
+                    Caption(
+                        text: "This comparison targets Snapshot \(comparison.targetSnapshotID), not the selected one; the overlay is hidden.",
+                        isError: false
+                    )
+                )
+            }
+        }
+        if case let .unavailable(message) = model.designAssetPhase {
+            lines.append(
+                Caption(text: "The design asset could not be loaded: \(message)", isError: false)
+            )
+        }
+        return lines
+    }
+}
+
+/// The screenshot with the design asset overlaid at adjustable opacity and
+/// the difference regions drawn over the affected areas.
+private struct ComparisonOverlayView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let overlayOpacity: Double
+
+    var body: some View {
+        if model.selectedSnapshot == nil {
+            honestPlaceholder("Select a Runtime Snapshot to compare against a design reference.")
+        } else if model.selectedSnapshot?.screenshot == nil {
+            honestPlaceholder(
+                "The selected Snapshot carries no screenshot Object. Differences are listed on the right without a visual overlay."
+            )
+        } else if let data = model.screenshotData, let image = NSImage(data: data) {
+            GeometryReader { proxy in
+                let fitted = Self.fittedRect(image: image.size, container: proxy.size)
+                ZStack(alignment: .topLeading) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .frame(width: fitted.width, height: fitted.height)
+                        .offset(x: fitted.minX, y: fitted.minY)
+                        .accessibilityLabel("Captured application screenshot")
+                    if let assetData = model.designAssetData, let design = NSImage(data: assetData) {
+                        // The design asset scales to the screenshot size so
+                        // both images share one coordinate space.
+                        Image(nsImage: design)
+                            .resizable()
+                            .frame(width: fitted.width, height: fitted.height)
+                            .offset(x: fitted.minX, y: fitted.minY)
+                            .opacity(overlayOpacity)
+                            .allowsHitTesting(false)
+                            .accessibilityLabel("Design reference overlay")
+                    }
+                    ForEach(model.differenceRegions) { region in
+                        regionOverlay(for: region, in: fitted)
+                    }
+                }
+            }
+            .padding(8)
+        } else {
+            honestPlaceholder(screenshotStateText)
+        }
+    }
+
+    @ViewBuilder
+    private func regionOverlay(for region: DifferenceRegion, in fitted: CGRect) -> some View {
+        let isSelected = region.id == model.selectedDifferenceID
+        let color = Self.severityColor(region.severity)
+        Rectangle()
+            .fill(isSelected ? color.opacity(0.18) : Color.clear)
+            .overlay(
+                Rectangle()
+                    .strokeBorder(color, lineWidth: isSelected ? 3 : 1.5)
+            )
+            .frame(
+                width: max(fitted.width * region.unitRect.width, 4),
+                height: max(fitted.height * region.unitRect.height, 4)
+            )
+            .offset(
+                x: fitted.minX + fitted.width * region.unitRect.x,
+                y: fitted.minY + fitted.height * region.unitRect.y
+            )
+            .onTapGesture {
+                model.selectDifference(id: region.id)
+            }
+            .accessibilityLabel("Difference region \(region.category), \(region.severity)")
+        if isSelected, let expected = region.expectedUnitRect {
+            Rectangle()
+                .strokeBorder(color, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3]))
+                .frame(
+                    width: max(fitted.width * expected.width, 4),
+                    height: max(fitted.height * expected.height, 4)
+                )
+                .offset(
+                    x: fitted.minX + fitted.width * expected.x,
+                    y: fitted.minY + fitted.height * expected.y
+                )
+                .allowsHitTesting(false)
+                .accessibilityLabel("Expected design position")
+        }
+    }
+
+    private var screenshotStateText: String {
+        switch model.screenshotPhase {
+        case .loading:
+            return "Loading the screenshot Object…"
+        case let .unavailable(message):
+            return "The screenshot Object could not be loaded: \(message)"
+        case .available:
+            return "The screenshot Object bytes are not a supported image."
+        case .none:
+            return "The screenshot Object has not been loaded."
+        }
+    }
+
+    private func honestPlaceholder(_ message: String) -> some View {
+        Text(message)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Aspect-fits the image into the container, centered.
+    static func fittedRect(image: CGSize, container: CGSize) -> CGRect {
+        guard image.width > 0, image.height > 0, container.width > 0, container.height > 0 else {
+            return .zero
+        }
+        let scale = min(container.width / image.width, container.height / image.height)
+        let size = CGSize(width: image.width * scale, height: image.height * scale)
+        return CGRect(
+            x: (container.width - size.width) / 2,
+            y: (container.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    static func severityColor(_ severity: String) -> Color {
+        switch severity {
+        case "critical": .red
+        case "major": .orange
+        case "minor": .yellow
+        default: .blue
+        }
+    }
+}
+
+/// The difference list: category, severity, delta, and the expected-versus-
+/// actual summary. Selection highlights the region; review mode steps
+/// through the differences one at a time.
+private struct DesignDifferenceColumn: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @Binding var isReviewMode: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Differences")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Toggle("Review mode", isOn: $isReviewMode)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
+                    .onChange(of: isReviewMode) {
+                        if isReviewMode, model.selectedDifferenceID == nil {
+                            model.advanceDifferenceSelection(by: 1)
+                        }
+                    }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            if isReviewMode {
+                HStack(spacing: 8) {
+                    Button("Previous", systemImage: "chevron.left") {
+                        model.advanceDifferenceSelection(by: -1)
+                    }
+                    Button("Next", systemImage: "chevron.right") {
+                        model.advanceDifferenceSelection(by: 1)
+                    }
+                    Spacer()
+                    if let position = reviewPosition {
+                        Text(position)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+                .disabled(model.designComparison?.differences.isEmpty != false)
+            }
+            Divider()
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let comparison = model.designComparison {
+            if comparison.differences.isEmpty {
+                Text("No differences were found.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(comparison.differences, selection: differenceSelection) { difference in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(difference.category)
+                                .font(.subheadline.weight(.semibold))
+                            Text(difference.severity)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(
+                                    ComparisonOverlayView.severityColor(difference.severity)
+                                )
+                            if let delta = difference.delta {
+                                Text("Δ \(delta.formatted(.number.precision(.fractionLength(0...3))))")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("expected \(difference.expected.summaryText)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        Text("actual \(difference.actual.summaryText)")
+                            .font(.caption)
+                            .lineLimit(2)
+                        if let stableID = difference.runtimeTarget?.stableID {
+                            Text(stableID)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .tag(difference.id)
+                    .accessibilityLabel(
+                        "Difference \(difference.category), \(difference.severity)"
+                    )
+                }
+                .listStyle(.sidebar)
+            }
+        } else {
+            Text("Run a comparison to list the differences between the design reference and the captured Snapshot.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var reviewPosition: String? {
+        guard let comparison = model.designComparison,
+              let selected = model.selectedDifferenceID,
+              let index = comparison.differences.firstIndex(where: { $0.id == selected })
+        else {
+            return nil
+        }
+        return "\(index + 1)/\(comparison.differences.count)"
+    }
+
+    private var differenceSelection: Binding<String?> {
+        Binding(
+            get: { model.selectedDifferenceID },
+            set: { model.selectDifference(id: $0) }
+        )
     }
 }
 

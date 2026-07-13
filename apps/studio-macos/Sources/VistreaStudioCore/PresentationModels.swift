@@ -72,6 +72,13 @@ public struct RectPresentation: Equatable, Sendable {
         height = rect.height
     }
 
+    init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+
     public var summary: String {
         "x \(Self.format(x)), y \(Self.format(y)), w \(Self.format(width)), h \(Self.format(height))"
     }
@@ -331,6 +338,10 @@ public struct ScreenshotPresentation: Equatable, Sendable {
     public let logicalName: String?
     public let pixelWidth: UInt64
     public let pixelHeight: UInt64
+    /// The logical-point region the screenshot covers. Overlays convert
+    /// logical frames into image coordinates through this rect: the pixel
+    /// scale is `pixelWidth / coverage.width`.
+    public let coverage: RectPresentation
 
     init(_ evidence: ScreenshotEvidence) {
         hash = evidence.object.hash
@@ -339,6 +350,12 @@ public struct ScreenshotPresentation: Equatable, Sendable {
         logicalName = evidence.object.logicalName
         pixelWidth = evidence.pixelSize.width.rawValue
         pixelHeight = evidence.pixelSize.height.rawValue
+        coverage = RectPresentation(
+            x: evidence.coverage.x,
+            y: evidence.coverage.y,
+            width: evidence.coverage.width,
+            height: evidence.coverage.height
+        )
     }
 }
 

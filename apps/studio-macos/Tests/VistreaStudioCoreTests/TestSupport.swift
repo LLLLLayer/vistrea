@@ -60,6 +60,33 @@ extension HostClient {
         WikiNodePage(items: [])
     }
 
+    func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult {
+        throw HostClientError.fixtureUnavailable("This test double does not support identity curation.")
+    }
+
+    func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult {
+        throw HostClientError.fixtureUnavailable("This test double does not support identity curation.")
+    }
+
+    func listDesignReferences() async throws -> DesignReferencePage {
+        DesignReferencePage(items: [])
+    }
+
+    func getDesignReference(id: String) async throws -> DesignReferenceDetail {
+        throw HostClientError.fixtureUnavailable("This test double does not support design references.")
+    }
+
+    func listDesignComparisons(
+        designReferenceID: String?,
+        targetSnapshotID: String?
+    ) async throws -> DesignComparisonPage {
+        DesignComparisonPage(items: [])
+    }
+
+    func runDesignComparison(_ command: DesignComparisonCommand) async throws -> DesignComparisonDetail {
+        throw HostClientError.fixtureUnavailable("This test double does not support design comparisons.")
+    }
+
     func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef {
         throw HostClientError.fixtureUnavailable("This test double does not support exploration.")
     }

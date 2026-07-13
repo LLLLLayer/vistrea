@@ -321,14 +321,29 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
     public let title: String
     public let kind: String
     public let status: String
+    /// The observations deduplicated into this state; identity curation
+    /// splits move a strict subset of these into a new state.
+    public let observationIDs: [String]
 
     public var id: String { screenStateID }
 
-    public init(screenStateID: String, title: String, kind: String, status: String) {
+    /// True while the state represents a live product screen. Merged, split,
+    /// and deprecated tombstones stay in the graph for history but are not
+    /// curation targets.
+    public var isActive: Bool { status == "active" }
+
+    public init(
+        screenStateID: String,
+        title: String,
+        kind: String,
+        status: String,
+        observationIDs: [String] = []
+    ) {
         self.screenStateID = screenStateID
         self.title = title
         self.kind = kind
         self.status = status
+        self.observationIDs = observationIDs
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -336,6 +351,16 @@ public struct CanvasStateSummary: Decodable, Equatable, Sendable, Identifiable {
         case title
         case kind
         case status
+        case observationIDs = "observation_ids"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        screenStateID = try container.decode(String.self, forKey: .screenStateID)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(String.self, forKey: .kind)
+        status = try container.decode(String.self, forKey: .status)
+        observationIDs = try container.decodeIfPresent([String].self, forKey: .observationIDs) ?? []
     }
 }
 
@@ -371,17 +396,22 @@ public struct CanvasTransitionSummary: Decodable, Equatable, Sendable, Identifia
 /// The materialized Screen Graph reduced to what the Canvas renders.
 public struct CanvasGraph: Decodable, Equatable, Sendable {
     public let screenGraphID: String
+    /// The materialized graph revision. Identity curation writes send it as
+    /// `expected_graph_revision` so concurrent curation conflicts explicitly.
+    public let revision: UInt64
     public let entryStateIDs: [String]
     public let states: [CanvasStateSummary]
     public let transitions: [CanvasTransitionSummary]
 
     public init(
         screenGraphID: String,
+        revision: UInt64 = 1,
         entryStateIDs: [String],
         states: [CanvasStateSummary],
         transitions: [CanvasTransitionSummary]
     ) {
         self.screenGraphID = screenGraphID
+        self.revision = revision
         self.entryStateIDs = entryStateIDs
         self.states = states
         self.transitions = transitions
@@ -389,6 +419,7 @@ public struct CanvasGraph: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case screenGraphID = "screen_graph_id"
+        case revision
         case entryStateIDs = "entry_state_ids"
         case states
         case transitions
@@ -480,6 +511,19 @@ public protocol HostClient: Sendable {
     func getScreenState(id: String) async throws -> ScreenStateDetail
     func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary
     func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage
+
+    // Canvas identity curation writes, guarded by the graph revision.
+    func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult
+    func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult
+
+    // Design comparison workbench.
+    func listDesignReferences() async throws -> DesignReferencePage
+    func getDesignReference(id: String) async throws -> DesignReferenceDetail
+    func listDesignComparisons(
+        designReferenceID: String?,
+        targetSnapshotID: String?
+    ) async throws -> DesignComparisonPage
+    func runDesignComparison(_ command: DesignComparisonCommand) async throws -> DesignComparisonDetail
 
     // Exploration Operations over the configured device automation provider.
     // A Host without an automation provider rejects these routes with

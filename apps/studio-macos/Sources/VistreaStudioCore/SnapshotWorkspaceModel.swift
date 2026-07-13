@@ -97,6 +97,28 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isLinkingWikiNode = false
     @Published public private(set) var canvasLinkError: String?
 
+    // Canvas identity curation state.
+    @Published public private(set) var mergeSelectionStateIDs: [String] = []
+    @Published public private(set) var isMergingStates = false
+    @Published public private(set) var isSplittingState = false
+    @Published public private(set) var curationError: String?
+    @Published public private(set) var graphConflictNote: String?
+
+    // Design comparison workbench state.
+    @Published public private(set) var designReferencesPhase: EventTimelinePhase = .idle
+    @Published public private(set) var designReferences: [DesignReferenceDetail] = []
+    @Published public private(set) var selectedDesignReferenceID: String?
+    @Published public private(set) var selectedDesignReference: DesignReferenceDetail?
+    @Published public private(set) var designReferencePhase: SnapshotDetailPhase = .idle
+    @Published public private(set) var designAssetData: Data?
+    @Published public private(set) var designAssetPhase: ScreenshotEvidencePhase = .none
+    @Published public private(set) var designComparisons: [DesignComparisonDetail] = []
+    @Published public private(set) var designComparisonsPhase: EventTimelinePhase = .idle
+    @Published public private(set) var designComparison: DesignComparisonDetail?
+    @Published public private(set) var isComparingDesign = false
+    @Published public private(set) var designComparisonError: String?
+    @Published public private(set) var selectedDifferenceID: String?
+
     // Exploration Operation state (device automation Host capability).
     @Published public private(set) var explorationOperationID: String?
     @Published public private(set) var explorationState: String?
@@ -120,6 +142,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     private var wikiEditGeneration = 0
     private var canvasStateGeneration = 0
     private var explorationGeneration = 0
+    private var designReferencesGeneration = 0
+    private var designReferenceGeneration = 0
+    private var designComparisonsGeneration = 0
     // The Screen Graph identity the Canvas last loaded, so a finished
     // exploration can refresh the same graph.
     private var lastCanvasProjectID: String?
@@ -267,6 +292,11 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             canvasGraph = graph
             canvasStates = CanvasLayout.positions(for: graph)
             canvasPhase = graph.states.isEmpty ? .empty : .content
+            // Only states that are still active can stay merge-selected
+            // after a reload.
+            mergeSelectionStateIDs = mergeSelectionStateIDs.filter { stateID in
+                graph.states.contains(where: { $0.id == stateID && $0.isActive })
+            }
         } catch {
             guard generation == canvasGeneration else {
                 return
@@ -688,6 +718,322 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         await loadRelatedWikiNodes(stateID: stateID, generation: canvasStateGeneration)
     }
 
+    // MARK: - Canvas identity curation
+
+    /// The observation IDs of the selected Canvas state, from the loaded
+    /// graph document. A split moves a strict subset of these.
+    public var selectedCanvasStateObservationIDs: [String] {
+        guard let stateID = selectedCanvasStateID,
+              let state = canvasGraph?.states.first(where: { $0.id == stateID })
+        else {
+            return []
+        }
+        return state.observationIDs
+    }
+
+    /// Toggles one active state in or out of the merge selection. Merged,
+    /// split, and deprecated tombstones are never selectable.
+    public func toggleMergeSelection(stateID: String) {
+        guard let state = canvasGraph?.states.first(where: { $0.id == stateID }), state.isActive else {
+            return
+        }
+        if let index = mergeSelectionStateIDs.firstIndex(of: stateID) {
+            mergeSelectionStateIDs.remove(at: index)
+        } else {
+            mergeSelectionStateIDs.append(stateID)
+        }
+    }
+
+    public func clearMergeSelection() {
+        mergeSelectionStateIDs = []
+    }
+
+    /// Merges the selected states into the chosen survivor, guarded by the
+    /// loaded graph revision. A revision conflict reloads the graph and
+    /// leaves a changed-elsewhere note. Returns true when the merge
+    /// persisted.
+    public func mergeSelectedStates(into survivorID: String?, justification: String?) async -> Bool {
+        guard !isMergingStates,
+              mergeSelectionStateIDs.count >= 2,
+              let graph = canvasGraph,
+              let projectID = lastCanvasProjectID,
+              let applicationID = lastCanvasApplicationID
+        else {
+            return false
+        }
+        isMergingStates = true
+        curationError = nil
+        graphConflictNote = nil
+        defer { isMergingStates = false }
+        do {
+            _ = try await client.mergeScreenStates(
+                MergeScreenStatesCommand(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    stateIDs: mergeSelectionStateIDs,
+                    intoStateID: survivorID,
+                    expectedGraphRevision: graph.revision,
+                    mergedBy: .studio,
+                    justification: justification
+                )
+            )
+        } catch {
+            await handleCurationFailure(
+                error,
+                projectID: projectID,
+                applicationID: applicationID
+            )
+            return false
+        }
+        mergeSelectionStateIDs = []
+        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        return true
+    }
+
+    /// Splits the given observations out of the selected state, guarded by
+    /// the loaded graph revision. The moved set must be a strict subset.
+    /// Returns true when the split persisted.
+    public func splitSelectedState(
+        observationIDs: [String],
+        title: String?,
+        justification: String?
+    ) async -> Bool {
+        guard !isSplittingState,
+              let stateID = selectedCanvasStateID,
+              let graph = canvasGraph,
+              let projectID = lastCanvasProjectID,
+              let applicationID = lastCanvasApplicationID
+        else {
+            return false
+        }
+        let available = selectedCanvasStateObservationIDs
+        guard !observationIDs.isEmpty,
+              observationIDs.count < available.count,
+              observationIDs.allSatisfy(available.contains)
+        else {
+            curationError = "Select at least one observation and leave at least one behind."
+            return false
+        }
+        isSplittingState = true
+        curationError = nil
+        graphConflictNote = nil
+        defer { isSplittingState = false }
+        do {
+            _ = try await client.splitScreenState(
+                SplitScreenStateCommand(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    stateID: stateID,
+                    observationIDs: observationIDs,
+                    title: title,
+                    expectedGraphRevision: graph.revision,
+                    splitBy: .studio,
+                    justification: justification
+                )
+            )
+        } catch {
+            await handleCurationFailure(
+                error,
+                projectID: projectID,
+                applicationID: applicationID
+            )
+            return false
+        }
+        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await selectCanvasState(id: stateID)
+        return true
+    }
+
+    public func dismissCurationError() {
+        curationError = nil
+        graphConflictNote = nil
+    }
+
+    private func handleCurationFailure(
+        _ error: Error,
+        projectID: String,
+        applicationID: String
+    ) async {
+        if Self.isConflict(error) {
+            graphConflictNote =
+                "The Screen Graph changed elsewhere. The latest graph has been reloaded; review it before retrying."
+            await loadCanvas(projectID: projectID, applicationID: applicationID)
+        } else {
+            curationError = Self.message(for: error)
+        }
+    }
+
+    // MARK: - Design comparison workbench
+
+    /// The drawable overlay regions of the shown comparison, resolved
+    /// against the selected Snapshot. Empty when the Snapshot changed since
+    /// the comparison ran or carries no screenshot.
+    public var differenceRegions: [DifferenceRegion] {
+        guard let comparison = designComparison,
+              let snapshot = selectedSnapshot,
+              comparison.targetSnapshotID == snapshot.id
+        else {
+            return []
+        }
+        return DesignOverlayProjection.regions(
+            for: comparison,
+            tree: snapshot.tree,
+            screenshot: snapshot.screenshot
+        )
+    }
+
+    /// Reloads the persisted design references.
+    public func loadDesignReferences() async {
+        designReferencesGeneration += 1
+        let generation = designReferencesGeneration
+        designReferencesPhase = .loading
+        do {
+            let page = try await client.listDesignReferences()
+            guard generation == designReferencesGeneration else {
+                return
+            }
+            designReferences = page.items
+            designReferencesPhase = designReferences.isEmpty ? .empty : .content
+        } catch {
+            guard generation == designReferencesGeneration else {
+                return
+            }
+            designReferences = []
+            designReferencesPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    /// Selects one design reference, loads its persisted document, then its
+    /// asset bytes, then the past comparisons against the selected Snapshot.
+    public func selectDesignReference(id: String?) async {
+        designReferenceGeneration += 1
+        let generation = designReferenceGeneration
+        selectedDesignReferenceID = id
+        selectedDesignReference = nil
+        designAssetData = nil
+        designAssetPhase = .none
+        designComparison = nil
+        selectedDifferenceID = nil
+        designComparisonError = nil
+        guard let id else {
+            designReferencePhase = .idle
+            designComparisons = []
+            designComparisonsPhase = .idle
+            return
+        }
+        designReferencePhase = .loading
+        do {
+            let reference = try await client.getDesignReference(id: id)
+            guard generation == designReferenceGeneration else {
+                return
+            }
+            selectedDesignReference = reference
+            designReferencePhase = .content
+        } catch {
+            guard generation == designReferenceGeneration else {
+                return
+            }
+            designReferencePhase = .failure(Self.message(for: error))
+            return
+        }
+        await loadDesignAsset(generation: generation)
+        await loadDesignComparisons()
+    }
+
+    /// Reloads the persisted comparisons for the selected reference and
+    /// Snapshot.
+    public func loadDesignComparisons() async {
+        designComparisonsGeneration += 1
+        let generation = designComparisonsGeneration
+        designComparisonsPhase = .loading
+        do {
+            let page = try await client.listDesignComparisons(
+                designReferenceID: selectedDesignReferenceID,
+                targetSnapshotID: selectedSnapshotID
+            )
+            guard generation == designComparisonsGeneration else {
+                return
+            }
+            designComparisons = page.items
+            designComparisonsPhase = designComparisons.isEmpty ? .empty : .content
+        } catch {
+            guard generation == designComparisonsGeneration else {
+                return
+            }
+            designComparisons = []
+            designComparisonsPhase = .failure(Self.message(for: error))
+        }
+    }
+
+    /// Runs one design comparison of the selected reference against the
+    /// selected Snapshot and shows the persisted result.
+    public func runDesignComparison(includePixel: Bool) async {
+        guard !isComparingDesign else {
+            return
+        }
+        guard let referenceID = selectedDesignReferenceID, let snapshotID = selectedSnapshotID else {
+            designComparisonError = "Select a design reference and a Runtime Snapshot to compare."
+            return
+        }
+        isComparingDesign = true
+        designComparisonError = nil
+        defer { isComparingDesign = false }
+        do {
+            let comparison = try await client.runDesignComparison(
+                DesignComparisonCommand(
+                    designReferenceID: referenceID,
+                    targetSnapshotID: snapshotID,
+                    includePixel: includePixel ? true : nil,
+                    completedBy: .studio
+                )
+            )
+            designComparison = comparison
+            selectedDifferenceID = nil
+        } catch {
+            designComparisonError = Self.message(for: error)
+            return
+        }
+        await loadDesignComparisons()
+    }
+
+    /// Shows one previously persisted comparison from the list.
+    public func selectDesignComparison(id: String) {
+        guard let comparison = designComparisons.first(where: { $0.id == id }) else {
+            return
+        }
+        designComparison = comparison
+        selectedDifferenceID = nil
+    }
+
+    /// Highlights one difference of the shown comparison.
+    public func selectDifference(id: String?) {
+        guard let id else {
+            selectedDifferenceID = nil
+            return
+        }
+        guard designComparison?.differences.contains(where: { $0.id == id }) == true else {
+            return
+        }
+        selectedDifferenceID = id
+    }
+
+    /// Steps the difference selection for review mode, wrapping at both
+    /// ends. Without a current selection the first (or last) difference is
+    /// selected.
+    public func advanceDifferenceSelection(by step: Int) {
+        guard let comparison = designComparison, !comparison.differences.isEmpty else {
+            return
+        }
+        let ids = comparison.differences.map(\.differenceID)
+        guard let current = selectedDifferenceID, let index = ids.firstIndex(of: current) else {
+            selectedDifferenceID = step >= 0 ? ids.first : ids.last
+            return
+        }
+        let count = ids.count
+        let next = ((index + step) % count + count) % count
+        selectedDifferenceID = ids[next]
+    }
+
     // MARK: - Exploration Operations (device automation Host capability)
 
     /// Starts one background exploration Operation and polls it to a
@@ -941,6 +1287,35 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             }
             screenshotData = nil
             screenshotPhase = .unavailable(Self.message(for: error))
+        }
+    }
+
+    /// Loads the selected design reference's asset bytes through the Object
+    /// route. Failures degrade to inline text; the workbench never invents
+    /// image bytes.
+    private func loadDesignAsset(generation: Int) async {
+        guard let reference = selectedDesignReference else {
+            return
+        }
+        designAssetPhase = .loading
+        do {
+            let data = try await client.getObject(hash: reference.artifact.object.hash, range: nil)
+            guard generation == designReferenceGeneration else {
+                return
+            }
+            guard !data.isEmpty else {
+                designAssetData = nil
+                designAssetPhase = .unavailable("The design asset Object is empty.")
+                return
+            }
+            designAssetData = data
+            designAssetPhase = .available
+        } catch {
+            guard generation == designReferenceGeneration else {
+                return
+            }
+            designAssetData = nil
+            designAssetPhase = .unavailable(Self.message(for: error))
         }
     }
 
