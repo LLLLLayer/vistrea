@@ -23,6 +23,7 @@ export {
 } from "./automation-engine.js";
 export {
   AdbAutomationProvider,
+  parseDisplayInteractive,
   type AdbAutomationProviderOptions,
 } from "./adb-provider.js";
 export {

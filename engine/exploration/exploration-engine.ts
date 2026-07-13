@@ -373,7 +373,9 @@ export class ExplorationEngine {
       },
     });
     if (result.outcome === "blocked" || result.outcome === "failed") {
-      throw new DataError("conflict", "An exploration action did not execute.", {
+      // The provider's own words explain the refusal (a locked display, an
+      // unsafe input) far better than the outcome word alone.
+      throw new DataError("conflict", `An exploration action did not execute: ${result.detail}`, {
         details: { outcome: result.outcome, kind: action.kind },
       });
     }

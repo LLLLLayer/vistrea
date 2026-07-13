@@ -17,6 +17,7 @@ import {
   type AutomationProviderPort,
   type ProviderActionCommand,
   type ProviderActionResult,
+  parseDisplayInteractive,
 } from "../../engine/automation/index.js";
 
 const repositoryRoot = process.cwd();
@@ -314,4 +315,19 @@ test("automation enforces risk policy, confirmation binding, and session lifecyc
     engine.listProviders().map((descriptor) => descriptor.provider_id),
     ["scripted"],
   );
+});
+
+test("display interactivity judgment refuses locked and sleeping screens", () => {
+  const awake = "mWakefulness=Awake";
+  const asleep = "mWakefulness=Asleep";
+  const unlocked = "isKeyguardShowing=false\n  mCurrentFocus=Window{a1 u0 dev.vistrea.demo.debug/dev.vistrea.demo.MainActivity}";
+  const keyguard = "isKeyguardShowing=true\n  mCurrentFocus=Window{b2 u0 NotificationShade}";
+  const keyguardFocus = "isKeyguardShowing=false\n  mCurrentFocus=Window{c3 u0 Keyguard}";
+
+  assert.equal(parseDisplayInteractive(unlocked, awake).interactive, true);
+  assert.equal(parseDisplayInteractive(keyguard, awake).interactive, false);
+  assert.match(parseDisplayInteractive(keyguard, awake).reason, /keyguard is showing/);
+  assert.equal(parseDisplayInteractive(unlocked, asleep).interactive, false);
+  assert.match(parseDisplayInteractive(unlocked, asleep).reason, /display is asleep/);
+  assert.equal(parseDisplayInteractive(keyguardFocus, awake).interactive, false);
 });

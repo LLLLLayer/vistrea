@@ -58,6 +58,20 @@ export class AdbAutomationProvider implements AutomationProviderPort {
     options?: { readonly signal?: AbortSignal },
   ): Promise<ProviderActionResult> {
     this.#assertAuthorization(command);
+    // A locked or sleeping display swallows injected input while in-process
+    // capture keeps answering, so every action would be recorded against a
+    // screen the user cannot see — a real device locked mid-walk once turned
+    // a cart tap into a plausible-looking self-transition. Refuse instead.
+    const interactive = parseDisplayInteractive(
+      await this.#shell(["dumpsys", "window"], options),
+      await this.#shell(["dumpsys", "power"], options),
+    );
+    if (!interactive.interactive) {
+      return {
+        outcome: "failed",
+        detail: `The device display is not interactive (${interactive.reason}); unlock and wake it, then retry.`,
+      };
+    }
     switch (command.kind) {
       case "tap": {
         const point = await this.#pixelPoint(command, options);
@@ -269,4 +283,27 @@ export class AdbAutomationProvider implements AutomationProviderPort {
 
 function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+/**
+ * Judges whether injected input can reach the application, from the same
+ * dumpsys surfaces the platform exposes. Pure so the judgment is testable
+ * without a device: a keyguard on screen or a non-awake display means taps
+ * land on the system, not the app.
+ */
+export function parseDisplayInteractive(
+  windowDump: string,
+  powerDump: string,
+): { interactive: boolean; reason: string } {
+  const wakefulness = /mWakefulness=(\w+)/.exec(powerDump)?.[1];
+  if (wakefulness !== undefined && wakefulness !== "Awake") {
+    return { interactive: false, reason: `display is ${wakefulness.toLowerCase()}` };
+  }
+  if (/isKeyguardShowing=true|mKeyguardShowing=true/.test(windowDump)) {
+    return { interactive: false, reason: "the keyguard is showing" };
+  }
+  if (/mCurrentFocus=Window\{[^}]*Keyguard/i.test(windowDump)) {
+    return { interactive: false, reason: "the keyguard holds input focus" };
+  }
+  return { interactive: true, reason: "awake and unlocked" };
 }
