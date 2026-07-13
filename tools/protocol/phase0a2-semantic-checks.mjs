@@ -179,9 +179,55 @@ export function checkScreenGraph(graph) {
   // transition endpoints. A decision in the graph grants an output state the
   // observations it names, and a superseded tombstone resolves to its
   // surviving states for endpoint comparisons.
+  // Only a tombstone can hand its evidence or endpoints to a survivor. An
+  // active state still deduplicates new captures, so following its
+  // supersession chain would let a live screen's evidence explain a different
+  // screen.
+  const statesById = new Map(graph.states.map((state) => [state.screen_state_id, state]));
+  const resolvesToState = (fromStateId, toStateId, seen = new Set()) => {
+    if (fromStateId === toStateId) {
+      return true;
+    }
+    if (seen.has(fromStateId)) {
+      return false;
+    }
+    seen.add(fromStateId);
+    const from = statesById.get(fromStateId);
+    if (from === undefined || from.status === "active") {
+      return false;
+    }
+    return (from.superseded_by_state_ids ?? []).some((nextId) =>
+      resolvesToState(nextId, toStateId, seen),
+    );
+  };
+
+  // A curation decision may move observation membership, but only along the
+  // lineage it actually describes: the observation must have been captured
+  // from one of the decision's input states (directly or through the
+  // supersession chain), and only a merge or a split may move membership at
+  // all. Anything looser would let a fabricated decision launder one state's
+  // evidence onto another.
   const decisionGrants = new Map();
+  const transitionRedirects = new Map();
   for (const decision of graph.identity_decisions) {
+    for (const coalesced of decision.extensions?.["vistrea.coalesced_transitions"] ?? []) {
+      transitionRedirects.set(coalesced.from_transition_id, coalesced.to_transition_id);
+    }
+    if (decision.kind !== "merge" && decision.kind !== "split") {
+      continue;
+    }
     for (const observationId of decision.observation_ids) {
+      const observation = graph.observations.find(
+        (candidate) => candidate.observation_id === observationId,
+      );
+      const capturedFrom =
+        observation?.screen_state_id ?? observation?.source_state_id ?? undefined;
+      if (
+        capturedFrom === undefined ||
+        !decision.input_state_ids.some((inputId) => resolvesToState(capturedFrom, inputId))
+      ) {
+        continue;
+      }
       let granted = decisionGrants.get(observationId);
       if (!granted) {
         granted = new Set();
@@ -192,29 +238,69 @@ export function checkScreenGraph(graph) {
       }
     }
   }
-  const supersededBy = new Map(
-    graph.states.map((state) => [
-      state.screen_state_id,
-      state.superseded_by_state_ids ?? [],
-    ]),
-  );
-  const resolvesToState = (fromStateId, toStateId, seen = new Set()) => {
-    if (fromStateId === toStateId) {
-      return true;
+  const resolveTransitionId = (transitionId, seen = new Set()) => {
+    if (seen.has(transitionId)) {
+      return transitionId;
     }
-    if (seen.has(fromStateId)) {
-      return false;
-    }
-    seen.add(fromStateId);
-    return (supersededBy.get(fromStateId) ?? []).some((nextId) =>
-      resolvesToState(nextId, toStateId, seen),
-    );
+    seen.add(transitionId);
+    const next = transitionRedirects.get(transitionId);
+    return next === undefined ? transitionId : resolveTransitionId(next, seen);
   };
   const observationReferencesState = (observation, stateId) =>
     observation.screen_state_id === stateId ||
     observation.source_state_id === stateId ||
     observation.target_state_id === stateId ||
     decisionGrants.get(observation.observation_id)?.has(stateId) === true;
+
+  // A curation decision must describe a shape that could have happened: a
+  // merge collapses its inputs into one of them, and a split keeps its input
+  // and adds states. Without this, a fabricated decision could grant one
+  // state's evidence to an unrelated state it never produced.
+  for (const [index, decision] of graph.identity_decisions.entries()) {
+    const inputs = new Set(decision.input_state_ids);
+    const outputs = new Set(decision.output_state_ids);
+    if (
+      decision.kind === "merge" &&
+      decision.output_state_ids.some((stateId) => !inputs.has(stateId))
+    ) {
+      issues.push(
+        issue(
+          "graph_identity_decision_shape_invalid",
+          `/identity_decisions/${index}/output_state_ids`,
+          "A merge must survive as one of the states it merged.",
+        ),
+      );
+    }
+    if (
+      decision.kind === "split" &&
+      decision.input_state_ids.some((stateId) => !outputs.has(stateId))
+    ) {
+      issues.push(
+        issue(
+          "graph_identity_decision_shape_invalid",
+          `/identity_decisions/${index}/output_state_ids`,
+          "A split must keep the state it split among its outputs.",
+        ),
+      );
+    }
+  }
+
+  // An active state must not claim supersession: status and lineage are one
+  // statement, and a graph that says both would be lying about one of them.
+  for (const [index, state] of graph.states.entries()) {
+    if (
+      state.status === "active" &&
+      (state.superseded_by_state_ids ?? []).length > 0
+    ) {
+      issues.push(
+        issue(
+          "graph_active_state_superseded",
+          `/states/${index}/superseded_by_state_ids`,
+          "An active Screen State cannot declare superseding states.",
+        ),
+      );
+    }
+  }
 
   if (graph.context.observation_time_range) {
     checkTimeOrder(
@@ -370,7 +456,7 @@ export function checkScreenGraph(graph) {
         );
       } else if (
         observation.kind !== "transition" ||
-        observation.transition_id !== transition.transition_id ||
+        resolveTransitionId(observation.transition_id) !== transition.transition_id ||
         observation.action_id !== transition.action_id ||
         !resolvesToState(observation.source_state_id, transition.source_state_id) ||
         !resolvesToState(observation.target_state_id, transition.target_state_id)
@@ -529,15 +615,23 @@ export function checkScreenGraph(graph) {
       );
     }
 
-    for (const [field, collection, code] of [
+    for (const [field, collection, code, resolve] of [
       ["screen_state_id", states, "graph_dangling_state_reference"],
       ["source_state_id", states, "graph_dangling_state_reference"],
       ["target_state_id", states, "graph_dangling_state_reference"],
-      ["transition_id", transitions, "graph_dangling_transition_reference"],
+      // Immutable evidence keeps naming the transition it was captured for;
+      // a merge that coalesced that transition records where it went.
+      ["transition_id", transitions, "graph_dangling_transition_reference", resolveTransitionId],
       ["action_id", actions, "graph_dangling_action_reference"],
       ["supersedes_observation_id", observations, "graph_dangling_observation_reference"],
     ]) {
-      if (observation[field] !== undefined && !collection.has(observation[field])) {
+      const value =
+        observation[field] === undefined
+          ? undefined
+          : resolve === undefined
+            ? observation[field]
+            : resolve(observation[field]);
+      if (value !== undefined && !collection.has(value)) {
         issues.push(
           issue(code, `/observations/${index}/${field}`, `${field} does not exist in the graph.`),
         );
@@ -601,8 +695,17 @@ export function checkScreenGraph(graph) {
       }
     }
     if (observation.kind === "transition") {
-      const transition = transitions.get(observation.transition_id);
-      if (transition && !transition.observation_ids.includes(observation.observation_id)) {
+      const resolvedTransitionId = resolveTransitionId(observation.transition_id);
+      const transition = transitions.get(resolvedTransitionId);
+      if (transition === undefined) {
+        issues.push(
+          issue(
+            "graph_dangling_transition_reference",
+            `/observations/${index}/transition_id`,
+            "A transition Observation must name a Transition the graph still holds.",
+          ),
+        );
+      } else if (!transition.observation_ids.includes(observation.observation_id)) {
         issues.push(
           issue(
             "graph_transition_observation_mismatch",

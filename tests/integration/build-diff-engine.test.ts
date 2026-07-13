@@ -330,31 +330,70 @@ test("a tagged baseline classifies removals as regressions or expected", async (
     baseline_tag: "release/1.0",
   });
   validator.assert(PROTOCOL_SCHEMA_IDS.buildDiff, diff);
+  // A vanished screen has no right-build subject, so every entry stays an
+  // honest `removed`; the baseline verdict rides in the extension.
   assert.deepEqual(diff["summary"], {
     total: 5,
     added: 2,
-    removed: 1,
+    removed: 3,
     changed: 0,
-    regressed: 2,
+    regressed: 0,
     improved: 0,
   });
   assert.deepEqual((diff["extensions"] as JsonObject)["vistrea.baseline"], {
     tag: "release/1.0",
   });
   const entries = diff["entries"] as readonly JsonObject[];
-  const regressedState = entries.find(
-    (entry) =>
-      entry["kind"] === "regressed" &&
-      (entry["left_subject"] as JsonObject | undefined)?.["kind"] === "screen_state",
+  const classification = (entry: JsonObject): unknown =>
+    ((entry["extensions"] as JsonObject)["vistrea.baseline"] as JsonObject | undefined)?.[
+      "classification"
+    ];
+  const regressions = entries.filter((entry) => classification(entry) === "regression");
+  assert.equal(regressions.length, 2);
+  const regressedState = regressions.find(
+    (entry) => (entry["left_subject"] as JsonObject | undefined)?.["kind"] === "screen_state",
   ) as JsonObject;
-  assert.equal(
-    (regressedState["right_subject"] as JsonObject)["version"],
-    "tag:release/1.0",
-  );
+  assert.equal(regressedState["kind"], "removed");
+  assert.equal(regressedState["severity"], "error");
+  assert.equal(regressedState["right_subject"], undefined);
   assert.match(regressedState["summary"] as string, /baseline/);
-  const expectedRemoval = entries.find((entry) => entry["kind"] === "removed") as JsonObject;
-  assert.match(expectedRemoval["summary"] as string, /Experiment/);
-  assert.equal(expectedRemoval["right_subject"], undefined);
+  const expected = entries.filter((entry) => classification(entry) === "expected");
+  assert.equal(expected.length, 1);
+  assert.match(expected[0]?.["summary"] as string, /Experiment/);
+  assert.equal((expected[0] as JsonObject)["severity"], "warning");
+
+  // Curation must not manufacture or hide regressions. Merging the vanished
+  // experiment into the surviving Home leaves a tombstone: it is history, not
+  // coverage, so it must stop being reported at all.
+  const graphNow = graphEngine.getGraph(graphQuery);
+  const experiment = graphNow.states.find(
+    (state) => (state as unknown as JsonObject)["title"] === "Experiment",
+  ) as unknown as JsonObject;
+  const homeState = graphNow.states.find(
+    (state) => (state as unknown as JsonObject)["title"] === "Home",
+  ) as unknown as JsonObject;
+  graphEngine.mergeScreenStates({
+    ...graphQuery,
+    state_ids: [
+      homeState["screen_state_id"] as string,
+      experiment["screen_state_id"] as string,
+    ],
+    into_state_id: homeState["screen_state_id"] as string,
+    expected_graph_revision: graphNow.revision,
+    merged_by: { kind: "human", id: "curator-1", extensions: {} },
+  });
+  const afterMerge = engine.compareBuilds({
+    ...graphQuery,
+    left_build_id: LEFT_BUILD,
+    right_build_id: RIGHT_BUILD,
+    baseline_tag: "release/1.0",
+  });
+  const merged = (afterMerge["entries"] as readonly JsonObject[]).filter(
+    (entry) =>
+      (entry["left_subject"] as JsonObject | undefined)?.["id"] ===
+      experiment["screen_state_id"],
+  );
+  assert.deepEqual(merged, []);
 
   // An unknown baseline tag fails closed instead of classifying nothing.
   await assert.rejects(

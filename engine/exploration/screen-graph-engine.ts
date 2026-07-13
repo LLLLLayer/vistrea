@@ -496,7 +496,10 @@ export class ScreenGraphEngine {
       // action): they are one transition now, so coalesce them instead of
       // leaving a duplicate whose occurrences no future observation reaches.
       const transitionsByKey = new Map<string, JsonObject>();
-      const droppedTransitionIds = new Set<string>();
+      // Observations are immutable evidence: a coalesced transition records
+      // where its dropped twin went, and the shared semantic rules resolve
+      // observation ownership through that record.
+      const coalescedTransitions: JsonObject[] = [];
       const coalesced: JsonObject[] = [];
       for (const transition of graph.transitions) {
         const key = (transition["extensions"] as JsonObject)["vistrea.transition_key"];
@@ -528,42 +531,34 @@ export class ScreenGraphEngine {
         };
         transitionsByKey.set(key as string, survivingTransition);
         coalesced[coalesced.indexOf(existing)] = survivingTransition;
-        droppedTransitionIds.add(transition["transition_id"] as string);
+        coalescedTransitions.push({
+          from_transition_id: transition["transition_id"] as string,
+          to_transition_id: existing["transition_id"] as string,
+        });
       }
       graph.transitions = coalesced;
-      // Observations of a dropped transition must name the surviving one, or
-      // the graph would carry dangling transition references.
-      graph.observations = graph.observations.map((observation) => {
-        if (
-          observation["kind"] !== "transition" ||
-          !droppedTransitionIds.has(observation["transition_id"] as string)
-        ) {
-          return observation;
-        }
-        const owner = graph.transitions.find((transition) =>
-          (transition["observation_ids"] as readonly string[]).includes(
-            observation["observation_id"] as string,
-          ),
-        ) as JsonObject;
-        return {
-          ...observation,
-          transition_id: owner["transition_id"] as string,
-          source_state_id: owner["source_state_id"] as string,
-          target_state_id: owner["target_state_id"] as string,
-        };
-      });
 
       graph.entry_state_ids = uniqueStrings(
         graph.entry_state_ids.map((stateId) => (absorbedIds.has(stateId) ? targetId : stateId)),
       );
 
-      graph.identity_decisions.push(decision);
-      unit.screenGraph.storeIdentityDecision(decision as never);
+      const recordedDecision: JsonObject =
+        coalescedTransitions.length === 0
+          ? decision
+          : {
+              ...decision,
+              extensions: {
+                ...(decision["extensions"] as JsonObject),
+                "vistrea.coalesced_transitions": coalescedTransitions,
+              },
+            };
+      graph.identity_decisions.push(recordedDecision);
+      unit.screenGraph.storeIdentityDecision(recordedDecision as never);
       const persisted = this.#persistGraph(unit, graph);
       return {
         screen_graph_id: persisted.screen_graph_id,
         graph_revision: persisted.revision,
-        decision,
+        decision: recordedDecision,
         state: persisted.states.find(
           (state) => state.screen_state_id === targetId,
         ) as ScreenState,
@@ -635,6 +630,31 @@ export class ScreenGraphEngine {
       });
 
       const movedTimes = movedObservations.map(observationWallTime);
+      // When the moved observations all share one structure that the source
+      // only answers to because a merge aliased it, the split gives that
+      // digest back: the merge becomes reversible and future captures of that
+      // structure land on the new state instead of the source. Otherwise the
+      // structures are genuinely identical, no rule can tell them apart, and
+      // the new state stays manual — future identical captures return to the
+      // source, which is the honest outcome.
+      const movedDigests = new Set(
+        movedObservations.map((observation) =>
+          ScreenGraphEngine.computeStructuralIdentity(
+            this.#getSnapshot(
+              unit,
+              (observation["snapshot_ids"] as readonly string[])[0] as string,
+            ),
+          ).layout_digest,
+        ),
+      );
+      const sourceIdentity = source["identity"] as JsonObject;
+      const sourceAliases = ((sourceIdentity["extensions"] as JsonObject)[
+        "vistrea.alias_layout_digests"
+      ] as readonly string[] | undefined) ?? [];
+      const reclaimedDigest =
+        movedDigests.size === 1 && sourceAliases.includes([...movedDigests][0] as string)
+          ? ([...movedDigests][0] as string)
+          : undefined;
       const newState: JsonObject = {
         screen_state_id: newStateId,
         protocol_version: PROTOCOL_VERSION,
@@ -644,7 +664,15 @@ export class ScreenGraphEngine {
         status: "active",
         canonical_snapshot_id: firstSnapshotId(movedObservations),
         observation_ids: movedIds,
-        identity: { strategy: "manual", manual_key: decisionId, extensions: {} },
+        identity:
+          reclaimedDigest === undefined
+            ? { strategy: "manual", manual_key: decisionId, extensions: {} }
+            : {
+                strategy: "structural",
+                layout_digest: reclaimedDigest,
+                normalization_profile: IDENTITY_PROFILE,
+                extensions: {},
+              },
         first_seen: minimumTimestamp(movedTimes),
         last_seen: maximumTimestamp(movedTimes),
         ...(observationBuilds(movedObservations).length === 0
@@ -660,9 +688,22 @@ export class ScreenGraphEngine {
           (observation) => observation["snapshot_ids"] as readonly string[],
         ),
       );
+      const remainingAliases = sourceAliases.filter((digest) => digest !== reclaimedDigest);
       this.#replaceState(graph, {
         ...source,
         revision: (source["revision"] as number) + 1,
+        identity: {
+          ...sourceIdentity,
+          extensions: {
+            ...withoutKey(
+              sourceIdentity["extensions"] as JsonObject,
+              "vistrea.alias_layout_digests",
+            ),
+            ...(remainingAliases.length === 0
+              ? {}
+              : { "vistrea.alias_layout_digests": remainingAliases }),
+          },
+        },
         observation_ids: remainingIds,
         canonical_snapshot_id: remainingSnapshots.has(
           source["canonical_snapshot_id"] as string,
@@ -1075,6 +1116,11 @@ function defaultStateTitle(identity: StructuralIdentity): string {
     return root;
   }
   return `Screen ${identity.layout_digest.slice("sha256:".length, "sha256:".length + 8)}`;
+}
+
+function withoutKey(value: JsonObject, key: string): JsonObject {
+  const { [key]: _removed, ...rest } = value;
+  return rest;
 }
 
 function observationWallTime(observation: JsonObject): string {

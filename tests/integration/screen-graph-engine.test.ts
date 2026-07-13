@@ -495,12 +495,26 @@ test("merging states that share an action coalesces the duplicate transition", a
     (transition) => (transition["extensions"] as JsonObject)["vistrea.transition_key"],
   );
   assert.equal(new Set(keys).size, keys.length);
-  // Every transition observation names the surviving transition.
-  for (const observation of graph.observations as readonly JsonObject[]) {
-    if (observation["kind"] === "transition") {
-      assert.equal(observation["transition_id"], survivor["transition_id"]);
-    }
-  }
+  // Evidence is immutable: the observations still name the transition they
+  // were captured for, and the decision records where the coalesced one went.
+  const transitionObservations = (graph.observations as readonly JsonObject[]).filter(
+    (observation) => observation["kind"] === "transition",
+  );
+  assert.equal(
+    transitionObservations.some(
+      (observation) => observation["transition_id"] !== survivor["transition_id"],
+    ),
+    true,
+  );
+  const mergeDecision = (graph.identity_decisions as readonly JsonObject[]).find(
+    (decision) => decision["kind"] === "merge",
+  ) as JsonObject;
+  assert.deepEqual((mergeDecision["extensions"] as JsonObject)["vistrea.coalesced_transitions"], [
+    {
+      from_transition_id: toB.transition.transition_id,
+      to_transition_id: survivor["transition_id"],
+    },
+  ]);
 
   // A later observation of the same action accumulates on the survivor.
   const repeat = engine.recordTransitionObservation({
@@ -511,6 +525,92 @@ test("merging states that share an action coalesces the duplicate transition", a
   assert.equal(repeat.created, false);
   assert.equal(repeat.transition["occurrence_count"], 3);
   assert.equal(engine.getGraph(graphQuery).transitions.length, 1);
+});
+
+test("splitting a wrongly merged structure gives its identity back", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const home = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000f1");
+  const variant = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000f2",
+  );
+  const variantAgain = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000f3",
+  );
+  persistSnapshots(workspace, [home, variant, variantAgain]);
+  const runtimeContext = home["runtime_context"] as JsonObject;
+  const graphQuery = {
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+  };
+
+  const homeState = engine.recordStateObservation({
+    snapshot_id: home["snapshot_id"] as string,
+    title: "Home",
+    entry: true,
+  });
+  const variantState = engine.recordStateObservation({
+    snapshot_id: variant["snapshot_id"] as string,
+    title: "Home with banner",
+  });
+
+  // A curator merges them, then realizes they are genuinely different screens.
+  const beforeMerge = engine.getGraph(graphQuery);
+  engine.mergeScreenStates({
+    ...graphQuery,
+    state_ids: [
+      homeState.screen_state.screen_state_id,
+      variantState.screen_state.screen_state_id,
+    ],
+    into_state_id: homeState.screen_state.screen_state_id,
+    expected_graph_revision: beforeMerge.revision,
+    merged_by: CURATOR,
+  });
+  const merged = engine.getGraph(graphQuery);
+  const survivor = merged.states.find(
+    (state) => state.screen_state_id === homeState.screen_state.screen_state_id,
+  ) as unknown as JsonObject;
+  assert.equal(
+    (
+      ((survivor["identity"] as JsonObject)["extensions"] as JsonObject)[
+        "vistrea.alias_layout_digests"
+      ] as readonly string[]
+    ).length,
+    1,
+  );
+
+  // Splitting the merged observations back out reclaims the aliased digest,
+  // so the merge is reversible and future captures of that structure land on
+  // the restored state instead of the survivor.
+  const split = engine.splitScreenState({
+    ...graphQuery,
+    state_id: homeState.screen_state.screen_state_id,
+    observation_ids: [variantState.observation_id],
+    title: "Home with banner",
+    expected_graph_revision: merged.revision,
+    split_by: CURATOR,
+  });
+  const restoredIdentity = split.state["identity"] as JsonObject;
+  assert.equal(restoredIdentity["strategy"], "structural");
+  assert.match(restoredIdentity["layout_digest"] as string, /^sha256:[0-9a-f]{64}$/);
+
+  const afterSplit = engine.getGraph(graphQuery);
+  const restoredSource = afterSplit.states.find(
+    (state) => state.screen_state_id === homeState.screen_state.screen_state_id,
+  ) as unknown as JsonObject;
+  assert.equal(
+    ((restoredSource["identity"] as JsonObject)["extensions"] as JsonObject)[
+      "vistrea.alias_layout_digests"
+    ],
+    undefined,
+  );
+
+  const reobserved = engine.recordStateObservation({
+    snapshot_id: variantAgain["snapshot_id"] as string,
+  });
+  assert.equal(reobserved.created, false);
+  assert.equal(reobserved.screen_state.screen_state_id, split.state.screen_state_id);
 });
 
 test("manual split separates observations into a manual-identity state", async () => {

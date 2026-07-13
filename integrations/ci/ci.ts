@@ -102,7 +102,10 @@ export async function runVistreaCiGate(
       };
       if (options.baselineTag !== undefined) {
         const regressions = (diff["entries"] as readonly JsonObject[]).filter(
-          (entry) => entry["kind"] === "regressed",
+          (entry) =>
+            ((entry["extensions"] as JsonObject)["vistrea.baseline"] as JsonObject | undefined)?.[
+              "classification"
+            ] === "regression",
         );
         report["build_regressions"] = regressions.map((entry) => ({
           entry_id: entry["entry_id"],

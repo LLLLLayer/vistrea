@@ -344,6 +344,24 @@
       ]
     },
     {
+      "path": "graph/invalid/merge-survivor-outside-inputs.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": [
+        "graph_identity_decision_shape_invalid"
+      ]
+    },
+    {
+      "path": "graph/invalid/active-state-superseded.json",
+      "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
+      "expectation": "semantic-invalid",
+      "semantic_kind": "screen-graph",
+      "expected_semantic_codes": [
+        "graph_active_state_superseded"
+      ]
+    },
+    {
       "path": "graph/invalid/dangling-state-reference.json",
       "schema_id": "https://vistrea.dev/schema/v1/graph.schema.json",
       "expectation": "semantic-invalid",

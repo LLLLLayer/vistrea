@@ -22,7 +22,6 @@ const TAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 interface BaselineCoverage {
   readonly tag: string;
   readonly stateIds: ReadonlySet<string>;
-  readonly stateDigests: ReadonlySet<string>;
   readonly stateIdByDigest: ReadonlyMap<string, string>;
   readonly transitionIds: ReadonlySet<string>;
   readonly transitionIdByKey: ReadonlyMap<string, string>;
@@ -167,22 +166,14 @@ export class BuildDiffEngine {
       throw error;
     }
     const stateIds = new Set<string>();
-    const stateDigests = new Set<string>();
     const stateIdByDigest = new Map<string, string>();
     for (const state of frozen.states as readonly JsonObject[]) {
+      if ((state["status"] as string) !== "active") {
+        continue;
+      }
       const stateId = state["screen_state_id"] as string;
       stateIds.add(stateId);
-      const identity = state["identity"] as JsonObject;
-      const digests = [
-        ...(identity["layout_digest"] === undefined
-          ? []
-          : [identity["layout_digest"] as string]),
-        ...(((identity["extensions"] as JsonObject)["vistrea.alias_layout_digests"] as
-          | readonly string[]
-          | undefined) ?? []),
-      ];
-      for (const digest of digests) {
-        stateDigests.add(digest);
+      for (const digest of identityDigests(state)) {
         if (!stateIdByDigest.has(digest)) {
           stateIdByDigest.set(digest, stateId);
         }
@@ -198,7 +189,7 @@ export class BuildDiffEngine {
         transitionIdByKey.set(key, transitionId);
       }
     }
-    return { tag, stateIds, stateDigests, stateIdByDigest, transitionIds, transitionIdByKey };
+    return { tag, stateIds, stateIdByDigest, transitionIds, transitionIdByKey };
   }
 
   #stateEntries(
@@ -209,6 +200,12 @@ export class BuildDiffEngine {
     const now = this.#workspace.clock.now();
     const entries: JsonObject[] = [];
     for (const state of graph.states as readonly JsonObject[]) {
+      // Merged and split tombstones are history, not coverage: their evidence
+      // now lives on the surviving state, so reporting them would manufacture
+      // a removal that curation itself can never clear.
+      if ((state["status"] as string) !== "active") {
+        continue;
+      }
       const seen = (state["seen_in_build_ids"] ?? []) as readonly string[];
       const inLeft = seen.includes(command.left_build_id);
       const inRight = seen.includes(command.right_build_id);
@@ -220,19 +217,17 @@ export class BuildDiffEngine {
         id: state["screen_state_id"] as string,
         version: inLeft ? command.left_build_id : command.right_build_id,
       };
-      const identity = state["identity"] as JsonObject;
       const baselineStateId =
         !inLeft || baseline === undefined
           ? undefined
-          : baseline.stateIds.has(state["screen_state_id"] as string)
-            ? (state["screen_state_id"] as string)
-            : identity["layout_digest"] !== undefined
-              ? baseline.stateIdByDigest.get(identity["layout_digest"] as string)
-              : undefined;
+          : this.#baselineStateFor(graph, state, baseline);
       const regressed = baselineStateId !== undefined;
       entries.push({
         entry_id: this.#ids.next("diffentry"),
-        kind: regressed ? "regressed" : inLeft ? "removed" : "added",
+        // A vanished screen has no right-build subject, so the entry stays an
+        // honest `removed`; the baseline verdict rides in the extension the
+        // gate reads, never in a subject field bent to satisfy the schema.
+        kind: inLeft ? "removed" : "added",
         domains: ["behavioral", "structural"],
         severity: regressed ? "error" : inLeft ? "warning" : "info",
         summary: regressed
@@ -240,18 +235,7 @@ export class BuildDiffEngine {
           : inLeft
             ? `The Screen State "${state["title"] as string}" was observed in the left build but never in the right build.`
             : `The Screen State "${state["title"] as string}" appears only in the right build.`,
-        ...(regressed
-          ? {
-              left_subject: subject,
-              right_subject: {
-                kind: "screen_state",
-                id: baselineStateId,
-                version: `tag:${(baseline as BaselineCoverage).tag}`,
-              },
-            }
-          : inLeft
-            ? { left_subject: subject }
-            : { right_subject: subject }),
+        ...(inLeft ? { left_subject: subject } : { right_subject: subject }),
         evidence: [
           {
             evidence_id: this.#ids.next("evidence"),
@@ -263,10 +247,46 @@ export class BuildDiffEngine {
             extensions: {},
           },
         ],
-        extensions: {},
+        extensions: baselineExtensions(baseline, baselineStateId, regressed, inLeft),
       });
     }
     return entries;
+  }
+
+  /**
+   * The baseline state this live state stands for: by identity, by any digest
+   * it carries (merges alias absorbed digests onto the survivor), or — for a
+   * manual identity produced by a split — through the curation decision that
+   * created it, since the split content was baseline coverage of its source.
+   */
+  #baselineStateFor(
+    graph: ScreenGraph,
+    state: JsonObject,
+    baseline: BaselineCoverage,
+  ): string | undefined {
+    const stateId = state["screen_state_id"] as string;
+    if (baseline.stateIds.has(stateId)) {
+      return stateId;
+    }
+    for (const digest of identityDigests(state)) {
+      const matched = baseline.stateIdByDigest.get(digest);
+      if (matched !== undefined) {
+        return matched;
+      }
+    }
+    const manualKey = (state["identity"] as JsonObject)["manual_key"];
+    if (typeof manualKey !== "string") {
+      return undefined;
+    }
+    const decision = (graph["identity_decisions"] as readonly JsonObject[]).find(
+      (candidate) => candidate["state_identity_decision_id"] === manualKey,
+    );
+    for (const inputId of (decision?.["input_state_ids"] ?? []) as readonly string[]) {
+      if (baseline.stateIds.has(inputId)) {
+        return inputId;
+      }
+    }
+    return undefined;
   }
 
   #transitionEntries(
@@ -323,7 +343,7 @@ export class BuildDiffEngine {
       const regressed = baselineTransitionId !== undefined;
       entries.push({
         entry_id: this.#ids.next("diffentry"),
-        kind: regressed ? "regressed" : inLeft ? "removed" : "added",
+        kind: inLeft ? "removed" : "added",
         domains: ["behavioral"],
         severity: regressed ? "error" : inLeft ? "warning" : "info",
         summary: regressed
@@ -331,18 +351,7 @@ export class BuildDiffEngine {
           : inLeft
             ? `The transition from "${sourceTitle}" to "${targetTitle}" was observed in the left build but never in the right build.`
             : `The transition from "${sourceTitle}" to "${targetTitle}" appears only in the right build.`,
-        ...(regressed
-          ? {
-              left_subject: subject,
-              right_subject: {
-                kind: "transition",
-                id: baselineTransitionId,
-                version: `tag:${(baseline as BaselineCoverage).tag}`,
-              },
-            }
-          : inLeft
-            ? { left_subject: subject }
-            : { right_subject: subject }),
+        ...(inLeft ? { left_subject: subject } : { right_subject: subject }),
         evidence: [
           {
             evidence_id: this.#ids.next("evidence"),
@@ -354,7 +363,7 @@ export class BuildDiffEngine {
             extensions: {},
           },
         ],
-        extensions: {},
+        extensions: baselineExtensions(baseline, baselineTransitionId, regressed, inLeft),
       });
     }
     return entries;
@@ -375,4 +384,34 @@ export class BuildDiffEngine {
       throw error;
     }
   }
+}
+
+/** Every layout digest a state answers to, including merge aliases. */
+function identityDigests(state: JsonObject): readonly string[] {
+  const identity = state["identity"] as JsonObject;
+  return [
+    ...(identity["layout_digest"] === undefined ? [] : [identity["layout_digest"] as string]),
+    ...(((identity["extensions"] as JsonObject)["vistrea.alias_layout_digests"] as
+      | readonly string[]
+      | undefined) ?? []),
+  ];
+}
+
+/** The baseline verdict a gate reads: the entry's kind stays observation-honest. */
+function baselineExtensions(
+  baseline: BaselineCoverage | undefined,
+  baselineSubjectId: string | undefined,
+  regressed: boolean,
+  inLeft: boolean,
+): JsonObject {
+  if (baseline === undefined || !inLeft) {
+    return {};
+  }
+  return {
+    "vistrea.baseline": {
+      tag: baseline.tag,
+      classification: regressed ? "regression" : "expected",
+      ...(baselineSubjectId === undefined ? {} : { baseline_subject_id: baselineSubjectId }),
+    },
+  };
 }
