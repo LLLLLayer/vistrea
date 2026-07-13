@@ -47,6 +47,13 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // The workspace itself is going away, so the exploration poll loop is
+        // torn down here — never on a tab switch. The Host-side Operation
+        // keeps running and stays cancellable from the next session.
+        model.stopExplorationPolling()
+    }
 }
 
 private enum StudioComposition {
