@@ -24,6 +24,18 @@ import { SecureUuidV7IdGenerator } from "../design/index.js";
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const IDENTITY_PROFILE = { kind: "identity_profile", id: "structural-v1" } as const;
 
+/**
+ * Capture limitations that make a Snapshot unusable as Screen State evidence.
+ *
+ * `structural-v1` hashes the captured tree, so a tree that omits content which
+ * is really on screen does not identify the screen — it identifies the capture
+ * condition. Admitting one would split a single screen into two Screen States
+ * that appear and disappear with an unrelated runtime, and every downstream
+ * merge, diff, and baseline would inherit that lie. These Snapshots are still
+ * persisted as evidence; they simply may not enter the graph.
+ */
+const IDENTITY_UNSAFE_LIMITATION_CODES = new Set(["ios.capture.content-not-observable"]);
+
 export const SCREEN_STATE_KINDS = ["screen", "modal", "overlay", "transient"] as const;
 export const OBSERVATION_CAPTURE_SOURCES = [
   "sdk",
@@ -1072,8 +1084,9 @@ export class ScreenGraphEngine {
   }
 
   #getSnapshot(unit: DataUnitOfWork, snapshotId: string): RuntimeSnapshot {
+    let snapshot: RuntimeSnapshot;
     try {
-      return unit.snapshots.get(snapshotId);
+      snapshot = unit.snapshots.get(snapshotId);
     } catch (error) {
       if (isDataError(error) && error.code === "not_found") {
         throw new DataError("invalid_argument", "The referenced Snapshot is not persisted.", {
@@ -1082,6 +1095,27 @@ export class ScreenGraphEngine {
       }
       throw error;
     }
+    const unsafe = (
+      (snapshot as unknown as JsonObject)["capture_limitations"] as
+        | readonly JsonObject[]
+        | undefined
+    )?.filter((limitation) =>
+      IDENTITY_UNSAFE_LIMITATION_CODES.has(limitation["code"] as string),
+    );
+    if (unsafe !== undefined && unsafe.length > 0) {
+      throw new DataError(
+        "invalid_argument",
+        "The Snapshot reports content the capture could not observe, so its structure identifies " +
+          "the capture condition rather than the screen. Recapture with the content observable.",
+        {
+          details: {
+            snapshot_id: snapshotId,
+            codes: unsafe.map((limitation) => limitation["code"] as string),
+          },
+        },
+      );
+    }
+    return snapshot;
   }
 
   #read<T>(operation: (unit: DataUnitOfWork) => T): T {

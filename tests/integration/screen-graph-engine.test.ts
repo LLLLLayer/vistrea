@@ -678,3 +678,59 @@ test("manual split separates observations into a manual-identity state", async (
   assert.equal(repeat.created, false);
   assert.equal(repeat.screen_state.screen_state_id, sourceStateId);
 });
+
+test("a capture that could not observe its content never enters the graph", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const observable = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000f1");
+  // A dormant SwiftUI accessibility runtime yields a tree missing the content
+  // that is really on screen. Its structure identifies the capture condition,
+  // not the screen, so admitting it would split one screen into two states.
+  const dormant = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000f2");
+  dormant["trees"] = structuredClone(withExtraNode(base)["trees"]);
+  dormant["capture_limitations"] = [
+    {
+      code: "ios.capture.content-not-observable",
+      severity: "warning",
+      message: "The hosted content vends no accessibility elements.",
+      retryable: false,
+      extensions: {},
+    },
+  ];
+  persistSnapshots(workspace, [observable, dormant]);
+
+  const accepted = engine.recordStateObservation({
+    snapshot_id: observable["snapshot_id"] as string,
+    entry: true,
+  });
+  assert.equal(accepted.created, true);
+
+  assert.throws(
+    () =>
+      engine.recordStateObservation({
+        snapshot_id: dormant["snapshot_id"] as string,
+      }),
+    (error: unknown) =>
+      isDataError(error) &&
+      error.code === "invalid_argument" &&
+      (error.details as JsonObject | undefined)?.["codes"] !== undefined,
+  );
+
+  // A transition endpoint mints a Screen State too, so the gate must hold there.
+  assert.throws(
+    () =>
+      engine.recordTransitionObservation({
+        before_snapshot_id: observable["snapshot_id"] as string,
+        after_snapshot_id: dormant["snapshot_id"] as string,
+        action: { kind: "tap", target_stable_id: "demo.home.root" } as never,
+      }),
+    (error: unknown) => isDataError(error) && error.code === "invalid_argument",
+  );
+
+  const graph = engine.getGraph({
+    project_id: (observable["runtime_context"] as JsonObject)["project_id"] as string,
+    application_id: (observable["runtime_context"] as JsonObject)["application_id"] as string,
+  });
+  assert.equal(graph.states.length, 1);
+  assert.equal(graph.observations.length, 1);
+  assert.equal(graph.transitions.length, 0);
+});
