@@ -41,7 +41,7 @@ import {
 } from "../../engine/exploration/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
-import { PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
+import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -1193,9 +1193,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         yield bytes;
       }
     })();
+    // Metadata must match exportPack's exactly: the same deterministic bytes
+    // re-exported later would otherwise conflict on immutable metadata.
     const pack = await context.objects.put(stream, {
       media_type: PACK_MEDIA_TYPE,
       compression: "none",
+      logical_name: PACK_LOGICAL_NAME,
     });
     if (pack.byte_size === 0) {
       throw invalidArgument("An empty pack upload is not a valid container.");

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import https from "node:https";
 import { test, type TestContext } from "node:test";
 
 import {
@@ -78,9 +80,9 @@ test("push and fetch move commits through the optional Hub and never force refs"
   const hubParty = await makeParty(t, "hub");
   const hub = await startHubServer({
     host: "127.0.0.1",
-    projectId: PROJECT_ID,
-    workspace: hubParty.workspace,
-    objects: hubParty.objects,
+    projects: [
+      { project_id: PROJECT_ID, workspace: hubParty.workspace, objects: hubParty.objects },
+    ],
     validator,
   });
   t.after(() => hub.close());
@@ -174,4 +176,125 @@ test("push and fetch move commits through the optional Hub and never force refs"
     (advancedStatus.remote_refs[0] as unknown as JsonObject)["commit_id"],
     second.commitId,
   );
+});
+
+test("the Hub isolates project namespaces and enforces read-only tokens", async (t) => {
+  const validator = await validatorPromise;
+  const PROJECT_B = "project_019f0000-0000-7000-8000-000000000002";
+  const partyA = await makeParty(t, "multi-a");
+  const partyB = await makeParty(t, "multi-b");
+  const hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [
+      { project_id: PROJECT_ID, workspace: partyA.workspace, objects: partyA.objects },
+      { project_id: PROJECT_B, workspace: partyB.workspace, objects: partyB.objects },
+    ],
+    validator,
+  });
+  t.after(() => hub.close());
+
+  const author = await makeParty(t, "multi-author");
+  const seeded = await seedCommit(author, "Record the multi-project graph.", '{"screens":["a"]}');
+  const remoteA = { baseUrl: hub.baseUrl, bearerToken: hub.bearerToken, projectId: PROJECT_ID };
+  const remoteB = { baseUrl: hub.baseUrl, bearerToken: hub.bearerToken, projectId: PROJECT_B };
+
+  const pushed = await author.sync.push({
+    remote: remoteA,
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+  assert.deepEqual(pushed.import.imported_commit_ids, [seeded.commitId]);
+
+  // Project B sees none of project A's refs.
+  const isolated = await author.sync.listRemoteRefs(remoteB);
+  assert.deepEqual(isolated.remote_refs, []);
+  const visible = await author.sync.listRemoteRefs(remoteA);
+  assert.equal(visible.remote_refs.length, 1);
+
+  // The read-only token reads and exports but can never mutate.
+  const readOnlyRemote = { ...remoteA, bearerToken: hub.readOnlyToken };
+  const readListing = await author.sync.listRemoteRefs(readOnlyRemote);
+  assert.equal(readListing.remote_refs.length, 1);
+  const reader = await makeParty(t, "multi-reader");
+  const fetched = await reader.sync.fetch({
+    remote: readOnlyRemote,
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+  assert.deepEqual(fetched.imported_commit_ids, [seeded.commitId]);
+  await assert.rejects(
+    author.sync.push({ remote: readOnlyRemote, ref_names: [REF_NAME], created_by: ACTOR }),
+    (error: unknown) =>
+      isDataError(error, "internal") &&
+      (error as { details: JsonObject }).details["hub_error_code"] === "forbidden",
+  );
+
+  // A garbage token stays unauthenticated regardless of role.
+  const forbidden = await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`, {
+    headers: { authorization: `Bearer ${"x".repeat(43)}` },
+  });
+  assert.equal(forbidden.status, 401);
+});
+
+test("the Hub serves TLS when configured and refuses non-loopback plain HTTP", async (t) => {
+  const validator = await validatorPromise;
+  const party = await makeParty(t, "tls");
+
+  // Plain HTTP must never leave the machine.
+  await assert.rejects(
+    startHubServer({
+      host: "0.0.0.0",
+      projects: [
+        { project_id: PROJECT_ID, workspace: party.workspace, objects: party.objects },
+      ],
+      validator,
+    }),
+    (error: unknown) => isDataError(error, "invalid_argument"),
+  );
+
+  // A self-signed pair generated for this test only; skip when openssl is
+  // unavailable rather than pretending TLS was proven.
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-tls-"));
+  t.after(async () => fs.rm(directory, { recursive: true, force: true }));
+  const keyPath = path.join(directory, "key.pem");
+  const certPath = path.join(directory, "cert.pem");
+  const generated = spawnSync(
+    "openssl",
+    [
+      "req", "-x509", "-newkey", "rsa:2048", "-keyout", keyPath, "-out", certPath,
+      "-days", "2", "-nodes", "-subj", "/CN=127.0.0.1",
+      "-addext", "subjectAltName=IP:127.0.0.1",
+    ],
+    { stdio: "ignore" },
+  );
+  if (generated.status !== 0) {
+    t.skip("openssl is unavailable for TLS certificate generation");
+    return;
+  }
+
+  const hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [
+      { project_id: PROJECT_ID, workspace: party.workspace, objects: party.objects },
+    ],
+    validator,
+    tls: { certificatePath: certPath, privateKeyPath: keyPath },
+  });
+  t.after(() => hub.close());
+  assert.match(hub.baseUrl, /^https:/);
+
+  const certificate = await fs.readFile(certPath);
+  const status = await new Promise<number>((resolve, reject) => {
+    const request = https.request(
+      `${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`,
+      { ca: certificate, headers: { authorization: `Bearer ${hub.bearerToken}` } },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
+  assert.equal(status, 200);
 });

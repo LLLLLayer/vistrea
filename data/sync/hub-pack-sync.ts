@@ -8,9 +8,12 @@ import {
   type Ref,
   type WorkspaceDataSource,
 } from "../api/index.js";
-import { PACK_MEDIA_TYPE, PackExchangeService } from "../exchange/index.js";
+import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../exchange/index.js";
 
-const LOOPBACK_URL_PATTERN = /^http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost):[0-9]{1,5}$/;
+// Plain HTTP stays loopback-only so the bearer token never leaves the
+// machine unencrypted; HTTPS remotes may live anywhere.
+const REMOTE_URL_PATTERN =
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9.\-]{1,255}):[0-9]{1,5}$/;
 const MAXIMUM_PACK_BYTES = 256 * 1024 * 1024;
 
 export interface HubRemote {
@@ -185,7 +188,7 @@ export class HubPackSync {
       (async function* () {
         yield packBytes;
       })(),
-      { media_type: PACK_MEDIA_TYPE, compression: "none" },
+      { media_type: PACK_MEDIA_TYPE, compression: "none", logical_name: PACK_LOGICAL_NAME },
     );
     this.#workspace.registerVerifiedObjects([pack]);
     return await this.#exchange.importPack({ pack });
@@ -212,10 +215,10 @@ export class HubPackSync {
     body: Buffer | undefined,
     contentType: string,
   ): Promise<Buffer> {
-    if (!LOOPBACK_URL_PATTERN.test(remote.baseUrl)) {
+    if (!REMOTE_URL_PATTERN.test(remote.baseUrl)) {
       throw new DataError(
         "invalid_argument",
-        "The Hub remote must be an explicit loopback HTTP origin in this slice.",
+        "The Hub remote must be a loopback HTTP origin or an HTTPS origin.",
       );
     }
     const route = `${remote.baseUrl}/v1/projects/${encodeURIComponent(remote.projectId)}/${resource}`;

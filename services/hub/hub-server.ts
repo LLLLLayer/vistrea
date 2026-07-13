@@ -1,6 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import http, { type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import https from "node:https";
 
 import {
   DataError,
@@ -10,7 +12,7 @@ import {
   type ProtocolValidator,
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
-import { PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
+import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
 
 const TOKEN_BYTES = 32;
 const MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
@@ -18,30 +20,51 @@ const MAXIMUM_PACK_BYTES = 256 * 1024 * 1024;
 const PROJECT_ID_PATTERN =
   /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export type HubBindAddress = "127.0.0.1" | "::1";
+export type HubBindAddress = string;
 
-export interface StartHubServerOptions {
-  /** The Hub is optional infrastructure; it binds loopback-only for now. */
-  readonly host: HubBindAddress;
-  readonly port?: number;
-  /**
-   * The single project this Hub instance serves in the first slice. Requests
-   * for any other project fail with `not_found` instead of being silently
-   * remapped.
-   */
-  readonly projectId: string;
+export interface HubProject {
+  readonly project_id: string;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
+}
+
+export interface HubTlsConfig {
+  /** PEM certificate chain path; read once at startup. */
+  readonly certificatePath: string;
+  /** PEM private key path; read once at startup and never logged. */
+  readonly privateKeyPath: string;
+}
+
+export interface StartHubServerOptions {
+  /**
+   * Plain HTTP binds loopback-only because the bearer token would otherwise
+   * travel unencrypted; TLS unlocks non-loopback interfaces for cross-team
+   * collaboration.
+   */
+  readonly host: HubBindAddress;
+  readonly port?: number;
+  /** Every served project namespace; requests outside them fail `not_found`. */
+  readonly projects: readonly HubProject[];
   readonly validator: ProtocolValidator;
+  readonly tls?: HubTlsConfig;
 }
 
 export interface HubServerHandle {
   readonly host: HubBindAddress;
   readonly port: number;
   readonly baseUrl: string;
-  /** Generated once for this server lifetime and never persisted. */
+  /** Read-write token, generated once for this server lifetime and never persisted. */
   readonly bearerToken: string;
+  /** Read-only token: refs listing/resolution and pack export only. */
+  readonly readOnlyToken: string;
   close(): Promise<void>;
+}
+
+type HubRole = "read-write" | "read-only";
+
+interface HubProjectRuntime {
+  readonly project: HubProject;
+  readonly exchange: PackExchangeService;
 }
 
 interface PublicError {
@@ -69,13 +92,37 @@ class HubRequestError extends Error implements PublicError {
  * without it.
  */
 export async function startHubServer(options: StartHubServerOptions): Promise<HubServerHandle> {
-  if (!PROJECT_ID_PATTERN.test(options.projectId)) {
-    throw new DataError("invalid_argument", "The Hub project identifier is invalid.");
+  if (options.projects.length === 0) {
+    throw new DataError("invalid_argument", "The Hub serves at least one project.");
   }
-  // Callers can cast arbitrary strings into HubBindAddress; the bearer token
-  // travels as plain HTTP, so refuse any non-loopback interface at runtime.
-  if (options.host !== "127.0.0.1" && options.host !== "::1") {
-    throw new DataError("invalid_argument", "The Hub binds loopback interfaces only.");
+  const projects = new Map<string, HubProjectRuntime>();
+  for (const project of options.projects) {
+    if (!PROJECT_ID_PATTERN.test(project.project_id)) {
+      throw new DataError("invalid_argument", "A Hub project identifier is invalid.");
+    }
+    if (projects.has(project.project_id)) {
+      throw new DataError("invalid_argument", "Hub project identifiers must be unique.");
+    }
+    projects.set(project.project_id, {
+      project,
+      exchange: new PackExchangeService({
+        data: project.workspace,
+        objects: project.objects,
+        validator: options.validator,
+      }),
+    });
+  }
+  // A plain-HTTP bearer token must never leave the machine; TLS unlocks
+  // other interfaces because the token then travels encrypted.
+  const loopback = options.host === "127.0.0.1" || options.host === "::1";
+  if (options.tls === undefined && !loopback) {
+    throw new DataError(
+      "invalid_argument",
+      "The Hub binds loopback interfaces only without TLS.",
+    );
+  }
+  if (!/^[A-Za-z0-9.:\-]{1,255}$/.test(options.host)) {
+    throw new DataError("invalid_argument", "The Hub bind address is invalid.");
   }
   if (
     options.port !== undefined &&
@@ -83,19 +130,27 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
   ) {
     throw new DataError("invalid_argument", "The Hub port must be an integer from 0 through 65535.");
   }
-  const exchange = new PackExchangeService({
-    data: options.workspace,
-    objects: options.objects,
-    validator: options.validator,
-  });
   const bearerToken = randomBytes(TOKEN_BYTES).toString("base64url");
+  const readOnlyToken = randomBytes(TOKEN_BYTES).toString("base64url");
   const bearerDigest = digestToken(bearerToken);
+  const readOnlyDigest = digestToken(readOnlyToken);
 
-  const server = http.createServer({ maxHeaderSize: 16 * 1024 }, (request, response) => {
-    void handleRequest(request, response, options, exchange, bearerDigest).catch(
+  const handler = (request: IncomingMessage, response: ServerResponse): void => {
+    void handleRequest(request, response, projects, bearerDigest, readOnlyDigest).catch(
       (error: unknown) => sendError(response, error),
     );
-  });
+  };
+  const server: Server =
+    options.tls === undefined
+      ? http.createServer({ maxHeaderSize: 16 * 1024 }, handler)
+      : https.createServer(
+          {
+            maxHeaderSize: 16 * 1024,
+            cert: readFileSync(options.tls.certificatePath),
+            key: readFileSync(options.tls.privateKeyPath),
+          },
+          handler,
+        );
   server.requestTimeout = 30_000;
   server.headersTimeout = 10_000;
 
@@ -108,11 +163,13 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
   }
 
   let closed = false;
+  const scheme = options.tls === undefined ? "http" : "https";
   return {
     host: options.host,
     port: address.port,
-    baseUrl: `http://${options.host === "::1" ? `[${options.host}]` : options.host}:${address.port}`,
+    baseUrl: `${scheme}://${options.host === "::1" ? `[${options.host}]` : options.host}:${address.port}`,
     bearerToken,
+    readOnlyToken,
     async close(): Promise<void> {
       if (!closed) {
         closed = true;
@@ -125,12 +182,12 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
-  options: StartHubServerOptions,
-  exchange: PackExchangeService,
+  projects: ReadonlyMap<string, HubProjectRuntime>,
   bearerDigest: Buffer,
+  readOnlyDigest: Buffer,
 ): Promise<void> {
   response.setHeader("cache-control", "no-store");
-  authorize(request, bearerDigest);
+  const role = authorize(request, bearerDigest, readOnlyDigest);
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
 
@@ -143,17 +200,28 @@ async function handleRequest(
     });
   }
   const projectId = decodeURIComponent(projectMatch[1] as string);
-  if (projectId !== options.projectId) {
+  const runtime = projects.get(projectId);
+  if (runtime === undefined) {
     throw new HubRequestError({
       status: 404,
       code: "not_found",
       message: "This Hub instance does not serve the requested project.",
     });
   }
+  const exchange = runtime.exchange;
+  const workspace = runtime.project.workspace;
+  const objects = runtime.project.objects;
   const resource = projectMatch[2] as string;
+  if (role === "read-only" && (resource === "refs:update" || resource === "packs:import")) {
+    throw new HubRequestError({
+      status: 403,
+      code: "forbidden",
+      message: "A read-only Hub token cannot mutate refs or import packs.",
+    });
+  }
 
   if (resource === "refs" && request.method === "GET") {
-    const unit = options.workspace.beginUnitOfWork("read");
+    const unit = workspace.beginUnitOfWork("read");
     try {
       const page = unit.versions.listRefs();
       writeJson(response, 200, { items: page.items } as unknown as JsonObject);
@@ -173,7 +241,7 @@ async function handleRequest(
         message: "refs:resolve requires a bounded ref name.",
       });
     }
-    const unit = options.workspace.beginUnitOfWork("read");
+    const unit = workspace.beginUnitOfWork("read");
     try {
       writeJson(response, 200, unit.versions.resolveRef(name) as unknown as JsonObject);
     } finally {
@@ -202,7 +270,7 @@ async function handleRequest(
         message: "refs:update requires name, commit_id, and an explicit precondition.",
       });
     }
-    const unit = options.workspace.beginUnitOfWork("write");
+    const unit = workspace.beginUnitOfWork("write");
     try {
       const ref = unit.versions.updateRef(name, commitId, precondition as never);
       unit.commit();
@@ -237,9 +305,12 @@ async function handleRequest(
         yield bytes;
       }
     })();
-    const pack = await options.objects.put(stream, {
+    // Metadata must match exportPack's exactly: the same deterministic bytes
+    // re-exported later would otherwise conflict on immutable metadata.
+    const pack = await objects.put(stream, {
       media_type: PACK_MEDIA_TYPE,
       compression: "none",
+      logical_name: PACK_LOGICAL_NAME,
     });
     if (pack.byte_size === 0) {
       throw new HubRequestError({
@@ -248,7 +319,7 @@ async function handleRequest(
         message: "An empty pack upload is not a valid container.",
       });
     }
-    options.workspace.registerVerifiedObjects([pack]);
+    workspace.registerVerifiedObjects([pack]);
     const result = await exchange.importPack({ pack });
     writeJson(response, 201, result as unknown as JsonObject);
     return;
@@ -259,13 +330,13 @@ async function handleRequest(
     const pack = await exchange.exportPack(
       body as unknown as Parameters<PackExchangeService["exportPack"]>[0],
     );
-    options.workspace.registerVerifiedObjects([pack]);
+    workspace.registerVerifiedObjects([pack]);
     response.writeHead(200, {
       "content-type": PACK_MEDIA_TYPE,
       "content-length": String(pack.byte_size),
       etag: `"${pack.hash}"`,
     });
-    for await (const chunk of await options.objects.open(pack.hash)) {
+    for await (const chunk of await objects.open(pack.hash)) {
       response.write(chunk);
     }
     response.end();
@@ -279,20 +350,26 @@ async function handleRequest(
   });
 }
 
-function authorize(request: IncomingMessage, expectedDigest: Buffer): void {
+function authorize(
+  request: IncomingMessage,
+  readWriteDigest: Buffer,
+  readOnlyDigest: Buffer,
+): HubRole {
   const header = request.headers.authorization;
   const match =
     typeof header === "string" ? /^Bearer ([A-Za-z0-9_-]{1,1024})$/i.exec(header) : null;
   const candidate = digestToken(match?.[1] ?? "");
-  const authorized = match !== null && timingSafeEqual(candidate, expectedDigest);
+  const readWrite = match !== null && timingSafeEqual(candidate, readWriteDigest);
+  const readOnly = match !== null && timingSafeEqual(candidate, readOnlyDigest);
   candidate.fill(0);
-  if (!authorized) {
+  if (!readWrite && !readOnly) {
     throw new HubRequestError({
       status: 401,
       code: "unauthenticated",
       message: "A valid Hub bearer token is required.",
     });
   }
+  return readWrite ? "read-write" : "read-only";
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {

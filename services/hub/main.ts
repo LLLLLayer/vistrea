@@ -9,10 +9,12 @@ import { LocalDataWorkspace } from "../../data/workspace/index.js";
 import { startHubServer, type HubBindAddress } from "./hub-server.js";
 
 const USAGE =
-  "Usage: vistrea-hub --workspace <abs-path> --project <project_id> " +
-  "[--connection-file <abs-path>] [--host 127.0.0.1|::1] [--port <port>]\n";
+  "Usage: vistrea-hub (--project <project_id> --workspace <abs-path>)... " +
+  "[--connection-file <abs-path>] [--host <address>] [--port <port>] " +
+  "[--tls-cert <pem> --tls-key <pem>]\n";
 
 const values = new Map<string, string>();
+const projectPairs: { projectId: string; workspaceRoot?: string }[] = [];
 const args = process.argv.slice(2);
 for (let index = 0; index < args.length; index += 1) {
   const option = args[index];
@@ -20,26 +22,42 @@ for (let index = 0; index < args.length; index += 1) {
   if (
     option === undefined ||
     value === undefined ||
-    !["--workspace", "--project", "--connection-file", "--host", "--port"].includes(option) ||
-    values.has(option)
+    !["--workspace", "--project", "--connection-file", "--host", "--port", "--tls-cert", "--tls-key"].includes(option)
   ) {
     process.stderr.write(USAGE);
     process.exit(2);
   }
-  values.set(option, value);
+  if (option === "--project") {
+    projectPairs.push({ projectId: value });
+  } else if (option === "--workspace") {
+    const current = projectPairs[projectPairs.length - 1];
+    if (current === undefined || current.workspaceRoot !== undefined) {
+      process.stderr.write(USAGE);
+      process.exit(2);
+    }
+    current.workspaceRoot = value;
+  } else {
+    if (values.has(option)) {
+      process.stderr.write(USAGE);
+      process.exit(2);
+    }
+    values.set(option, value);
+  }
   index += 1;
 }
-const workspaceRoot = values.get("--workspace");
-const projectId = values.get("--project");
 const hostValue = values.get("--host") ?? "127.0.0.1";
 const portValue = values.get("--port") ?? "0";
+const tlsCert = values.get("--tls-cert");
+const tlsKey = values.get("--tls-key");
 if (
-  workspaceRoot === undefined ||
-  !path.isAbsolute(workspaceRoot) ||
-  projectId === undefined ||
-  (hostValue !== "127.0.0.1" && hostValue !== "::1") ||
+  projectPairs.length === 0 ||
+  projectPairs.some(
+    (pair) => pair.workspaceRoot === undefined || !path.isAbsolute(pair.workspaceRoot),
+  ) ||
   !/^(?:0|[1-9][0-9]{0,4})$/.test(portValue) ||
-  Number(portValue) > 65_535
+  Number(portValue) > 65_535 ||
+  (tlsCert === undefined) !== (tlsKey === undefined) ||
+  (tlsCert !== undefined && (!path.isAbsolute(tlsCert) || !path.isAbsolute(tlsKey as string)))
 ) {
   process.stderr.write(USAGE);
   process.exit(2);
@@ -48,14 +66,28 @@ if (
 const validator = await createRepositoryProtocolValidator({
   repositoryRoot: process.cwd(),
 });
-const workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+const openWorkspaces = [] as Awaited<ReturnType<typeof LocalDataWorkspace.open>>[];
+const projects = [] as { project_id: string; workspace: never; objects: never }[];
+for (const pair of projectPairs) {
+  const workspace = await LocalDataWorkspace.open({
+    workspaceRoot: pair.workspaceRoot as string,
+    validator,
+  });
+  openWorkspaces.push(workspace);
+  projects.push({
+    project_id: pair.projectId,
+    workspace: workspace.data as never,
+    objects: workspace.objects as never,
+  });
+}
 const hub = await startHubServer({
   host: hostValue as HubBindAddress,
   port: Number(portValue),
-  projectId,
-  workspace: workspace.data,
-  objects: workspace.objects,
+  projects,
   validator,
+  ...(tlsCert === undefined
+    ? {}
+    : { tls: { certificatePath: tlsCert, privateKeyPath: tlsKey as string } }),
 });
 
 // The rotating token travels only through a private connection descriptor,
@@ -66,7 +98,12 @@ await fs.mkdir(path.dirname(connectionFile), { recursive: true, mode: 0o700 });
 const handle = await fs.open(connectionFile, "wx", 0o600);
 try {
   await handle.writeFile(
-    `${JSON.stringify({ hub_url: hub.baseUrl, hub_token: hub.bearerToken, project_id: projectId })}\n`,
+    `${JSON.stringify({
+      hub_url: hub.baseUrl,
+      hub_token: hub.bearerToken,
+      hub_read_token: hub.readOnlyToken,
+      project_ids: projectPairs.map((pair) => pair.projectId),
+    })}\n`,
     "utf8",
   );
 } finally {
@@ -78,7 +115,9 @@ process.stdout.write(
 
 const shutdown = async (): Promise<void> => {
   await hub.close();
-  await workspace.close();
+  for (const workspace of openWorkspaces) {
+    await workspace.close();
+  }
   await fs.rm(connectionFile, { force: true });
   process.exit(0);
 };
