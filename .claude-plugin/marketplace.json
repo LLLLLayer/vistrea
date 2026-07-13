@@ -1,0 +1,14 @@
+{
+  "name": "vistrea",
+  "owner": {
+    "name": "Vistrea"
+  },
+  "plugins": [
+    {
+      "name": "vistrea-explorer",
+      "source": "./integrations/claude-plugin",
+      "description": "Explore a running iOS or Android app through Vistrea: bounded device exploration, Screen Graph curation, and canonical Runtime asset recording."
+    }
+  ],
+  "description": "Vistrea plugins: runtime UI exploration, Screen Graph curation, and canonical asset recording for native iOS and Android apps."
+}

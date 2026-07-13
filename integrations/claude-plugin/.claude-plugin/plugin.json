@@ -1,0 +1,8 @@
+{
+  "name": "vistrea-explorer",
+  "description": "Explore a running iOS or Android app through Vistrea: bounded device exploration, Screen Graph reading and curation, and canonical Runtime asset recording (Snapshots, screenshots, events, portable packs).",
+  "version": "0.1.0",
+  "author": {
+    "name": "Vistrea"
+  }
+}

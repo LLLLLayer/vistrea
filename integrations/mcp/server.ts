@@ -1146,7 +1146,133 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_cancel_exploration", "CancelExploration"],
 ]);
 
-export function createVistreaMcpServer(client: HostLocalApiClient): Server {
+/**
+ * Named tool surfaces a composition may expose. Every tool belongs to exactly
+ * one surface; `workspace` is always on because status is how an agent checks
+ * connectivity before anything else. The default exposes every surface. A
+ * deployment focused on exploration and asset recording passes
+ * `assets,exploration`, and the verification surface (design review, review
+ * issues, tuning, validators, build diffs) disappears from both the tool list
+ * and the call path — masked by configuration, not removed from the Host.
+ */
+export const VISTREA_MCP_TOOLSETS = {
+  workspace: ["vistrea_get_workspace_status"],
+  assets: [
+    "vistrea_capture_snapshot",
+    "vistrea_list_snapshots",
+    "vistrea_get_snapshot",
+    "vistrea_get_event_timeline",
+    "vistrea_get_object",
+    "vistrea_export_pack",
+    "vistrea_import_pack",
+  ],
+  exploration: [
+    "vistrea_run_exploration",
+    "vistrea_get_exploration_operation",
+    "vistrea_cancel_exploration",
+    "vistrea_observe_screen_state",
+    "vistrea_observe_transition",
+    "vistrea_get_screen_graph",
+    "vistrea_get_screen_state",
+    "vistrea_find_screen_path",
+    "vistrea_tag_graph_version",
+    "vistrea_merge_screen_states",
+    "vistrea_split_screen_state",
+  ],
+  knowledge: [
+    "vistrea_create_wiki_node",
+    "vistrea_update_wiki_node",
+    "vistrea_get_wiki_node",
+    "vistrea_search_wiki",
+    "vistrea_link_wiki_node",
+    "vistrea_unlink_wiki_node",
+    "vistrea_get_wiki_backlinks",
+    "vistrea_related_wiki_nodes",
+  ],
+  verification: [
+    "vistrea_upload_design_asset",
+    "vistrea_add_design_reference",
+    "vistrea_get_design_reference",
+    "vistrea_list_design_references",
+    "vistrea_list_design_comparisons",
+    "vistrea_map_design_region",
+    "vistrea_run_design_comparison",
+    "vistrea_get_design_comparison",
+    "vistrea_create_review_issue",
+    "vistrea_list_review_issues",
+    "vistrea_get_review_issue",
+    "vistrea_transition_review_issue",
+    "vistrea_verify_review_issue",
+    "vistrea_create_tuning_patch",
+    "vistrea_get_tuning_patch",
+    "vistrea_apply_tuning_patch",
+    "vistrea_revert_tuning_application",
+    "vistrea_get_tuning_application",
+    "vistrea_list_active_tuning",
+    "vistrea_validate_snapshot",
+    "vistrea_validate_screen_graph",
+    "vistrea_get_validation_run",
+    "vistrea_list_validation_findings",
+    "vistrea_get_validation_finding",
+    "vistrea_suppress_validation_finding",
+    "vistrea_compare_builds",
+    "vistrea_get_build_diff",
+  ],
+} as const;
+
+export type VistreaMcpToolset = keyof typeof VISTREA_MCP_TOOLSETS;
+
+// A tool without a surface would silently survive every focus configuration,
+// so an unassigned or doubly assigned tool fails the module, not the caller.
+{
+  const assigned = Object.values(VISTREA_MCP_TOOLSETS).flat();
+  const unique = new Set<string>(assigned);
+  if (
+    unique.size !== assigned.length ||
+    unique.size !== VISTREA_MCP_TOOLS.length ||
+    VISTREA_MCP_TOOLS.some((tool) => !unique.has(tool.name))
+  ) {
+    throw new Error("Every Vistrea MCP tool must belong to exactly one toolset.");
+  }
+}
+
+/**
+ * Parses the `VISTREA_MCP_TOOLSETS` environment value. Undefined or empty
+ * means every surface; anything it cannot understand fails closed rather than
+ * exposing more than the operator intended.
+ */
+export function parseMcpToolsets(value: string | undefined): VistreaMcpToolset[] | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const known = Object.keys(VISTREA_MCP_TOOLSETS);
+  const requested = value.split(",").map((entry) => entry.trim());
+  const invalid = requested.filter((entry) => !known.includes(entry));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Unknown VISTREA_MCP_TOOLSETS entries: ${invalid.join(", ")}. ` +
+        `Valid toolsets: ${known.join(", ")}.`,
+    );
+  }
+  return [...new Set([...(requested as VistreaMcpToolset[]), "workspace" as const])];
+}
+
+export interface VistreaMcpServerOptions {
+  /** Tool surfaces to expose; omitted means all of them. */
+  readonly toolsets?: readonly VistreaMcpToolset[];
+}
+
+export function createVistreaMcpServer(
+  client: HostLocalApiClient,
+  options: VistreaMcpServerOptions = {},
+): Server {
+  const enabledTools =
+    options.toolsets === undefined
+      ? new Set(VISTREA_MCP_TOOLS.map((tool) => tool.name))
+      : new Set<string>([
+          ...options.toolsets.flatMap((toolset) => VISTREA_MCP_TOOLSETS[toolset]),
+          ...VISTREA_MCP_TOOLSETS.workspace,
+        ]);
   const server = new Server(
     { name: "vistrea", version: "0.0.0" },
     {
@@ -1156,12 +1282,16 @@ export function createVistreaMcpServer(client: HostLocalApiClient): Server {
     },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [...VISTREA_MCP_TOOLS] }));
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: VISTREA_MCP_TOOLS.filter((tool) => enabledTools.has(tool.name)),
+  }));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const requestId = createCorrelationId("request");
     const traceId = createCorrelationId("trace");
     try {
-      const operation = TOOL_OPERATIONS.get(request.params.name);
+      const operation = enabledTools.has(request.params.name)
+        ? TOOL_OPERATIONS.get(request.params.name)
+        : undefined;
       if (operation === undefined) {
         throw new HostClientError("unsupported", "The requested MCP tool is not implemented.");
       }

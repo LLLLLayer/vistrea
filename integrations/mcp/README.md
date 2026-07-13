@@ -74,4 +74,18 @@ node .build/typescript/integrations/mcp/main.js
 
 Configure an MCP client with that command and pass `VISTREA_HOST_URL` plus `VISTREA_HOST_TOKEN` in its controlled environment map. The token is intentionally not a tool argument or command-line option. Stdout is reserved exclusively for MCP JSON-RPC framing; startup failures write only one generic line to stderr.
 
+## Toolset focus
+
+`VISTREA_MCP_TOOLSETS` selects which named tool surfaces the server exposes:
+`workspace`, `assets`, `exploration`, `knowledge`, and `verification`. Unset
+means every surface (the full tool list above). A focused value such as
+`assets,exploration` removes the other surfaces from both the tool list and
+the call path — a masked tool call fails closed as `unsupported`. `workspace`
+is always included, because status is how an agent checks connectivity before
+anything else. Unknown toolset names fail startup with exit code 11 and a
+message naming the valid sets; toolset names are configuration, not secrets.
+The repository's Claude Code plugin (`integrations/claude-plugin/`) uses
+`assets,exploration` to present an exploration-and-asset-recording product
+surface without the verification tools.
+
 Capture currently returns the Host endpoint's canonical `RuntimeSnapshot` synchronously; it must migrate to the catalog's `OperationRef` lifecycle when that Engine capability exists.

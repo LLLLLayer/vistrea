@@ -190,6 +190,57 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assert.equal(mcpStatus.isError, undefined);
   assert.deepEqual(mcpStatus.structuredContent, cliStatusEnvelope.data);
 
+  // A composition focused on exploration and asset recording masks the
+  // verification surface on both sides: the tools vanish from the list and a
+  // call to one fails closed instead of quietly executing.
+  const focusedTransport = new StdioClientTransport({
+    command: process.execPath,
+    args: [emittedMcpPath],
+    cwd: repositoryRoot,
+    env: { ...environment, VISTREA_MCP_TOOLSETS: "assets,exploration" },
+    stderr: "pipe",
+  });
+  const focused = new Client({ name: "vistrea-focused-adapter-test", version: "1.0.0" });
+  t.after(() => focused.close().catch(() => undefined));
+  await focused.connect(focusedTransport);
+  const focusedTools = await focused.listTools();
+  assert.deepEqual(
+    focusedTools.tools.map((tool) => tool.name).sort(),
+    [
+      "vistrea_cancel_exploration",
+      "vistrea_capture_snapshot",
+      "vistrea_export_pack",
+      "vistrea_find_screen_path",
+      "vistrea_get_event_timeline",
+      "vistrea_get_exploration_operation",
+      "vistrea_get_object",
+      "vistrea_get_screen_graph",
+      "vistrea_get_screen_state",
+      "vistrea_get_snapshot",
+      "vistrea_get_workspace_status",
+      "vistrea_import_pack",
+      "vistrea_list_snapshots",
+      "vistrea_merge_screen_states",
+      "vistrea_observe_screen_state",
+      "vistrea_observe_transition",
+      "vistrea_run_exploration",
+      "vistrea_split_screen_state",
+      "vistrea_tag_graph_version",
+    ],
+  );
+  const maskedCall = await focused.callTool({ name: "vistrea_validate_snapshot", arguments: {} });
+  assert.equal(maskedCall.isError, true);
+  assert.equal(
+    ((maskedCall.structuredContent as JsonObject)["error"] as JsonObject)["code"],
+    "unsupported",
+  );
+  const focusedStatus = await focused.callTool({
+    name: "vistrea_get_workspace_status",
+    arguments: {},
+  });
+  assert.equal(focusedStatus.isError, undefined);
+  await focused.close();
+
   const cliCapture = await runCli(["snapshot", "capture"], environment);
   assert.equal(cliCapture.exitCode, 0);
   assert.equal(cliCapture.stderr, "");
