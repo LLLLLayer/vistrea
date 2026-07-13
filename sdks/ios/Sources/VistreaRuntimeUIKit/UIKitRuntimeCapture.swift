@@ -371,8 +371,34 @@ public final class UIKitRuntimeCaptureAdapter {
                 continue
             }
             let parentID = item.parentPath.flatMap { idsByPath[$0] }
-            let childIDs = item.view.subviews.indices.compactMap {
+            var childIDs = item.view.subviews.indices.compactMap {
                 idsByPath["\(item.path).\($0)"]
+            }
+            // SwiftUI hosting views (and other accessibility containers)
+            // expose their semantic content as non-view accessibility
+            // elements; synthesize real child nodes from them instead of
+            // stopping at the opaque container view.
+            var elementNodes: [UiNode] = []
+            var elementRootIDs: [NodeID] = []
+            let elements = Self.synthesizableAccessibilityElements(of: item.view)
+            if !elements.isEmpty {
+                var visited: Set<ObjectIdentifier> = [ObjectIdentifier(item.view)]
+                let controller = Self.owningViewController(for: item.view)
+                    .map { String(reflecting: type(of: $0)) }
+                elementRootIDs = try captureAccessibilityElementNodes(
+                    elements: elements,
+                    window: window,
+                    treeID: treeID,
+                    snapshotID: snapshotID,
+                    parentID: nodeID,
+                    parentPath: item.path,
+                    controller: controller,
+                    depth: 1,
+                    visited: &visited,
+                    nodes: &elementNodes,
+                    limitations: &limitations
+                )
+                childIDs.append(contentsOf: elementRootIDs)
             }
             nodes.append(
                 try captureNode(
@@ -382,9 +408,11 @@ public final class UIKitRuntimeCaptureAdapter {
                     nodeID: nodeID,
                     parentID: parentID,
                     childIDs: childIDs,
+                    hostsSynthesizedElements: !elementRootIDs.isEmpty,
                     limitations: &limitations
                 )
             )
+            nodes.append(contentsOf: elementNodes)
         }
         guard let rootNodeID = idsByPath["0"] else {
             throw UIKitRuntimeCaptureError.noVisibleWindow
@@ -399,6 +427,7 @@ public final class UIKitRuntimeCaptureAdapter {
         nodeID: NodeID,
         parentID: NodeID?,
         childIDs: [NodeID],
+        hostsSynthesizedElements: Bool,
         limitations: inout [CaptureLimitation]
     ) throws -> UiNode {
         let frame = view.convert(view.bounds, to: window)
@@ -451,6 +480,15 @@ public final class UIKitRuntimeCaptureAdapter {
             controller: Self.owningViewController(for: view).map { String(reflecting: type(of: $0)) },
             component: String(reflecting: type(of: view))
         )
+        var extensionValues: [String: JSONValue] = [:]
+        if view === window {
+            extensionValues["ios.uikit.window_level"] = .number(Double(window.windowLevel.rawValue))
+        }
+        if hostsSynthesizedElements {
+            // Provenance: child nodes below this view were synthesized from
+            // the accessibility tree, not observed as UIView subviews.
+            extensionValues["ios.capture.semantics_source"] = .string("accessibility")
+        }
 
         return try UiNode(
             nodeID: nodeID,
@@ -482,9 +520,216 @@ public final class UIKitRuntimeCaptureAdapter {
             sourceContext: sourceContext,
             relatedNodes: [],
             captureLimitations: [],
-            extensions: view === window
-                ? try Extensions(["ios.uikit.window_level": .number(Double(window.windowLevel.rawValue))])
-                : .empty
+            extensions: extensionValues.isEmpty ? .empty : try Extensions(extensionValues)
+        )
+    }
+
+    /// Bounds for the synthesized accessibility-element walk. Unlike UIView
+    /// subview trees, accessibility containers are arbitrary object graphs
+    /// that may nest deeply or reference each other, so the walk carries its
+    /// own explicit depth and breadth limits plus a cycle guard.
+    private static let accessibilityElementDepthLimit = 16
+    private static let accessibilityElementCountLimit = 128
+
+    /// Returns the non-view accessibility elements a container exposes.
+    ///
+    /// Views that are themselves accessibility elements are leaves of the
+    /// accessibility tree and stay captured exactly as before. UIView-typed
+    /// elements are excluded because the subview walk already captures them;
+    /// only synthetic elements (UIAccessibilityElement, SwiftUI accessibility
+    /// nodes, and similar NSObjects) need synthesized nodes.
+    private static func synthesizableAccessibilityElements(of container: NSObject) -> [NSObject] {
+        guard !container.isAccessibilityElement else {
+            return []
+        }
+        if let declared = container.accessibilityElements {
+            return declared.compactMap { $0 as? NSObject }.filter { !($0 is UIView) }
+        }
+        let count = container.accessibilityElementCount()
+        guard count != NSNotFound, count > 0 else {
+            return []
+        }
+        // Enumerate one element past the walk's breadth limit at most, so an
+        // absurd declared count cannot stall capture; the walk itself records
+        // the omission limitation when the extra element goes unused.
+        return (0..<min(count, Self.accessibilityElementCountLimit + 1))
+            .compactMap { container.accessibilityElement(at: $0) as? NSObject }
+            .filter { !($0 is UIView) }
+    }
+
+    /// Synthesizes nodes for non-view accessibility elements, recursing into
+    /// nested containers with bounded depth, bounded breadth, and a cycle
+    /// guard. Returns the direct child node IDs for the caller's node.
+    private func captureAccessibilityElementNodes(
+        elements: [NSObject],
+        window: UIWindow,
+        treeID: TreeID,
+        snapshotID: String,
+        parentID: NodeID,
+        parentPath: String,
+        controller: String?,
+        depth: Int,
+        visited: inout Set<ObjectIdentifier>,
+        nodes: inout [UiNode],
+        limitations: inout [CaptureLimitation]
+    ) throws -> [NodeID] {
+        var childIDs: [NodeID] = []
+        for (index, element) in elements.enumerated() {
+            if childIDs.count >= Self.accessibilityElementCountLimit {
+                limitations.append(
+                    try CaptureContentLimits.accessibilityElementsOmitted(
+                        message: "The accessibility container exposes more than \(Self.accessibilityElementCountLimit) elements; the remaining elements were omitted.",
+                        treeID: treeID,
+                        nodeID: parentID
+                    )
+                )
+                break
+            }
+            guard visited.insert(ObjectIdentifier(element)).inserted else {
+                limitations.append(
+                    try CaptureContentLimits.accessibilityElementsOmitted(
+                        message: "An accessibility element appears more than once in the container graph and was captured only at its first position.",
+                        treeID: treeID,
+                        nodeID: parentID
+                    )
+                )
+                continue
+            }
+            let path = "\(parentPath).ax\(index)"
+            let stableSeed = Self.stableIdentifier(for: element) ?? path
+            let nodeID = try NodeID(
+                validating: RuntimeIdentifierFactory.deterministic(
+                    prefix: "node",
+                    seed: "\(snapshotID):\(stableSeed):\(path)"
+                )
+            )
+            var descendantNodes: [UiNode] = []
+            var elementChildIDs: [NodeID] = []
+            let nested = Self.synthesizableAccessibilityElements(of: element)
+            if !nested.isEmpty {
+                if depth >= Self.accessibilityElementDepthLimit {
+                    limitations.append(
+                        try CaptureContentLimits.accessibilityElementsOmitted(
+                            message: "The accessibility container graph exceeds the depth limit of \(Self.accessibilityElementDepthLimit); deeper elements were omitted.",
+                            treeID: treeID,
+                            nodeID: nodeID
+                        )
+                    )
+                } else {
+                    elementChildIDs = try captureAccessibilityElementNodes(
+                        elements: nested,
+                        window: window,
+                        treeID: treeID,
+                        snapshotID: snapshotID,
+                        parentID: nodeID,
+                        parentPath: path,
+                        controller: controller,
+                        depth: depth + 1,
+                        visited: &visited,
+                        nodes: &descendantNodes,
+                        limitations: &limitations
+                    )
+                }
+            }
+            nodes.append(
+                try captureElementNode(
+                    element: element,
+                    window: window,
+                    treeID: treeID,
+                    nodeID: nodeID,
+                    parentID: parentID,
+                    childIDs: elementChildIDs,
+                    controller: controller,
+                    limitations: &limitations
+                )
+            )
+            nodes.append(contentsOf: descendantNodes)
+            childIDs.append(nodeID)
+        }
+        return childIDs
+    }
+
+    /// Builds a canonical node for one synthetic accessibility element using
+    /// the same declared accessibility facts the SwiftUI semantics bridge
+    /// encodes: identifier as `stable_id`, traits as the canonical role, and
+    /// label/value as bounded text. The element never receives messages
+    /// outside the UIAccessibility informal protocol.
+    private func captureElementNode(
+        element: NSObject,
+        window: UIWindow,
+        treeID: TreeID,
+        nodeID: NodeID,
+        parentID: NodeID,
+        childIDs: [NodeID],
+        controller: String?,
+        limitations: inout [CaptureLimitation]
+    ) throws -> UiNode {
+        // accessibilityFrame is documented in screen coordinates; convert it
+        // into the window's logical space, the same space the view walker
+        // records with `view.convert(view.bounds, to: window)`.
+        let frame = window.convert(element.accessibilityFrame, from: window.screen.coordinateSpace)
+        let visibleFrame = frame.intersection(window.bounds)
+        let traits = element.accessibilityTraits
+        let role = Self.traitRole(for: traits) ?? "container"
+        var stableID: StableID?
+        if let identifier = Self.stableIdentifier(for: element) {
+            if let validated = try? StableID(validating: identifier) {
+                stableID = validated
+            } else {
+                limitations.append(
+                    try CaptureContentLimits.invalidStableIdentifier(treeID: treeID, nodeID: nodeID)
+                )
+            }
+        }
+        let label = try CaptureContentLimits.bounded(
+            element.accessibilityLabel,
+            limit: CaptureContentLimits.textScalarLimit,
+            field: "accessibility.label",
+            treeID: treeID,
+            nodeID: nodeID
+        )
+        let value = try CaptureContentLimits.bounded(
+            element.accessibilityValue,
+            limit: CaptureContentLimits.textScalarLimit,
+            field: "accessibility.value",
+            treeID: treeID,
+            nodeID: nodeID
+        )
+        limitations.append(
+            contentsOf: [label.limitation, value.limitation].compactMap { $0 }
+        )
+        let tappable = traits.contains(.button) || traits.contains(.link)
+
+        return try UiNode(
+            nodeID: nodeID,
+            stableID: stableID,
+            parentID: parentID,
+            childIDs: childIDs,
+            nativeType: String(reflecting: type(of: element)),
+            role: role,
+            frame: Self.protocolRect(frame),
+            visibleRect: visibleFrame.isNull ? nil : Self.protocolRect(visibleFrame),
+            hitRect: tappable ? Self.protocolRect(frame) : nil,
+            // A synthetic element has no coordinate space of its own, so it
+            // carries no bounds, layer, or visual facts.
+            content: TextContent(text: label.value, value: value.value),
+            state: NodeState(
+                visible: !visibleFrame.isNull,
+                enabled: !traits.contains(.notEnabled)
+            ),
+            actions: tappable ? [.tap] : [],
+            accessibility: AccessibilityProperties(
+                label: label.value,
+                value: value.value,
+                role: role
+            ),
+            sourceContext: SourceContext(
+                controller: controller,
+                component: String(reflecting: type(of: element))
+            ),
+            relatedNodes: [],
+            captureLimitations: [],
+            extensions: .empty
         )
     }
 
@@ -571,7 +816,10 @@ public final class UIKitRuntimeCaptureAdapter {
     /// Hosted content (SwiftUI in particular) renders through private view
     /// classes; declared accessibility traits still carry the semantic role.
     private static func traitRole(for view: UIView) -> String? {
-        let traits = view.accessibilityTraits
+        traitRole(for: view.accessibilityTraits)
+    }
+
+    private static func traitRole(for traits: UIAccessibilityTraits) -> String? {
         if traits.contains(.button) {
             return "button"
         }
@@ -611,6 +859,31 @@ public final class UIKitRuntimeCaptureAdapter {
             return nil
         }
         return identifier
+    }
+
+    /// Reads the declared accessibility identifier from a synthetic element.
+    /// UIViews keep the direct property read above: on-device UIKit does not
+    /// resolve the view's identifier through the protocol existential, so the
+    /// two paths must stay separate. UIAccessibilityElement adopts
+    /// UIAccessibilityIdentification; SwiftUI's accessibility nodes implement
+    /// the same standard `accessibilityIdentifier` accessor without declaring
+    /// the conformance, so a dynamic read of that public selector follows.
+    private static func stableIdentifier(for element: NSObject) -> String? {
+        if let view = element as? UIView {
+            return stableIdentifier(for: view)
+        }
+        if let identification = element as? UIAccessibilityIdentification,
+           let identifier = identification.accessibilityIdentifier,
+           !identifier.isEmpty {
+            return identifier
+        }
+        let selector = Selector(("accessibilityIdentifier"))
+        if element.responds(to: selector),
+           let identifier = element.perform(selector)?.takeUnretainedValue() as? String,
+           !identifier.isEmpty {
+            return identifier
+        }
+        return nil
     }
 
     private static func owningViewController(for view: UIView) -> UIViewController? {

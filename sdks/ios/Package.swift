@@ -65,6 +65,9 @@ let package = Package(
             dependencies: [
                 "VistreaRuntimeUIKit",
                 "VistreaRuntimeModels",
+                // Proves the SwiftUI semantics bridge round-trips through the
+                // UIKit capture adapter on hosted content.
+                "VistreaRuntimeSwiftUI",
             ]
         ),
         .testTarget(

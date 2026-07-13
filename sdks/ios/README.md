@@ -18,6 +18,8 @@ The canonical model target does not import UIKit or Core Graphics.
 
 - selects the visible application window without invoking business methods;
 - flattens the actual UIKit view hierarchy into canonical `UiTree` and `UiNode` values;
+- synthesizes per-element child nodes for non-view accessibility elements that container views expose (`UIAccessibilityElement` and SwiftUI's accessibility nodes): screen-coordinate element frames convert into the same logical window space as view frames, declared traits map to the canonical role vocabulary, valid identifiers become `stable_id`, button and link traits yield `tap`, and the hosting view records the `ios.capture.semantics_source = "accessibility"` extension so synthesized provenance stays explicit;
+- bounds the element walk with explicit depth and per-container count limits plus a cycle guard, reporting every omission as an `ios.capture.accessibility-elements-omitted` limitation; views that are themselves accessibility elements are leaves and capture exactly as before;
 - preserves `accessibilityIdentifier` as the cross-platform `stable_id` when valid;
 - records full-display logical geometry, state, text, accessibility, actions, and visual facts;
 - captures PNG bytes, computes their encoded SHA-256 identity, and embeds the matching canonical `ObjectReference`;
@@ -51,7 +53,9 @@ The adapter is compiled only where UIKit is available. It is included only by in
 
 The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews only their alpha on the main actor.
 
-`VistreaRuntimeSwiftUI` is the SwiftUI semantic annotation bridge: `.vistreaSemantics(stableID:role:label:)` declares the cross-platform `stable_id`, a canonical role, and an optional label as standard accessibility facts, and the UIKit capture adapter maps declared accessibility traits back to the canonical role vocabulary for hosted content whose view classes are private. Two role limits are deliberate: `.listItem` and `.container` carry no accessibility traits, so these structural roles do not round-trip through the accessibility bridge and are captured as `container`; `.textField` maps to the search-field trait, which VoiceOver announces as a search field, so annotate production text fields deliberately. A full SwiftUI semantic-tree capture adapter, automatic UIKit event observation, and additional tuning properties remain separate follow-up capabilities.
+`VistreaRuntimeSwiftUI` is the SwiftUI semantic annotation bridge: `.vistreaSemantics(stableID:role:label:)` declares the cross-platform `stable_id`, a canonical role, and an optional label as standard accessibility facts, and the UIKit capture adapter maps declared accessibility traits back to the canonical role vocabulary for hosted content whose view classes are private. Two role limits are deliberate: `.listItem` and `.container` carry no accessibility traits, so these structural roles do not round-trip through the accessibility bridge and are captured as `container`; `.textField` maps to the search-field trait, which VoiceOver announces as a search field, so annotate production text fields deliberately. Automatic UIKit event observation and additional tuning properties remain separate follow-up capabilities.
+
+SwiftUI hosted content captures as real per-element child nodes through the accessibility-element synthesis above, with one verified honest limit: a SwiftUI hosting view builds its accessibility node tree only while the app-level accessibility runtime is active — the state that VoiceOver, the Accessibility Inspector, and XCUITest/WebDriverAgent automation sessions establish. With the runtime dormant, `accessibilityElements` on the hosting view is an empty array, so the capture degrades to the opaque hosting container exactly as before this capability, without phantom nodes. In the Vistrea product loop, device automation runs through WebDriverAgent, whose session activates that runtime for the target app. The SDK only observes this state and never toggles it; the hosted-capture test flips the simulator's persistent runtime flag itself (the same one automation harnesses use), restores the prior state afterwards, and that toggle stays strictly inside the test bundle. SwiftUI's accessibility nodes also implement the standard `accessibilityIdentifier` accessor without declaring `UIAccessibilityIdentification` conformance, so the adapter reads the identifier dynamically through that public selector.
 
 ## Verify
 
@@ -69,6 +73,20 @@ xcodebuild -scheme VistreaRuntimeUIKit \
   -destination 'generic/platform=iOS Simulator' \
   build
 ```
+
+Run the UIKit-gated capture tests (including the real SwiftUI hosted-capture
+round-trip) on a booted Simulator:
+
+```bash
+xcodebuild test -scheme VistreaIOSSDK-Package \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' \
+  -only-testing:VistreaRuntimeUIKitTests
+```
+
+Known pre-existing iOS-only failures outside this target: two
+`VistreaRuntimeModelsTests` cases assert macOS-specific `DecodingError`
+message wording ("Unknown core field") that the iOS runtime formats
+differently; the rejection behavior itself passes on both platforms.
 
 From the repository root, the cross-language integration test starts the real Node `LoopbackRuntimeHost` plus a raw coalescing Host fixture, runs the Swift fixture client, and verifies authentication, Snapshot/Object transfer, negotiated framing, coalesced state dispatch, cancellation, continued use, close, and token-safe failures:
 

@@ -35,6 +35,23 @@ enum CaptureContentLimits {
         return BoundedValue(value: truncated, limitation: limitation)
     }
 
+    /// Reports synthesized accessibility-element children omitted by the
+    /// cycle guard or by the depth or breadth bounds of the element walk, so
+    /// missing nodes remain diagnosable instead of silently vanishing.
+    static func accessibilityElementsOmitted(
+        message: String,
+        treeID: TreeID,
+        nodeID: NodeID
+    ) throws -> CaptureLimitation {
+        try CaptureLimitation(
+            code: "ios.capture.accessibility-elements-omitted",
+            severity: .warning,
+            message: message,
+            scope: CaptureLimitationScope(treeID: treeID, nodeID: nodeID, field: "child_ids"),
+            retryable: false
+        )
+    }
+
     /// Reports an accessibilityIdentifier that cannot become a canonical
     /// `stable_id`, so vanished stable identity remains diagnosable.
     static func invalidStableIdentifier(
