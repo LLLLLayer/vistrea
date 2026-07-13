@@ -102,7 +102,7 @@ export async function runVistreaCli(
           "validate findings [--run <id>] [--statuses a,b] [--severities a,b] [--limit n] [--cursor c]",
           "validate get-finding <finding_id>",
           "validate suppress <finding_id> --json <command>",
-          "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id>",
+          "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id> [--baseline <tag>]",
           "validate get-build-diff <build_diff_id>",
           "pack export --json <command>",
           "pack import --file <path>",
@@ -549,7 +549,7 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
   if (command[0] === "validate" && command[1] === "build-diff") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--project", "--application", "--left", "--right"].includes(key)) {
+      if (!["--project", "--application", "--left", "--right", "--baseline"].includes(key)) {
         throw invalidArguments();
       }
     }
@@ -560,6 +560,9 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
         application_id: requireOption(values, "--application"),
         left_build_id: requireOption(values, "--left"),
         right_build_id: requireOption(values, "--right"),
+        ...(values.get("--baseline") === undefined
+          ? {}
+          : { baseline_tag: values.get("--baseline") as string }),
       },
       timeoutMilliseconds,
     );

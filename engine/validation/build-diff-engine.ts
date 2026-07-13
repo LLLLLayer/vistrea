@@ -1,5 +1,6 @@
 import {
   DataError,
+  isDataError,
   PROTOCOL_SCHEMA_IDS,
   type BuildDiff,
   type DataUnitOfWork,
@@ -15,6 +16,17 @@ import { deterministicGraphId } from "../exploration/index.js";
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const BUILD_ID_PATTERN =
   /^build_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+
+/** What the frozen baseline graph version considered covered. */
+interface BaselineCoverage {
+  readonly tag: string;
+  readonly stateIds: ReadonlySet<string>;
+  readonly stateDigests: ReadonlySet<string>;
+  readonly stateIdByDigest: ReadonlyMap<string, string>;
+  readonly transitionIds: ReadonlySet<string>;
+  readonly transitionIdByKey: ReadonlyMap<string, string>;
+}
 
 export interface BuildDiffEngineDependencies {
   readonly workspace: WorkspaceDataSource;
@@ -27,6 +39,13 @@ export interface CompareBuildsCommand {
   readonly application_id: string;
   readonly left_build_id: string;
   readonly right_build_id: string;
+  /**
+   * A frozen graph version tag. Removed coverage that the baseline also
+   * exhibited classifies as `regressed`; removals absent from the baseline
+   * stay plain `removed` (an intentional change), so gates can fail on
+   * regressions only.
+   */
+  readonly baseline_tag?: string;
 }
 
 /**
@@ -63,14 +82,24 @@ export class BuildDiffEngine {
         "A Build Diff must compare two distinct builds.",
       );
     }
+    if (
+      command.baseline_tag !== undefined &&
+      !TAG_NAME_PATTERN.test(command.baseline_tag)
+    ) {
+      throw new DataError("invalid_argument", "The baseline tag name is invalid.");
+    }
     return this.#write((unit) => {
       const graphId = deterministicGraphId(command.project_id, command.application_id);
       const graph = unit.screenGraph.getGraph(graphId);
       this.#assertBuildObserved(graph, command.left_build_id);
       this.#assertBuildObserved(graph, command.right_build_id);
+      const baseline =
+        command.baseline_tag === undefined
+          ? undefined
+          : this.#loadBaseline(unit, command, command.baseline_tag);
       const entries = [
-        ...this.#stateEntries(graph, command),
-        ...this.#transitionEntries(graph, command),
+        ...this.#stateEntries(graph, command, baseline),
+        ...this.#transitionEntries(graph, command, baseline),
       ];
       const now = this.#workspace.clock.now();
       const summary = { added: 0, removed: 0, changed: 0, regressed: 0, improved: 0 };
@@ -86,7 +115,10 @@ export class BuildDiffEngine {
         created_at: now,
         summary: { total: entries.length, ...summary },
         entries,
-        extensions: {},
+        extensions:
+          baseline === undefined
+            ? {}
+            : { "vistrea.baseline": { tag: baseline.tag } },
       };
       this.#validator.assert(PROTOCOL_SCHEMA_IDS.buildDiff, diff);
       unit.validation.appendBuildDiff(diff as unknown as BuildDiff);
@@ -114,7 +146,66 @@ export class BuildDiffEngine {
     }
   }
 
-  #stateEntries(graph: ScreenGraph, command: CompareBuildsCommand): JsonObject[] {
+  #loadBaseline(
+    unit: DataUnitOfWork,
+    command: CompareBuildsCommand,
+    tag: string,
+  ): BaselineCoverage {
+    const frozenId = deterministicGraphId(
+      command.project_id,
+      `${command.application_id} tag:${tag}`,
+    );
+    let frozen: ScreenGraph;
+    try {
+      frozen = unit.screenGraph.getGraph(frozenId);
+    } catch (error) {
+      if (isDataError(error, "not_found")) {
+        throw new DataError("invalid_argument", "The baseline tag names no frozen graph version.", {
+          details: { baseline_tag: tag },
+        });
+      }
+      throw error;
+    }
+    const stateIds = new Set<string>();
+    const stateDigests = new Set<string>();
+    const stateIdByDigest = new Map<string, string>();
+    for (const state of frozen.states as readonly JsonObject[]) {
+      const stateId = state["screen_state_id"] as string;
+      stateIds.add(stateId);
+      const identity = state["identity"] as JsonObject;
+      const digests = [
+        ...(identity["layout_digest"] === undefined
+          ? []
+          : [identity["layout_digest"] as string]),
+        ...(((identity["extensions"] as JsonObject)["vistrea.alias_layout_digests"] as
+          | readonly string[]
+          | undefined) ?? []),
+      ];
+      for (const digest of digests) {
+        stateDigests.add(digest);
+        if (!stateIdByDigest.has(digest)) {
+          stateIdByDigest.set(digest, stateId);
+        }
+      }
+    }
+    const transitionIds = new Set<string>();
+    const transitionIdByKey = new Map<string, string>();
+    for (const transition of frozen.transitions as readonly JsonObject[]) {
+      const transitionId = transition["transition_id"] as string;
+      transitionIds.add(transitionId);
+      const key = (transition["extensions"] as JsonObject)["vistrea.transition_key"];
+      if (typeof key === "string" && !transitionIdByKey.has(key)) {
+        transitionIdByKey.set(key, transitionId);
+      }
+    }
+    return { tag, stateIds, stateDigests, stateIdByDigest, transitionIds, transitionIdByKey };
+  }
+
+  #stateEntries(
+    graph: ScreenGraph,
+    command: CompareBuildsCommand,
+    baseline?: BaselineCoverage,
+  ): JsonObject[] {
     const now = this.#workspace.clock.now();
     const entries: JsonObject[] = [];
     for (const state of graph.states as readonly JsonObject[]) {
@@ -129,15 +220,38 @@ export class BuildDiffEngine {
         id: state["screen_state_id"] as string,
         version: inLeft ? command.left_build_id : command.right_build_id,
       };
+      const identity = state["identity"] as JsonObject;
+      const baselineStateId =
+        !inLeft || baseline === undefined
+          ? undefined
+          : baseline.stateIds.has(state["screen_state_id"] as string)
+            ? (state["screen_state_id"] as string)
+            : identity["layout_digest"] !== undefined
+              ? baseline.stateIdByDigest.get(identity["layout_digest"] as string)
+              : undefined;
+      const regressed = baselineStateId !== undefined;
       entries.push({
         entry_id: this.#ids.next("diffentry"),
-        kind: inLeft ? "removed" : "added",
+        kind: regressed ? "regressed" : inLeft ? "removed" : "added",
         domains: ["behavioral", "structural"],
-        severity: inLeft ? "warning" : "info",
-        summary: inLeft
-          ? `The Screen State "${state["title"] as string}" was observed in the left build but never in the right build.`
-          : `The Screen State "${state["title"] as string}" appears only in the right build.`,
-        ...(inLeft ? { left_subject: subject } : { right_subject: subject }),
+        severity: regressed ? "error" : inLeft ? "warning" : "info",
+        summary: regressed
+          ? `The Screen State "${state["title"] as string}" is covered by the "${(baseline as BaselineCoverage).tag}" baseline and the left build but vanished from the right build.`
+          : inLeft
+            ? `The Screen State "${state["title"] as string}" was observed in the left build but never in the right build.`
+            : `The Screen State "${state["title"] as string}" appears only in the right build.`,
+        ...(regressed
+          ? {
+              left_subject: subject,
+              right_subject: {
+                kind: "screen_state",
+                id: baselineStateId,
+                version: `tag:${(baseline as BaselineCoverage).tag}`,
+              },
+            }
+          : inLeft
+            ? { left_subject: subject }
+            : { right_subject: subject }),
         evidence: [
           {
             evidence_id: this.#ids.next("evidence"),
@@ -155,7 +269,11 @@ export class BuildDiffEngine {
     return entries;
   }
 
-  #transitionEntries(graph: ScreenGraph, command: CompareBuildsCommand): JsonObject[] {
+  #transitionEntries(
+    graph: ScreenGraph,
+    command: CompareBuildsCommand,
+    baseline?: BaselineCoverage,
+  ): JsonObject[] {
     const now = this.#workspace.clock.now();
     // A transition is covered by a build when one of its observations was
     // captured in that build's runtime context.
@@ -193,15 +311,38 @@ export class BuildDiffEngine {
         id: transitionId,
         version: inLeft ? command.left_build_id : command.right_build_id,
       };
+      const transitionKey = (transition["extensions"] as JsonObject)["vistrea.transition_key"];
+      const baselineTransitionId =
+        !inLeft || baseline === undefined
+          ? undefined
+          : baseline.transitionIds.has(transitionId)
+            ? transitionId
+            : typeof transitionKey === "string"
+              ? baseline.transitionIdByKey.get(transitionKey)
+              : undefined;
+      const regressed = baselineTransitionId !== undefined;
       entries.push({
         entry_id: this.#ids.next("diffentry"),
-        kind: inLeft ? "removed" : "added",
+        kind: regressed ? "regressed" : inLeft ? "removed" : "added",
         domains: ["behavioral"],
-        severity: inLeft ? "warning" : "info",
-        summary: inLeft
-          ? `The transition from "${sourceTitle}" to "${targetTitle}" was observed in the left build but never in the right build.`
-          : `The transition from "${sourceTitle}" to "${targetTitle}" appears only in the right build.`,
-        ...(inLeft ? { left_subject: subject } : { right_subject: subject }),
+        severity: regressed ? "error" : inLeft ? "warning" : "info",
+        summary: regressed
+          ? `The transition from "${sourceTitle}" to "${targetTitle}" is covered by the "${(baseline as BaselineCoverage).tag}" baseline and the left build but vanished from the right build.`
+          : inLeft
+            ? `The transition from "${sourceTitle}" to "${targetTitle}" was observed in the left build but never in the right build.`
+            : `The transition from "${sourceTitle}" to "${targetTitle}" appears only in the right build.`,
+        ...(regressed
+          ? {
+              left_subject: subject,
+              right_subject: {
+                kind: "transition",
+                id: baselineTransitionId,
+                version: `tag:${(baseline as BaselineCoverage).tag}`,
+              },
+            }
+          : inLeft
+            ? { left_subject: subject }
+            : { right_subject: subject }),
         evidence: [
           {
             evidence_id: this.#ids.next("evidence"),

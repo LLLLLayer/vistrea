@@ -19,6 +19,7 @@ interface CiGateOptions {
   readonly applicationId?: string;
   readonly leftBuildId?: string;
   readonly rightBuildId?: string;
+  readonly baselineTag?: string;
   readonly failOn: FailOnSeverity;
 }
 
@@ -43,7 +44,8 @@ export async function runVistreaCiGate(
         status: "usage_error",
         usage:
           "vistrea-ci [--snapshot <snapshot_id>] [--project <project_id> --application <application_id>] " +
-          "[--left-build <build_id> --right-build <build_id>] [--fail-on info|warning|error|critical]",
+          "[--left-build <build_id> --right-build <build_id> [--baseline-tag <tag>]] " +
+          "[--fail-on info|warning|error|critical]",
       })}\n`,
     );
     return 2;
@@ -62,6 +64,7 @@ export async function runVistreaCiGate(
     const snapshotId = options.snapshotId ?? (await newestSnapshotId(client));
     const runs: JsonObject[] = [];
     let worst: FailOnSeverity | undefined;
+    let buildRegressions = 0;
     if (snapshotId !== undefined) {
       const outcome = (await client.execute("ValidateSnapshot", {
         snapshot_id: snapshotId,
@@ -90,17 +93,31 @@ export async function runVistreaCiGate(
         application_id: options.applicationId,
         left_build_id: options.leftBuildId,
         right_build_id: options.rightBuildId,
+        ...(options.baselineTag === undefined ? {} : { baseline_tag: options.baselineTag }),
       })) as JsonObject;
+      const summary = diff["summary"] as JsonObject;
       report["build_diff"] = {
         build_diff_id: diff["build_diff_id"],
-        summary: diff["summary"],
+        summary,
       };
+      if (options.baselineTag !== undefined) {
+        const regressions = (diff["entries"] as readonly JsonObject[]).filter(
+          (entry) => entry["kind"] === "regressed",
+        );
+        report["build_regressions"] = regressions.map((entry) => ({
+          entry_id: entry["entry_id"],
+          summary: entry["summary"],
+          left_subject: entry["left_subject"] ?? null,
+        }));
+        buildRegressions = regressions.length;
+      }
     }
     report["runs"] = runs;
 
     const failed =
-      worst !== undefined &&
-      SEVERITY_ORDER.indexOf(worst) >= SEVERITY_ORDER.indexOf(options.failOn);
+      (worst !== undefined &&
+        SEVERITY_ORDER.indexOf(worst) >= SEVERITY_ORDER.indexOf(options.failOn)) ||
+      buildRegressions > 0;
     report["status"] = failed ? "failed" : "passed";
     if (worst !== undefined) {
       report["worst_open_severity"] = worst;
@@ -184,7 +201,15 @@ function parseArguments(arguments_: readonly string[]): CiGateOptions {
     const option = arguments_[index] as string;
     const value = arguments_[index + 1];
     if (
-      !["--snapshot", "--project", "--application", "--left-build", "--right-build", "--fail-on"].includes(option) ||
+      ![
+        "--snapshot",
+        "--project",
+        "--application",
+        "--left-build",
+        "--right-build",
+        "--baseline-tag",
+        "--fail-on",
+      ].includes(option) ||
       value === undefined ||
       values.has(option)
     ) {
@@ -210,6 +235,10 @@ function parseArguments(arguments_: readonly string[]): CiGateOptions {
   if (leftBuildId !== undefined && projectId === undefined) {
     throw new Error("invalid arguments");
   }
+  const baselineTag = values.get("--baseline-tag");
+  if (baselineTag !== undefined && leftBuildId === undefined) {
+    throw new Error("invalid arguments");
+  }
   const snapshotId = values.get("--snapshot");
   return {
     ...(snapshotId === undefined ? {} : { snapshotId }),
@@ -217,6 +246,7 @@ function parseArguments(arguments_: readonly string[]): CiGateOptions {
     ...(applicationId === undefined ? {} : { applicationId }),
     ...(leftBuildId === undefined ? {} : { leftBuildId }),
     ...(rightBuildId === undefined ? {} : { rightBuildId }),
+    ...(baselineTag === undefined ? {} : { baselineTag }),
     failOn,
   };
 }

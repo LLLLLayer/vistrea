@@ -280,7 +280,7 @@ export class ExplorationEngine {
       const source = unit.screenGraph.getGraph(sourceGraphId);
       const frozenId = deterministicGraphId(
         command.project_id,
-        `${command.application_id} tag:${command.tag_name}`,
+        `${command.application_id} tag:${command.tag_name}`,
       );
       const frozen = {
         ...(structuredClone(source) as unknown as JsonObject),

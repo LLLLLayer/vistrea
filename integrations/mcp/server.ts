@@ -949,6 +949,7 @@ export const VISTREA_MCP_TOOLS = [
         application_id: { type: "string", maxLength: 256 },
         left_build_id: { type: "string", maxLength: 128 },
         right_build_id: { type: "string", maxLength: 128 },
+        baseline_tag: { type: "string", minLength: 1, maxLength: 128 },
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },

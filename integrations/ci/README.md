@@ -11,7 +11,7 @@ export VISTREA_HOST_URL=http://127.0.0.1:43123
 node .build/typescript/integrations/ci/main.js \
   [--snapshot <snapshot_id>] \
   [--project <project_id> --application <application_id>] \
-  [--left-build <build_id> --right-build <build_id>] \
+  [--left-build <build_id> --right-build <build_id>] \ [--baseline-tag <tag>]
   [--fail-on info|warning|error|critical]
 ```
 
@@ -20,3 +20,5 @@ The gate validates the newest (or one named) Snapshot with the core rule set, op
 Exit codes: `0` gate passed, `1` open findings at or above `--fail-on` (default `error`), `2` usage error, `3` the Host was unavailable or an operation failed.
 
 Target-environment orchestration (booting devices and capturing inside the pipeline) remains a later slice; the gate judges evidence a pipeline has already captured through the Host.
+
+With `--baseline-tag`, removed coverage that the frozen baseline graph version also exhibited classifies as `regressed`, the report lists the regressions under `build_regressions`, and any regression fails the gate (exit `1`) regardless of the severity threshold — intentional removals stay `removed` and pass.

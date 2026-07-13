@@ -23,3 +23,14 @@ Unknown rule identifiers fail closed as `invalid_argument`, and every
 non-default configuration persists into the run's
 `extensions["vistrea.configuration"]` so a lenient run can never masquerade as
 a default one.
+
+## Baseline-classified build regressions
+
+`CompareBuilds` with a `baseline_tag` loads the frozen graph version created
+by `tagGraphVersion` and classifies every removed coverage entry: removals
+the baseline also exhibited become `regressed` (error severity, both
+subjects, the baseline counterpart under `tag:<name>`), while removals
+absent from the baseline stay plain `removed` — an intentional change.
+States match by identity (layout digest including merge aliases) and
+transitions by their dedup key, so curation and re-materialization do not
+break classification.

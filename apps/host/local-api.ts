@@ -1066,7 +1066,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
     const command = parseCommandObject(
       input,
-      ["project_id", "application_id", "left_build_id", "right_build_id"],
+      ["project_id", "application_id", "left_build_id", "right_build_id", "baseline_tag"],
       ["project_id", "application_id", "left_build_id", "right_build_id"],
     );
     const diff = context.buildDiffs.compareBuilds(

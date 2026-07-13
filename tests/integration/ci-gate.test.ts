@@ -168,6 +168,14 @@ test("the CI gate reports usage errors and unavailable Hosts distinctly", async 
   assert.equal(usage.exitCode, 2);
   assert.equal(usage.report["status"], "usage_error");
 
+  const baselineWithoutBuilds = await runGate(["--baseline-tag", "release/1.0"], {
+    ...process.env,
+    VISTREA_HOST_URL: "http://127.0.0.1:1",
+    VISTREA_HOST_TOKEN: "x".repeat(43),
+  });
+  assert.equal(baselineWithoutBuilds.exitCode, 2);
+  assert.equal(baselineWithoutBuilds.report["status"], "usage_error");
+
   const unavailable = await runGate([], {
     ...process.env,
     VISTREA_HOST_URL: "http://127.0.0.1:1",

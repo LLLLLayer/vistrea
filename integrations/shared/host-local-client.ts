@@ -1319,8 +1319,9 @@ export class HostLocalApiClient {
       case "CompareBuilds": {
         const command = assertExactObject(
           input,
-          ["project_id", "application_id", "left_build_id", "right_build_id"],
+          ["project_id", "application_id", "left_build_id", "right_build_id", "baseline_tag"],
           "Build diff input",
+          true,
         );
         if (
           typeof command["project_id"] !== "string" ||
@@ -1330,7 +1331,11 @@ export class HostLocalApiClient {
           typeof command["left_build_id"] !== "string" ||
           !BUILD_ID_PATTERN.test(command["left_build_id"]) ||
           typeof command["right_build_id"] !== "string" ||
-          !BUILD_ID_PATTERN.test(command["right_build_id"])
+          !BUILD_ID_PATTERN.test(command["right_build_id"]) ||
+          (command["baseline_tag"] !== undefined &&
+            (typeof command["baseline_tag"] !== "string" ||
+              command["baseline_tag"].length === 0 ||
+              command["baseline_tag"].length > 128))
         ) {
           throw invalidInput();
         }
