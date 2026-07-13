@@ -26,9 +26,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             if let requestedID = ProcessInfo.processInfo.environment["VISTREA_SCENARIO_ID"],
                let scenario = catalog.scenario(id: requestedID) {
                 navigationController.pushViewController(
-                    ScenarioStateViewController(
+                    ScenarioEntryFactory.makeEntryViewController(
                         scenario: scenario,
-                        stateID: scenario.entryStateID,
                         profile: ProcessInfo.processInfo.environment["VISTREA_SCENARIO_PROFILE"]
                             ?? "baseline"
                     ),

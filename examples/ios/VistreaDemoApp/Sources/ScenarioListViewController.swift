@@ -47,9 +47,8 @@ final class ScenarioListViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         let scenario = catalog.scenarios[indexPath.row]
         ownedNavigationController?.pushViewController(
-            ScenarioStateViewController(
+            ScenarioEntryFactory.makeEntryViewController(
                 scenario: scenario,
-                stateID: scenario.entryStateID,
                 profile: "baseline"
             ),
             animated: true

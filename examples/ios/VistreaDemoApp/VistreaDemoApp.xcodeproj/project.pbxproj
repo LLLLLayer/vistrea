@@ -7,24 +7,54 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00CF5689F190E9E38116569A /* StoreDetailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89C49271E4EE1CD7391F542A /* StoreDetailViewController.swift */; };
 		07CF473491ED18BA9D5C3D3A /* ScenarioStateViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5ED2A1D0CD4117541AA3A84 /* ScenarioStateViewController.swift */; };
+		0F08D3F51008B557B9F8018E /* MixedDeclarativeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46A1B188CBD4EA76EA3D6DB3 /* MixedDeclarativeViewController.swift */; };
 		0FAC067D07C5F427A26FAE59 /* ScenarioListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF679B2739AE67DF2AFF8D25 /* ScenarioListViewController.swift */; };
+		1281967ECFFFDBF268F4F2BF /* ScenarioEntryFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3568521494B6333C8A0B080C /* ScenarioEntryFactory.swift */; };
+		21882B4575DCEDEC6D1767A5 /* StoreTabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D99D419901B36F00EA0649C /* StoreTabBarView.swift */; };
+		2209AC4592EEB6BBBBA21E9A /* SnapCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5FB80E1467813FFBC120442 /* SnapCatalogView.swift */; };
+		289E0EE3611C6B1131F86A92 /* StoreCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53D0CFFE19C8384DE44FEDAF /* StoreCatalog.swift */; };
+		2990B0E2D86180A938B66770 /* StoreCartViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95D5A352229157B31413A9D0 /* StoreCartViewControllerTests.swift */; };
 		2AA2F9C52814473976DE4F58 /* DebugRuntimeConnectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88348C6854F8DC16DFB5DF60 /* DebugRuntimeConnectionController.swift */; };
+		2DAEA15E4D59613B5928E05C /* MixedDeclarativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50583BD72424FA292BD9CA73 /* MixedDeclarativeTests.swift */; };
 		30B78552160F986394FB6604 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */; };
+		442C25C5256AED70A9386A6F /* StoreCartViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27EBA7B50FB6B441B200409 /* StoreCartViewController.swift */; };
+		59C9C4052EB17C8D25A68F7B /* ViewHierarchyAssertions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A1495818619BBC5CE7B0DC /* ViewHierarchyAssertions.swift */; };
 		6175E1103644B1D4A641D329 /* ErrorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63342939C1226AF013189B27 /* ErrorViewController.swift */; };
 		63DA21192944C4A772E4C9E9 /* VistreaDemoAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C36D789C3091819CC51AC129 /* VistreaDemoAppUITests.swift */; };
+		653B244B0E003F4CA25DB23B /* StoreSheetViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E56FC06B268E9DAAD8D2C66A /* StoreSheetViewController.swift */; };
 		6695A984357284ACF1FF8E34 /* VistreaRuntimeConnection in Frameworks */ = {isa = PBXBuildFile; productRef = 522172FBED8DCA824F1C1FC1 /* VistreaRuntimeConnection */; };
 		68E5FF12544EBBF7ACF3CB54 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 632B5D6EC60A02491F96DC58 /* AppDelegate.swift */; };
+		6B8E7EB4FE7A3A94D29370AA /* ScenarioContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54188CDC4C2AD3F71F6735FF /* ScenarioContractTests.swift */; };
 		724157E63D085AF834B6CA2B /* ScenarioCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 161A15B4825786242639A385 /* ScenarioCatalog.swift */; };
 		769639C05EDCDE3C5D7B9A0A /* VistreaRuntimeUIKit in Frameworks */ = {isa = PBXBuildFile; productRef = DDA6A09CA7A655EA0A792FBB /* VistreaRuntimeUIKit */; };
+		82D3D21F71828FAD89911A93 /* StoreSheetViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB72CB3966763D4980834E4A /* StoreSheetViewControllerTests.swift */; };
 		8E8C2AAA4B74DBFE7C50D2CC /* v1 in Resources */ = {isa = PBXBuildFile; fileRef = E2959B615B3C6EF5F06B971B /* v1 */; };
+		A4FF6D25E42C4978085E9400 /* StoreProfileViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD1C072D051EEF2B7F5C0B22 /* StoreProfileViewController.swift */; };
+		A5E6C4E7C82740668679DEF0 /* StoreSearchViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9500FE21838A68FC4411A133 /* StoreSearchViewController.swift */; };
 		AB62149C2F44F4C53A8D581E /* VistreaRuntimeModels in Frameworks */ = {isa = PBXBuildFile; productRef = 0FE9807DBF8628F1979EE85F /* VistreaRuntimeModels */; };
+		AEF096B2D61F3D30953DA8D1 /* StoreScenarioUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3F870DC1E1F675E9115E800 /* StoreScenarioUITests.swift */; };
+		B154579808D69177DD021F4E /* StoreReviewsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1C96B0D35BB91297C76ADA5 /* StoreReviewsViewController.swift */; };
 		BA64BCFBF74F3B41DCF79BD4 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 445F4E971917BB39FB8B70CA /* manifest.json */; };
+		C317EA52A25FE6A5873A88D6 /* ScenarioScreenViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6FAE6EF53D79A5F3581C5B /* ScenarioScreenViewController.swift */; };
+		C8AA7FD900AC279578614D39 /* SnapCatalogLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE307E373C62048BFC415047 /* SnapCatalogLayoutTests.swift */; };
 		DF8219F00E8536C126C4F418 /* ScenarioModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A39FF8BEF12A922224503C /* ScenarioModels.swift */; };
+		E6C85064F7265F811082A947 /* StoreCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB7A478F14EC75DEE333D02 /* StoreCatalogTests.swift */; };
+		F17E9EE145C18846AFBA207D /* StoreNavigationSceneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B73947324F412B3AE7027971 /* StoreNavigationSceneTests.swift */; };
 		F5B96AFBA2FC688B8C28851C /* VistreaRuntimeUIKitConnection in Frameworks */ = {isa = PBXBuildFile; productRef = C4A1AC38DAD917062950B8F3 /* VistreaRuntimeUIKitConnection */; };
+		F65BF11E24ACC7E3C01FE524 /* StoreSearchViewControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E66869453BF66B9BD7F6AA6 /* StoreSearchViewControllerTests.swift */; };
+		F681B14F598B5135A699296F /* StoreShopViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0AF5A4AC2F231873DEBC15F /* StoreShopViewController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		2A73222684B689C2A706957D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CE049C43B56D212FCE34F1B6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E594F3B5F2EA3C55CC4BA17E;
+			remoteInfo = VistreaDemoApp;
+		};
 		B9C089803DF721C858433E3A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CE049C43B56D212FCE34F1B6 /* Project object */;
@@ -35,20 +65,44 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0CB7A478F14EC75DEE333D02 /* StoreCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCatalogTests.swift; sourceTree = "<group>"; };
+		0E66869453BF66B9BD7F6AA6 /* StoreSearchViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSearchViewControllerTests.swift; sourceTree = "<group>"; };
 		161A15B4825786242639A385 /* ScenarioCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioCatalog.swift; sourceTree = "<group>"; };
+		3568521494B6333C8A0B080C /* ScenarioEntryFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioEntryFactory.swift; sourceTree = "<group>"; };
 		445F4E971917BB39FB8B70CA /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
+		46A1B188CBD4EA76EA3D6DB3 /* MixedDeclarativeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixedDeclarativeViewController.swift; sourceTree = "<group>"; };
+		50583BD72424FA292BD9CA73 /* MixedDeclarativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MixedDeclarativeTests.swift; sourceTree = "<group>"; };
+		53D0CFFE19C8384DE44FEDAF /* StoreCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCatalog.swift; sourceTree = "<group>"; };
+		54188CDC4C2AD3F71F6735FF /* ScenarioContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioContractTests.swift; sourceTree = "<group>"; };
 		632B5D6EC60A02491F96DC58 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		63342939C1226AF013189B27 /* ErrorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorViewController.swift; sourceTree = "<group>"; };
+		705A1E3DA897EFE781603CA7 /* VistreaDemoAppTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VistreaDemoAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		761C269257DCCE229DDC7498 /* ios */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ios; path = ../../../sdks/ios; sourceTree = SOURCE_ROOT; };
 		7DE89CC72CED9C526739A48E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		88348C6854F8DC16DFB5DF60 /* DebugRuntimeConnectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugRuntimeConnectionController.swift; sourceTree = "<group>"; };
+		89C49271E4EE1CD7391F542A /* StoreDetailViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreDetailViewController.swift; sourceTree = "<group>"; };
+		8E6FAE6EF53D79A5F3581C5B /* ScenarioScreenViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioScreenViewController.swift; sourceTree = "<group>"; };
 		90A39FF8BEF12A922224503C /* ScenarioModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioModels.swift; sourceTree = "<group>"; };
+		9500FE21838A68FC4411A133 /* StoreSearchViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSearchViewController.swift; sourceTree = "<group>"; };
+		95D5A352229157B31413A9D0 /* StoreCartViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCartViewControllerTests.swift; sourceTree = "<group>"; };
 		9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorViewController.swift; sourceTree = "<group>"; };
 		9CE5D298AC09901745691E29 /* VistreaDemoApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VistreaDemoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9D99D419901B36F00EA0649C /* StoreTabBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreTabBarView.swift; sourceTree = "<group>"; };
+		A27EBA7B50FB6B441B200409 /* StoreCartViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCartViewController.swift; sourceTree = "<group>"; };
 		A5ED2A1D0CD4117541AA3A84 /* ScenarioStateViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioStateViewController.swift; sourceTree = "<group>"; };
+		AE307E373C62048BFC415047 /* SnapCatalogLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapCatalogLayoutTests.swift; sourceTree = "<group>"; };
 		AF74E78A6D06EC30EA6DA60C /* VistreaDemoAppUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VistreaDemoAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B3A1495818619BBC5CE7B0DC /* ViewHierarchyAssertions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHierarchyAssertions.swift; sourceTree = "<group>"; };
+		B73947324F412B3AE7027971 /* StoreNavigationSceneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreNavigationSceneTests.swift; sourceTree = "<group>"; };
+		BD1C072D051EEF2B7F5C0B22 /* StoreProfileViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreProfileViewController.swift; sourceTree = "<group>"; };
 		C36D789C3091819CC51AC129 /* VistreaDemoAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VistreaDemoAppUITests.swift; sourceTree = "<group>"; };
+		D0AF5A4AC2F231873DEBC15F /* StoreShopViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreShopViewController.swift; sourceTree = "<group>"; };
+		D1C96B0D35BB91297C76ADA5 /* StoreReviewsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreReviewsViewController.swift; sourceTree = "<group>"; };
+		D5FB80E1467813FFBC120442 /* SnapCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapCatalogView.swift; sourceTree = "<group>"; };
+		DB72CB3966763D4980834E4A /* StoreSheetViewControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSheetViewControllerTests.swift; sourceTree = "<group>"; };
 		E2959B615B3C6EF5F06B971B /* v1 */ = {isa = PBXFileReference; lastKnownFileType = folder; name = v1; path = ../../scenarios/fixtures/v1; sourceTree = SOURCE_ROOT; };
+		E56FC06B268E9DAAD8D2C66A /* StoreSheetViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreSheetViewController.swift; sourceTree = "<group>"; };
+		F3F870DC1E1F675E9115E800 /* StoreScenarioUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreScenarioUITests.swift; sourceTree = "<group>"; };
 		FF679B2739AE67DF2AFF8D25 /* ScenarioListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioListViewController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -70,9 +124,26 @@
 		5801EEF4C3431A0A130779A0 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				F3F870DC1E1F675E9115E800 /* StoreScenarioUITests.swift */,
 				C36D789C3091819CC51AC129 /* VistreaDemoAppUITests.swift */,
 			);
 			path = UITests;
+			sourceTree = "<group>";
+		};
+		70C61AAD87DA1AB59690F2A6 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				50583BD72424FA292BD9CA73 /* MixedDeclarativeTests.swift */,
+				54188CDC4C2AD3F71F6735FF /* ScenarioContractTests.swift */,
+				AE307E373C62048BFC415047 /* SnapCatalogLayoutTests.swift */,
+				95D5A352229157B31413A9D0 /* StoreCartViewControllerTests.swift */,
+				0CB7A478F14EC75DEE333D02 /* StoreCatalogTests.swift */,
+				B73947324F412B3AE7027971 /* StoreNavigationSceneTests.swift */,
+				0E66869453BF66B9BD7F6AA6 /* StoreSearchViewControllerTests.swift */,
+				DB72CB3966763D4980834E4A /* StoreSheetViewControllerTests.swift */,
+				B3A1495818619BBC5CE7B0DC /* ViewHierarchyAssertions.swift */,
+			);
+			path = Tests;
 			sourceTree = "<group>";
 		};
 		8B9A305BAFBAA4FF098C1460 /* Sources */ = {
@@ -83,10 +154,23 @@
 				63342939C1226AF013189B27 /* ErrorViewController.swift */,
 				7DE89CC72CED9C526739A48E /* Info.plist */,
 				9BF0BBD1E3B9955E3D0FD21A /* InspectorViewController.swift */,
+				46A1B188CBD4EA76EA3D6DB3 /* MixedDeclarativeViewController.swift */,
 				161A15B4825786242639A385 /* ScenarioCatalog.swift */,
+				3568521494B6333C8A0B080C /* ScenarioEntryFactory.swift */,
 				FF679B2739AE67DF2AFF8D25 /* ScenarioListViewController.swift */,
 				90A39FF8BEF12A922224503C /* ScenarioModels.swift */,
+				8E6FAE6EF53D79A5F3581C5B /* ScenarioScreenViewController.swift */,
 				A5ED2A1D0CD4117541AA3A84 /* ScenarioStateViewController.swift */,
+				D5FB80E1467813FFBC120442 /* SnapCatalogView.swift */,
+				A27EBA7B50FB6B441B200409 /* StoreCartViewController.swift */,
+				53D0CFFE19C8384DE44FEDAF /* StoreCatalog.swift */,
+				89C49271E4EE1CD7391F542A /* StoreDetailViewController.swift */,
+				BD1C072D051EEF2B7F5C0B22 /* StoreProfileViewController.swift */,
+				D1C96B0D35BB91297C76ADA5 /* StoreReviewsViewController.swift */,
+				9500FE21838A68FC4411A133 /* StoreSearchViewController.swift */,
+				E56FC06B268E9DAAD8D2C66A /* StoreSheetViewController.swift */,
+				D0AF5A4AC2F231873DEBC15F /* StoreShopViewController.swift */,
+				9D99D419901B36F00EA0649C /* StoreTabBarView.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -104,6 +188,7 @@
 			isa = PBXGroup;
 			children = (
 				9CE5D298AC09901745691E29 /* VistreaDemoApp.app */,
+				705A1E3DA897EFE781603CA7 /* VistreaDemoAppTests.xctest */,
 				AF74E78A6D06EC30EA6DA60C /* VistreaDemoAppUITests.xctest */,
 			);
 			name = Products;
@@ -115,6 +200,7 @@
 				DCFF6F6C51E6067FCC9D17A6 /* Packages */,
 				A58A9FE85C959393ACD3F0BD /* scenarios */,
 				8B9A305BAFBAA4FF098C1460 /* Sources */,
+				70C61AAD87DA1AB59690F2A6 /* Tests */,
 				5801EEF4C3431A0A130779A0 /* UITests */,
 				E2959B615B3C6EF5F06B971B /* v1 */,
 				AE0706FE70A2B78B5ECCD82D /* Products */,
@@ -132,6 +218,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		79731F619607F7171023326B /* VistreaDemoAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 972AC70C39232D579DD60DCA /* Build configuration list for PBXNativeTarget "VistreaDemoAppTests" */;
+			buildPhases = (
+				3670BC16AE6C3A26D575D2FB /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				630EB65F80ED444F08E90D1F /* PBXTargetDependency */,
+			);
+			name = VistreaDemoAppTests;
+			packageProductDependencies = (
+			);
+			productName = VistreaDemoAppTests;
+			productReference = 705A1E3DA897EFE781603CA7 /* VistreaDemoAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		E594F3B5F2EA3C55CC4BA17E /* VistreaDemoApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1F0FBF3A303642FC26171C7F /* Build configuration list for PBXNativeTarget "VistreaDemoApp" */;
@@ -208,6 +312,7 @@
 			projectRoot = "";
 			targets = (
 				E594F3B5F2EA3C55CC4BA17E /* VistreaDemoApp */,
+				79731F619607F7171023326B /* VistreaDemoAppTests */,
 				F16C949F90DCDD3F6AE8AFC9 /* VistreaDemoAppUITests */,
 			);
 		};
@@ -234,10 +339,39 @@
 				2AA2F9C52814473976DE4F58 /* DebugRuntimeConnectionController.swift in Sources */,
 				6175E1103644B1D4A641D329 /* ErrorViewController.swift in Sources */,
 				30B78552160F986394FB6604 /* InspectorViewController.swift in Sources */,
+				0F08D3F51008B557B9F8018E /* MixedDeclarativeViewController.swift in Sources */,
 				724157E63D085AF834B6CA2B /* ScenarioCatalog.swift in Sources */,
+				1281967ECFFFDBF268F4F2BF /* ScenarioEntryFactory.swift in Sources */,
 				0FAC067D07C5F427A26FAE59 /* ScenarioListViewController.swift in Sources */,
 				DF8219F00E8536C126C4F418 /* ScenarioModels.swift in Sources */,
+				C317EA52A25FE6A5873A88D6 /* ScenarioScreenViewController.swift in Sources */,
 				07CF473491ED18BA9D5C3D3A /* ScenarioStateViewController.swift in Sources */,
+				2209AC4592EEB6BBBBA21E9A /* SnapCatalogView.swift in Sources */,
+				442C25C5256AED70A9386A6F /* StoreCartViewController.swift in Sources */,
+				289E0EE3611C6B1131F86A92 /* StoreCatalog.swift in Sources */,
+				00CF5689F190E9E38116569A /* StoreDetailViewController.swift in Sources */,
+				A4FF6D25E42C4978085E9400 /* StoreProfileViewController.swift in Sources */,
+				B154579808D69177DD021F4E /* StoreReviewsViewController.swift in Sources */,
+				A5E6C4E7C82740668679DEF0 /* StoreSearchViewController.swift in Sources */,
+				653B244B0E003F4CA25DB23B /* StoreSheetViewController.swift in Sources */,
+				F681B14F598B5135A699296F /* StoreShopViewController.swift in Sources */,
+				21882B4575DCEDEC6D1767A5 /* StoreTabBarView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3670BC16AE6C3A26D575D2FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2DAEA15E4D59613B5928E05C /* MixedDeclarativeTests.swift in Sources */,
+				6B8E7EB4FE7A3A94D29370AA /* ScenarioContractTests.swift in Sources */,
+				C8AA7FD900AC279578614D39 /* SnapCatalogLayoutTests.swift in Sources */,
+				2990B0E2D86180A938B66770 /* StoreCartViewControllerTests.swift in Sources */,
+				E6C85064F7265F811082A947 /* StoreCatalogTests.swift in Sources */,
+				F17E9EE145C18846AFBA207D /* StoreNavigationSceneTests.swift in Sources */,
+				F65BF11E24ACC7E3C01FE524 /* StoreSearchViewControllerTests.swift in Sources */,
+				82D3D21F71828FAD89911A93 /* StoreSheetViewControllerTests.swift in Sources */,
+				59C9C4052EB17C8D25A68F7B /* ViewHierarchyAssertions.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -245,6 +379,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AEF096B2D61F3D30953DA8D1 /* StoreScenarioUITests.swift in Sources */,
 				63DA21192944C4A772E4C9E9 /* VistreaDemoAppUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -252,6 +387,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		630EB65F80ED444F08E90D1F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E594F3B5F2EA3C55CC4BA17E /* VistreaDemoApp */;
+			targetProxy = 2A73222684B689C2A706957D /* PBXContainerItemProxy */;
+		};
 		68C2F3FD60C918E3F6ADBE41 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E594F3B5F2EA3C55CC4BA17E /* VistreaDemoApp */;
@@ -280,6 +420,25 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		50787D4764CCCE86C304A690 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.vistrea.demo-tests";
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VistreaDemoApp.app/VistreaDemoApp";
 			};
 			name = Debug;
 		};
@@ -463,6 +622,25 @@
 			};
 			name = Release;
 		};
+		F3D59A3CA0B780704448292D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.vistrea.demo-tests";
+				SDKROOT = iphoneos;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VistreaDemoApp.app/VistreaDemoApp";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -480,6 +658,15 @@
 			buildConfigurations = (
 				95CD6E020DAF3A8401E82B43 /* Debug */,
 				9A2EDA4C973FAF70DABA76CE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		972AC70C39232D579DD60DCA /* Build configuration list for PBXNativeTarget "VistreaDemoAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				50787D4764CCCE86C304A690 /* Debug */,
+				F3D59A3CA0B780704448292D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

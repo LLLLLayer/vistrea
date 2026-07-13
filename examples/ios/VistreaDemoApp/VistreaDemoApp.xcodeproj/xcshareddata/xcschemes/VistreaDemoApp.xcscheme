@@ -44,6 +44,17 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "79731F619607F7171023326B"
+               BuildableName = "VistreaDemoAppTests.xctest"
+               BlueprintName = "VistreaDemoAppTests"
+               ReferencedContainer = "container:VistreaDemoApp.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "F16C949F90DCDD3F6AE8AFC9"
                BuildableName = "VistreaDemoAppUITests.xctest"
                BlueprintName = "VistreaDemoAppUITests"

@@ -5,10 +5,8 @@ import VistreaRuntimeUIKit
 import VistreaRuntimeConnection
 #endif
 
-final class ScenarioStateViewController: UIViewController {
-    private let scenario: ScenarioDefinition
+final class ScenarioStateViewController: ScenarioScreenViewController {
     private let stateID: String
-    private let profile: String
     private let preferredWaitStepID: String?
     private var automaticTransition: DispatchWorkItem?
 #if DEBUG
@@ -21,25 +19,15 @@ final class ScenarioStateViewController: UIViewController {
         profile: String,
         preferredWaitStepID: String? = nil
     ) {
-        self.scenario = scenario
         self.stateID = stateID
-        self.profile = profile
         self.preferredWaitStepID = preferredWaitStepID
-        super.init(nibName: nil, bundle: nil)
+        super.init(scenario: scenario, profile: profile)
         title = Self.shortStateName(stateID)
-        navigationItem.largeTitleDisplayMode = .never
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is unavailable")
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
         view.accessibilityIdentifier = "\(stateID).root"
-        configureInspector()
         configureContent()
         scheduleWaitTransitionIfNeeded()
     }
@@ -107,18 +95,6 @@ final class ScenarioStateViewController: UIViewController {
     }
 #endif
 
-    private func configureInspector() {
-#if DEBUG
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Inspect",
-            style: .plain,
-            target: self,
-            action: #selector(showInspector)
-        )
-        navigationItem.rightBarButtonItem?.accessibilityIdentifier = "vistrea.inspector.capture"
-#endif
-    }
-
     private func configureContent() {
         guard let state = scenario.state(id: stateID) else {
             presentStateError("Unknown state \(stateID)")
@@ -150,12 +126,7 @@ final class ScenarioStateViewController: UIViewController {
             stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
         ])
 
-        let eyebrow = UILabel()
-        eyebrow.font = .preferredFont(forTextStyle: .caption1)
-        eyebrow.textColor = .secondaryLabel
-        eyebrow.text = "\(scenario.scenarioID)  •  \(profile)"
-        eyebrow.numberOfLines = 0
-        stack.addArrangedSubview(eyebrow)
+        stack.addArrangedSubview(makeContractEyebrow())
 
         let heading = UILabel()
         heading.font = .preferredFont(forTextStyle: .largeTitle)
@@ -308,62 +279,5 @@ final class ScenarioStateViewController: UIViewController {
             deadline: .now() + .milliseconds(milliseconds),
             execute: work
         )
-    }
-
-#if DEBUG
-    @objc private func showInspector() {
-        guard let window = view.window else {
-            return
-        }
-        do {
-            let adapter = UIKitRuntimeCaptureAdapter(
-                configuration: UIKitRuntimeCaptureConfiguration(
-                    projectID: try ProjectID(
-                        validating: "project_019f0000-0000-7000-8000-000000000001"
-                    ),
-                    buildID: try BuildID(
-                        validating: "build_019f0000-0000-7000-8000-000000000001"
-                    ),
-                    deviceID: try DeviceID(
-                        validating: "device_019f0000-0000-7000-8000-000000000001"
-                    ),
-                    environmentID: "demo",
-                    accountProfileID: "demo-user",
-                    featureContextRefs: [profile],
-                    sdkVersion: "0.1.0",
-                    adapterVersion: "0.1.0"
-                )
-            )
-            let result = try adapter.capture(
-                windows: [window],
-                scenarioID: scenario.scenarioID
-            )
-            present(
-                UINavigationController(
-                    rootViewController: InspectorViewController(result: result)
-                ),
-                animated: true
-            )
-        } catch {
-            presentStateError(String(describing: error))
-        }
-    }
-#endif
-
-    private func presentStateError(_ message: String) {
-        let alert = UIAlertController(title: "Demo state error", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
-    }
-
-    private static func shortStateName(_ value: String) -> String {
-        humanTitle(value.replacingOccurrences(of: "demo.state.", with: ""))
-    }
-
-    private static func humanTitle(_ value: String) -> String {
-        value
-            .split(whereSeparator: { $0 == "." || $0 == "_" || $0 == "-" })
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
     }
 }

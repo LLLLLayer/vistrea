@@ -44,6 +44,20 @@ targets:
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  VistreaDemoAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: VistreaDemoApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.demo-tests
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: true
+
   VistreaDemoAppUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -82,4 +96,5 @@ schemes:
     test:
       config: Debug
       targets:
+        - VistreaDemoAppTests
         - VistreaDemoAppUITests
