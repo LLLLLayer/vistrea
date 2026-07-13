@@ -102,9 +102,12 @@ test(
     await runCommand("xcrun", ["simctl", "boot", resources.simulatorId], {
       label: "Simulator boot",
     });
+    // A freshly created simulator's first boot migrates and seeds system
+    // state; under host load that regularly outlives two minutes without
+    // being unhealthy, so the window matches a loaded machine.
     await runCommand("xcrun", ["simctl", "bootstatus", resources.simulatorId, "-b"], {
       label: "Simulator boot readiness",
-      timeoutMilliseconds: 120_000,
+      timeoutMilliseconds: 360_000,
     });
 
     await runCommand(

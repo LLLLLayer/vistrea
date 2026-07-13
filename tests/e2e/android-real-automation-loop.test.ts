@@ -149,6 +149,13 @@ test(
       ["shell", "settings", "put", "system", "screen_off_timeout", "2147483647"],
       { allowFailure: true, label: "Android screen timeout" },
     );
+    // Under host load, SystemUI can ANR on a cold headless boot; its modal
+    // "isn't responding" dialog covers the app and eats every injected tap
+    // while rendering, focus, and coordinates all look perfectly healthy.
+    await runAdb(serial, ["shell", "settings", "put", "global", "hide_error_dialogs", "1"], {
+      allowFailure: true,
+      label: "Android error dialog suppression",
+    });
     // A cold boot reports boot_completed while the launcher is still
     // starting; launching the Demo into that churn races its capture surface
     // and connection, so wait for a focused launcher first.
@@ -253,10 +260,13 @@ test(
       );
       assert.match(launch.stdout, /Status:\s+ok/);
       try {
-        await resources.host.waitForRuntime(30_000);
+        // A cold headless emulator under host load spends its first minute in
+        // dexopt and boot storms; a short window misreads slowness as failure.
+        await resources.host.waitForRuntime(90_000);
         break;
       } catch (error) {
         if (attempt >= 3) {
+          await dumpDeviceEvidence(serial, "runtime-did-not-connect");
           throw error;
         }
       }
@@ -325,6 +335,7 @@ test(
       provider_id: "android-adb-input",
       actor_id: "vistrea-automation-acceptance",
     });
+    await waitForApplicationFocus(serial, debugPackage);
     const tapResult = await automation.execute({
       automation_session_id: session.automation_session_id,
       kind: "tap",
@@ -338,31 +349,36 @@ test(
     assert.equal(tapResult.authorization.decision, "allow");
     await delay(settleMilliseconds);
 
-    // The catalog Snapshot proves the tap actually navigated.
+    // The catalog Snapshot proves the tap actually navigated. Real input on a
+    // loaded host is noisy — a dialog, a focus race, or input-service churn
+    // can swallow an injected tap that resolved to the right coordinates —
+    // so the authorized action retries bounded times before failing.
     let catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
       hasStableId(snapshot, catalogStableId),
     );
-    if (!hasStableId(catalogSnapshot, catalogStableId)) {
-      // A system dialog can swallow one injected tap; dismiss it and repeat
-      // the same authorized action once before declaring a failure.
-      const dismissed = await dismissSystemDialogs(serial);
+    for (let attempt = 1; attempt <= 3 && !hasStableId(catalogSnapshot, catalogStableId); attempt += 1) {
+      await dismissSystemDialogs(serial);
       await ensureDisplayAwake(serial);
-      {
-        await automation.execute({
-          automation_session_id: session.automation_session_id,
-          kind: "tap",
-          target: { stable_id: homeStableId },
-          expected_snapshot_id: homeSnapshot["snapshot_id"] as string,
-          intent: { requested_effect: "Open the catalog screen after a system dialog" },
-        });
-        await delay(settleMilliseconds);
-        catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
-          hasStableId(snapshot, catalogStableId),
-        );
-      }
-      void dismissed;
+      await waitForApplicationFocus(serial, debugPackage);
+      await automation.execute({
+        automation_session_id: session.automation_session_id,
+        kind: "tap",
+        target: { stable_id: homeStableId },
+        expected_snapshot_id: homeSnapshot["snapshot_id"] as string,
+        intent: { requested_effect: `Open the catalog screen (input retry ${attempt})` },
+      });
+      await delay(settleMilliseconds);
+      catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+        hasStableId(snapshot, catalogStableId),
+      );
     }
     if (!hasStableId(catalogSnapshot, catalogStableId)) {
+      console.error(
+        `Tap resolution evidence: ${JSON.stringify({
+          resolution: tapResult.target_resolution,
+          display: homeSnapshot["display"],
+        })}`,
+      );
       await dumpDeviceEvidence(serial, "tap-did-not-navigate");
     }
     validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, catalogSnapshot);
@@ -502,9 +518,32 @@ test(
     assert.equal(confirmed.authorization.decision, "allow_once");
     assert.equal(confirmed.outcome, "uncertain");
     await delay(settleMilliseconds);
-    const confirmedCatalog = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+    let confirmedCatalog = await captureUntil(resources.host, knownSecrets, (snapshot) =>
       hasStableId(snapshot, catalogStableId),
     );
+    for (
+      let attempt = 1;
+      attempt <= 3 && !hasStableId(confirmedCatalog, catalogStableId);
+      attempt += 1
+    ) {
+      // Each retry authorizes a fresh confirmation token: the binding is per
+      // execution, and real input remains retryable without weakening it.
+      await dismissSystemDialogs(serial);
+      await ensureDisplayAwake(serial);
+      await waitForApplicationFocus(serial, debugPackage);
+      const retryToken = automation.confirmationTokenFor(dangerousCommand);
+      await automation.execute({
+        ...dangerousCommand,
+        intent: { ...dangerousCommand.intent, confirmation_token: retryToken },
+      });
+      await delay(settleMilliseconds);
+      confirmedCatalog = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+        hasStableId(snapshot, catalogStableId),
+      );
+    }
+    if (!hasStableId(confirmedCatalog, catalogStableId)) {
+      await dumpDeviceEvidence(serial, "confirmed-tap-did-not-navigate");
+    }
     assert.equal(hasStableId(confirmedCatalog, catalogStableId), true);
 
     // Physically return so exploration starts from Home as before.
@@ -573,6 +612,26 @@ test(
     await runAdb(serial, ["shell", "am", "force-stop", debugPackage], {
       label: "Android Demo storefront stop",
     });
+    // The Runtime token is one-shot per connection, so the relaunch installs
+    // a fresh descriptor exactly like the first launch did.
+    const storefrontTokenBytes = Buffer.from(resources.host.runtime.authorizationToken, "utf8");
+    try {
+      await runCommand(tokenInstaller, [], {
+        cwd: demoRoot,
+        environment: cleanEnvironment({
+          ANDROID_HOME: androidHome,
+          ANDROID_SERIAL: serial,
+          ADB: adbPath,
+          VISTREA_ANDROID_PACKAGE: debugPackage,
+        }),
+        input: storefrontTokenBytes,
+        secrets: knownSecrets,
+        forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
+        label: "one-shot Android Runtime token reinstallation",
+      });
+    } finally {
+      storefrontTokenBytes.fill(0);
+    }
     const storefrontLaunch = await runAdb(
       serial,
       [
@@ -688,21 +747,35 @@ async function ensureDisplayAwake(serial: string): Promise<void> {
  * eat an action would report a false navigation failure.
  */
 async function dismissSystemDialogs(serial: string): Promise<boolean> {
-  const focus = await runAdb(serial, ["shell", "dumpsys", "window", "windows"], {
+  // API 36 stopped printing focus lines under `dumpsys window windows`, and
+  // the CLOSE_SYSTEM_DIALOGS broadcast has been blocked since Android 12, so
+  // the honest probe is the rendered tree itself and the honest cure is
+  // tapping the dialog's own Wait button.
+  await runAdb(serial, ["shell", "uiautomator", "dump", "/sdcard/vistrea-dialog-probe.xml"], {
     allowFailure: true,
-    label: "Android system dialog probe",
+    label: "Android system dialog probe dump",
   });
-  if (!/Application Not Responding|mCurrentFocus=Window\{[^}]*(?:AnrDialog|Application Error)/i.test(focus.stdout)) {
+  const probe = await runAdb(serial, ["shell", "cat", "/sdcard/vistrea-dialog-probe.xml"], {
+    allowFailure: true,
+    label: "Android system dialog probe read",
+  });
+  if (!/isn&#39;t responding|isn't responding|has stopped|keeps stopping/i.test(probe.stdout)) {
     return false;
   }
-  await runAdb(serial, ["shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], {
-    allowFailure: true,
-    label: "Android system dialog dismissal",
-  });
-  await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"], {
-    allowFailure: true,
-    label: "Android system dialog back",
-  });
+  const wait = /text="Wait"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(probe.stdout);
+  if (wait !== null) {
+    const x = Math.round((Number(wait[1]) + Number(wait[3])) / 2);
+    const y = Math.round((Number(wait[2]) + Number(wait[4])) / 2);
+    await runAdb(serial, ["shell", "input", "tap", String(x), String(y)], {
+      allowFailure: true,
+      label: "Android system dialog wait tap",
+    });
+  } else {
+    await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"], {
+      allowFailure: true,
+      label: "Android system dialog back",
+    });
+  }
   await delay(1_000);
   return true;
 }
@@ -902,9 +975,35 @@ async function waitForAndroidBoot(resources: AcceptanceResources): Promise<void>
  * Screenshots remain the final visual truth: when injected input has no
  * visible effect, the acceptance preserves what the device actually showed.
  */
+/**
+ * Waits until the Demo window holds input focus. A cold emulator under host
+ * load can render a window whose taps still go nowhere; injecting before
+ * focus lands is indistinguishable from a missed tap.
+ */
+async function waitForApplicationFocus(serial: string, packageName: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const window = await runAdb(serial, ["shell", "dumpsys", "window"], {
+      allowFailure: true,
+      label: "Android focus readiness",
+    });
+    const focused = /mCurrentFocus=Window\{[^}]*\}/.exec(window.stdout)?.[0] ?? "";
+    if (focused.includes(packageName) || Date.now() >= deadline) {
+      return;
+    }
+    await delay(1_000);
+  }
+}
+
 async function dumpDeviceEvidence(serial: string, label: string): Promise<void> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), `vistrea-acceptance-${label}-`));
-  const focus = await runAdb(serial, ["shell", "dumpsys", "window", "windows"], {
+  const logcat = await runAdb(serial, ["logcat", "-d", "-t", "400"], {
+    allowFailure: true,
+    label: "logcat evidence",
+  });
+  await fs.writeFile(path.join(directory, "logcat.txt"), `${logcat.stdout}\n`, "utf8");
+  // API 36 no longer prints focus lines under the `windows` subcommand.
+  const focus = await runAdb(serial, ["shell", "dumpsys", "window"], {
     allowFailure: true,
     label: "window focus evidence",
   });
