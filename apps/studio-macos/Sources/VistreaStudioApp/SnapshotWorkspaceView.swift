@@ -111,11 +111,10 @@ private struct CanvasPane: View {
         .sheet(isPresented: $isMergeSheetPresented) {
             MergeStatesSheet(model: model)
         }
-        .onDisappear {
-            // The Host-side run continues; only the poll loop stops with
-            // the pane.
-            model.stopExplorationPolling()
-        }
+        // The pane deliberately has no `onDisappear` teardown: an exploration
+        // Operation belongs to the run, not to the visible tab. Switching tabs
+        // keeps the poll loop, the progress line, the automatic Canvas refresh
+        // after a succeeded run, and Cancel all alive.
     }
 
     @ViewBuilder
@@ -329,12 +328,21 @@ private struct ExplorationStatusView: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
-        if model.isExploring || model.explorationReport != nil || model.explorationError != nil {
+        if model.isExploring
+            || model.isExplorationRunAddressable
+            || model.explorationReport != nil
+            || model.explorationError != nil
+        {
             VStack(alignment: .leading, spacing: 4) {
-                if model.isExploring {
+                // Cancel stays reachable for every Operation the Host has not
+                // settled yet — including a run this Studio stopped polling —
+                // so a started exploration can never become unstoppable.
+                if model.isExploring || model.isExplorationRunAddressable {
                     HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
+                        if model.isExploring {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                         Text(progressLine)
                             .font(.caption)
                             .lineLimit(1)
@@ -459,7 +467,10 @@ private struct MergeStatesSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") {
+                    model.endMergeDecision()
+                    dismiss()
+                }
                 Button("Merge") {
                     Task {
                         let merged = await model.mergeSelectedStates(
@@ -478,7 +489,16 @@ private struct MergeStatesSheet: View {
         .padding(16)
         .frame(minWidth: 440)
         .onAppear {
+            // The decision starts here, against the graph revision on screen.
+            model.beginMergeDecision()
             survivorID = model.mergeSelectionStateIDs.first ?? ""
+        }
+        .onChange(of: model.mergeSelectionStateIDs) {
+            // A background reload can drop the survivor out of the selection;
+            // the picker must never keep a state the merge cannot name.
+            if !model.mergeSelectionStateIDs.contains(survivorID) {
+                survivorID = model.mergeSelectionStateIDs.first ?? ""
+            }
         }
     }
 
@@ -535,7 +555,10 @@ private struct SplitStateSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") {
+                    model.endSplitDecision()
+                    dismiss()
+                }
                 Button("Split") {
                     let moved = observationIDs.filter(selectedObservationIDs.contains)
                     Task {
@@ -559,6 +582,10 @@ private struct SplitStateSheet: View {
         }
         .padding(16)
         .frame(minWidth: 440)
+        .onAppear {
+            // The decision starts here, against the graph revision on screen.
+            model.beginSplitDecision()
+        }
     }
 
     private func binding(for observationID: String) -> Binding<Bool> {
@@ -980,6 +1007,13 @@ private struct ComparisonCaptionsView: View {
                 Caption(text: "The design asset could not be loaded: \(message)", isError: false)
             )
         }
+        // An overlay that cannot be reconciled with the screenshot says so
+        // instead of stretching the design asset behind the user's back.
+        if model.designAssetData != nil,
+           let caption = model.designOverlayPlacement?.reconciliationCaption
+        {
+            lines.append(Caption(text: caption, isError: false))
+        }
         return lines
     }
 }
@@ -1006,13 +1040,27 @@ private struct ComparisonOverlayView: View {
                         .frame(width: fitted.width, height: fitted.height)
                         .offset(x: fitted.minX, y: fitted.minY)
                         .accessibilityLabel("Captured application screenshot")
-                    if let assetData = model.designAssetData, let design = NSImage(data: assetData) {
-                        // The design asset scales to the screenshot size so
-                        // both images share one coordinate space.
+                    if let assetData = model.designAssetData,
+                       let design = NSImage(data: assetData),
+                       let placement = model.designOverlayPlacement
+                    {
+                        // The design canvas maps through the screenshot
+                        // coverage, exactly like the difference rectangles, so
+                        // both live in one coordinate frame even when the
+                        // screenshot covers less than the whole canvas. The
+                        // asset keeps its own aspect ratio; a canvas it cannot
+                        // fill is captioned, never silently stretched.
                         Image(nsImage: design)
                             .resizable()
-                            .frame(width: fitted.width, height: fitted.height)
-                            .offset(x: fitted.minX, y: fitted.minY)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(
+                                width: max(fitted.width * placement.unitRect.width, 1),
+                                height: max(fitted.height * placement.unitRect.height, 1)
+                            )
+                            .offset(
+                                x: fitted.minX + fitted.width * placement.unitRect.x,
+                                y: fitted.minY + fitted.height * placement.unitRect.y
+                            )
                             .opacity(overlayOpacity)
                             .allowsHitTesting(false)
                             .accessibilityLabel("Design reference overlay")
@@ -1742,10 +1790,47 @@ private struct EventTimelinePane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: "Events", systemImage: "clock.arrow.circlepath")
+            PaneHeader(title: "Events", systemImage: "clock.arrow.circlepath") {
+                pumpStatus
+            }
             Divider()
             content
         }
+    }
+
+    /// The Host's Runtime event-pump status, reported by `GET /v1/status`.
+    @ViewBuilder
+    private var pumpStatus: some View {
+        if case let .available(status) = model.connectionPhase, let pump = status.runtimeEvents {
+            Text(pump.state.rawValue)
+                .font(.caption)
+                .foregroundStyle(pumpColor(pump.state))
+                .help(pumpHelp(pump))
+                .accessibilityLabel("Runtime event pump \(pump.state.rawValue)")
+        }
+    }
+
+    private func pumpColor(_ state: RuntimeEventsPumpState) -> Color {
+        switch state {
+        case .running: .green
+        case .failed: .red
+        case .stopped: .orange
+        case .idle, .unsupported: .secondary
+        }
+    }
+
+    private func pumpHelp(_ status: RuntimeEventsStatus) -> String {
+        var parts = ["Runtime event pump: \(status.state.rawValue)"]
+        if let epoch = status.eventEpochID {
+            parts.append("epoch \(epoch)")
+        }
+        if let sequence = status.persistedThroughSequence {
+            parts.append("persisted through #\(sequence)")
+        }
+        if let code = status.errorCode {
+            parts.append("error \(code)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -2114,7 +2199,7 @@ private struct NodeDetailsPane: View {
                         }
                     }
                     if node.stableID != nil {
-                        Section("Tuning Preview (Debug)") {
+                        Section("Tuning Preview (Debug Runtime)") {
                             TuningPreviewControls(model: model, node: node)
                         }
                         Section("Active Previews") {
@@ -2135,7 +2220,9 @@ private struct NodeDetailsPane: View {
     }
 }
 
-/// The Debug-only alpha preview controls for one selected node.
+/// The alpha preview controls for one selected node. The Host, not this
+/// package, is what protects the capability: a Host without an authorized
+/// Debug Runtime rejects the routes and the failure is shown inline.
 private struct TuningPreviewControls: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     let node: NodePresentation

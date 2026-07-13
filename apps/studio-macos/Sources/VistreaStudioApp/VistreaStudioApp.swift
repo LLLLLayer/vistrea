@@ -73,7 +73,13 @@ private enum StudioComposition {
         }
 
         do {
-            return FixtureHostClient(snapshots: [try CanonicalFixtureLoader.loadDefaultSnapshot()])
+            // The fixture development mode composes the canonical Snapshot
+            // with a materialized Screen Graph, Deep Wiki, and Review Issue so
+            // the Canvas, identity curation, and knowledge links are reachable
+            // without a Host.
+            return FixtureWorkspace.makeClient(
+                snapshot: try CanonicalFixtureLoader.loadDefaultSnapshot()
+            )
         } catch {
             return UnavailableHostClient(message: error.localizedDescription)
         }

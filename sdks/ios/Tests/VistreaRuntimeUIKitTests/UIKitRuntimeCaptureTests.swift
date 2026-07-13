@@ -73,6 +73,32 @@ final class CaptureContentLimitsTests: XCTestCase {
         XCTAssertNil(missing.limitation)
     }
 
+    func testContentNotObservableLimitationNamesTheNodeAndSatisfiesTheProtocolCode() throws {
+        let (treeID, nodeID) = try makeScopeIDs()
+        let limitation = try CaptureContentLimits.contentNotObservable(
+            treeID: treeID,
+            nodeID: nodeID
+        )
+        // The Engine gates Screen State observation on this exact code; a
+        // rename here silently reopens the identity-corruption defect.
+        XCTAssertEqual(limitation.code, "ios.capture.content-not-observable")
+        XCTAssertEqual(limitation.severity, .warning)
+        XCTAssertFalse(limitation.retryable)
+        XCTAssertEqual(limitation.scope?.treeID, treeID)
+        XCTAssertEqual(limitation.scope?.nodeID, nodeID)
+        XCTAssertEqual(limitation.scope?.field, "child_ids")
+        // The message must name the condition, not merely the symptom.
+        XCTAssertTrue(limitation.message.contains("accessibility runtime is active"))
+        XCTAssertLessThanOrEqual(limitation.message.unicodeScalars.count, 1_024)
+        // protocol/schema/v1 CaptureLimitation.code pattern.
+        XCTAssertNotNil(
+            limitation.code.range(
+                of: "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$",
+                options: .regularExpression
+            )
+        )
+    }
+
     func testInvalidStableIdentifierLimitationNamesTheNodeAndField() throws {
         let (treeID, nodeID) = try makeScopeIDs()
         let limitation = try CaptureContentLimits.invalidStableIdentifier(
@@ -228,6 +254,80 @@ final class UIKitRuntimeCaptureAdapterTests: XCTestCase {
         }))
     }
 
+    /// A view that answers the accessibility container protocol with an empty
+    /// element list is exactly how a SwiftUI hosting view presents itself
+    /// while no app-level accessibility runtime is active. Its content is
+    /// unobserved, not absent, and the Snapshot must say so.
+    func testHostingStyleViewWithoutExposedElementsRecordsContentNotObservable() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = false
+
+        // Dormant host: declares a container, exposes nothing, draws content
+        // the capture cannot see.
+        let dormantHost = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 200))
+        dormantHost.accessibilityIdentifier = "dormant-host"
+        dormantHost.accessibilityElements = []
+        window.addSubview(dormantHost)
+
+        // The same declaration on a host that still owns a UIKit-backed
+        // subview: dormant SwiftUI content holding a TextField looks like
+        // this, and its drawn content is just as unobservable, so subview
+        // presence must not suppress the limitation.
+        let backedHost = UIView(frame: CGRect(x: 0, y: 200, width: 390, height: 200))
+        backedHost.accessibilityIdentifier = "backed-host"
+        let backedField = UITextField(frame: CGRect(x: 0, y: 0, width: 200, height: 40))
+        backedField.accessibilityIdentifier = "backed-field"
+        backedHost.addSubview(backedField)
+        backedHost.accessibilityElements = []
+        window.addSubview(backedHost)
+
+        // Live host: the same view once an accessibility runtime exposes its
+        // content. Nothing is lost, so nothing may be reported.
+        let liveHost = UIView(frame: CGRect(x: 0, y: 400, width: 390, height: 200))
+        liveHost.accessibilityIdentifier = "live-host"
+        let submit = UIAccessibilityElement(accessibilityContainer: liveHost)
+        submit.accessibilityLabel = "Submit"
+        submit.accessibilityTraits = .button
+        submit.accessibilityFrame = CGRect(x: 10, y: 410, width: 120, height: 44)
+        liveHost.accessibilityElements = [submit]
+        window.addSubview(liveHost)
+
+        let result = try makeAdapter().capture(windows: [window], includeScreenshot: false)
+        let nodes = try XCTUnwrap(result.snapshot.trees.first?.payload.inlineNodes)
+        func node(_ stableID: String) throws -> UiNode {
+            try XCTUnwrap(nodes.first(where: { $0.stableID?.rawValue == stableID }))
+        }
+        let unobservable = result.snapshot.captureLimitations.filter {
+            $0.code == "ios.capture.content-not-observable"
+        }
+
+        let dormantNode = try node("dormant-host")
+        XCTAssertTrue(dormantNode.childIDs.isEmpty)
+        XCTAssertTrue(unobservable.contains(where: {
+            $0.scope?.nodeID == dormantNode.nodeID && $0.scope?.field == "child_ids"
+        }))
+
+        let backedNode = try node("backed-host")
+        // The real subview is still captured; only the hosted content is lost.
+        XCTAssertEqual(backedNode.childIDs, [try node("backed-field").nodeID])
+        XCTAssertTrue(unobservable.contains(where: {
+            $0.scope?.nodeID == backedNode.nodeID && $0.scope?.field == "child_ids"
+        }))
+
+        let liveNode = try node("live-host")
+        XCTAssertEqual(liveNode.childIDs.count, 1)
+        XCTAssertEqual(
+            liveNode.extensions["ios.capture.semantics_source"],
+            .string("accessibility")
+        )
+        XCTAssertFalse(unobservable.contains(where: { $0.scope?.nodeID == liveNode.nodeID }))
+
+        // Exactly the two dormant hosts: the window, the text field, and every
+        // other plain UIKit view declare no container and must not be flagged.
+        XCTAssertEqual(unobservable.count, 2)
+        XCTAssertTrue(unobservable.allSatisfy { $0.severity == .warning && !$0.retryable })
+    }
+
     func testElementWithInvalidIdentifierOmitsStableIDAndRecordsALimitation() throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.isHidden = false
@@ -281,6 +381,12 @@ final class UIKitRuntimeCaptureAdapterTests: XCTestCase {
         // Every captured node still corresponds to a real UIView.
         XCTAssertTrue(nodes.contains(where: { $0.role == "button" }))
         XCTAssertTrue(nodes.contains(where: { $0.content.text == "Real subview" }))
+        // Observable UIKit content must never be reported as unobservable:
+        // these views declare no accessibility container, and the reordering
+        // container exposes a real subview.
+        XCTAssertFalse(result.snapshot.captureLimitations.contains(where: {
+            $0.code == "ios.capture.content-not-observable"
+        }))
     }
 
     func testInvalidAccessibilityIdentifierRecordsAStableIDLimitation() throws {
@@ -317,11 +423,13 @@ import VistreaRuntimeSwiftUI
 /// round-trips stable identity and role through that path.
 ///
 /// SwiftUI builds its accessibility node tree only while the app-level
-/// accessibility runtime is active — the state that VoiceOver, the
-/// Accessibility Inspector, and XCUITest/WebDriverAgent automation sessions
-/// establish. The test flips the same persistent simulator runtime flag
-/// those harnesses use and always restores the prior state. The toggle
-/// stays strictly inside this test bundle; the SDK itself only observes.
+/// accessibility runtime is active — the state VoiceOver and the
+/// Accessibility Inspector establish. The test flips that persistent
+/// simulator runtime flag itself and always restores the prior state. The
+/// toggle stays strictly inside this test bundle; the SDK itself only
+/// observes. Whether a WebDriverAgent session activates the same runtime is
+/// expected but not verified here, so the dormant path must degrade honestly
+/// rather than rely on it.
 @MainActor
 final class SwiftUIHostingCaptureTests: XCTestCase {
     private typealias AXSetEnabled = @convention(c) (Bool) -> Void
@@ -378,20 +486,37 @@ final class SwiftUIHostingCaptureTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
 
         let adapter = try makeAdapter()
-        // The persistent preference can lag the live accessibility cache
-        // (they resync on simulator reboot), so probe the effective state
-        // through the hosting view itself before asserting the dormant
-        // degradation: no exposed elements must mean no synthesized nodes.
+        // The dormant assertions below are conditional by necessity: once
+        // SwiftUI has built its accessibility node tree, disabling the runtime
+        // does not tear it down (measured), so the dormant state is only
+        // reachable while the runtime has never been active in this process.
+        // The effective state is therefore probed through the hosting view
+        // itself rather than assumed from the persistent preference.
         let dormantExposure = host.view.accessibilityElementCount() > 0
             || host.view.accessibilityElements?.isEmpty == false
         if !wasEnabled, !dormantExposure {
-            // Honest partial: with the accessibility runtime dormant the
-            // hosting view exposes no elements, so the capture degrades to
-            // the opaque container exactly as before this capability.
+            // With the accessibility runtime dormant the hosting view exposes
+            // no elements, so no child nodes can be synthesized. The capture
+            // must then say the content was not observed instead of reporting
+            // an empty screen.
             let dormant = try adapter.capture(windows: [window], includeScreenshot: false)
             let dormantNodes = try XCTUnwrap(dormant.snapshot.trees.first?.payload.inlineNodes)
             XCTAssertFalse(dormantNodes.contains(where: {
                 $0.extensions["ios.capture.semantics_source"] != nil
+            }))
+            let hostingNodeIDs = Set(
+                dormantNodes
+                    .filter { $0.nativeType.contains("_UIHostingView") }
+                    .map(\.nodeID)
+            )
+            XCTAssertFalse(hostingNodeIDs.isEmpty)
+            XCTAssertTrue(dormant.snapshot.captureLimitations.contains(where: { limitation in
+                guard limitation.code == "ios.capture.content-not-observable",
+                      let nodeID = limitation.scope?.nodeID
+                else {
+                    return false
+                }
+                return hostingNodeIDs.contains(nodeID)
             }))
         }
 
@@ -401,6 +526,14 @@ final class SwiftUIHostingCaptureTests: XCTestCase {
 
         let result = try adapter.capture(windows: [window], includeScreenshot: false)
         let nodes = try XCTUnwrap(result.snapshot.trees.first?.payload.inlineNodes)
+
+        // Unconditional precision check against a real, live hosting view: the
+        // content is observable now, so no view in this hierarchy may be
+        // reported as unobservable. A false positive here would keep the
+        // Screen State out of the graph entirely.
+        XCTAssertFalse(result.snapshot.captureLimitations.contains(where: {
+            $0.code == "ios.capture.content-not-observable"
+        }))
 
         let submitNode = try XCTUnwrap(
             nodes.first(where: { $0.stableID?.rawValue == "hosted-submit" }),

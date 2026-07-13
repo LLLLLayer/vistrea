@@ -131,3 +131,15 @@ await api.close();
 ```
 
 The composition root owns the Local Workspace and closes the API before closing storage. Restarting the API rotates the bearer token while the persisted Snapshot and Object data remain available through the same public ports.
+
+## Device automation
+
+Exploration Operations require a configured automation provider; without one they fail closed as `unsupported`:
+
+```bash
+node .build/typescript/apps/host/serve.js --workspace <abs-path> \
+  --automation adb --automation-serial <serial> [--adb-path <path>]
+# or
+node .build/typescript/apps/host/serve.js --workspace <abs-path> \
+  --automation wda --wda-url http://127.0.0.1:8100
+```

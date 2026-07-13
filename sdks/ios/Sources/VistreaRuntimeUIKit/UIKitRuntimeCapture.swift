@@ -381,6 +381,15 @@ public final class UIKitRuntimeCaptureAdapter {
             var elementNodes: [UiNode] = []
             var elementRootIDs: [NodeID] = []
             let elements = Self.synthesizableAccessibilityElements(of: item.view)
+            if elements.isEmpty, Self.exposesNoObservableContent(item.view) {
+                // The view hosts content that is only observable while an
+                // accessibility runtime is active. Reporting it as a childless
+                // leaf would be indistinguishable from an empty screen, so
+                // record the loss instead of implying there is nothing there.
+                limitations.append(
+                    try CaptureContentLimits.contentNotObservable(treeID: treeID, nodeID: nodeID)
+                )
+            }
             if !elements.isEmpty {
                 var visited: Set<ObjectIdentifier> = [ObjectIdentifier(item.view)]
                 let controller = Self.owningViewController(for: item.view)
@@ -555,6 +564,43 @@ public final class UIKitRuntimeCaptureAdapter {
         return (0..<min(count, Self.accessibilityElementCountLimit + 1))
             .compactMap { container.accessibilityElement(at: $0) as? NSObject }
             .filter { !($0 is UIView) }
+    }
+
+    /// Reports whether a view hosts content the capture cannot observe.
+    ///
+    /// A SwiftUI hosting view builds its accessibility node tree only while an
+    /// app-level accessibility runtime is active. While that runtime is
+    /// dormant the hosting view still answers the accessibility container
+    /// protocol, but with an empty element list, so the capture would emit it
+    /// as a childless leaf and silently lose the whole hosted screen.
+    ///
+    /// The signal is that present-but-empty container declaration: a view that
+    /// is not itself an accessibility element and returns a non-nil, empty
+    /// `accessibilityElements`. Plain UIKit views never reach that state; they
+    /// return `nil` because they declare no container at all. Measured on the
+    /// iOS 26 Simulator: a dormant `_UIHostingView` returns `[]`, while
+    /// `UIView`, `UIImageView`, and every view of a 144-view UIKit hierarchy
+    /// (navigation bar, table view, tab bar, controls) return `nil` with the
+    /// runtime both dormant and active; with the runtime active the same
+    /// hosting view returns its real elements, so the signal clears itself.
+    ///
+    /// Deliberately excluded: a container that exposes only UIView elements
+    /// (accessibility reordering) is observable through the subview walk, and
+    /// its element list is non-empty, so it never matches. Subview count is
+    /// not part of the signal: a dormant hosting view whose SwiftUI content
+    /// includes a UIKit-backed control (a `TextField`, a `ScrollView`) does
+    /// have subviews while its drawn content is still unobservable.
+    ///
+    /// Known conservative case: SwiftUI content hidden with
+    /// `.accessibilityHidden(true)` also vends zero elements and does not set
+    /// `accessibilityElementsHidden` on the hosting view, so it matches too.
+    /// The two are genuinely indistinguishable at the UIKit boundary, and
+    /// reporting "content not observed" remains the honest statement.
+    private static func exposesNoObservableContent(_ view: UIView) -> Bool {
+        guard !view.isAccessibilityElement, let declared = view.accessibilityElements else {
+            return false
+        }
+        return declared.isEmpty
     }
 
     /// Synthesizes nodes for non-view accessibility elements, recursing into

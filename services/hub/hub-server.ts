@@ -49,14 +49,20 @@ export interface StartHubServerOptions {
   readonly tls?: HubTlsConfig;
 }
 
+export interface HubProjectTokens {
+  readonly project_id: string;
+  /** Read-write token for this project only; never persisted. */
+  readonly bearerToken: string;
+  /** Read-only token for this project only: listing, resolution, and export. */
+  readonly readOnlyToken: string;
+}
+
 export interface HubServerHandle {
   readonly host: HubBindAddress;
   readonly port: number;
   readonly baseUrl: string;
-  /** Read-write token, generated once for this server lifetime and never persisted. */
-  readonly bearerToken: string;
-  /** Read-only token: refs listing/resolution and pack export only. */
-  readonly readOnlyToken: string;
+  /** One token pair per served project: a team's token never reaches another team's namespace. */
+  readonly projects: readonly HubProjectTokens[];
   close(): Promise<void>;
 }
 
@@ -65,6 +71,8 @@ type HubRole = "read-write" | "read-only";
 interface HubProjectRuntime {
   readonly project: HubProject;
   readonly exchange: PackExchangeService;
+  readonly bearerDigest: Buffer;
+  readonly readOnlyDigest: Buffer;
 }
 
 interface PublicError {
@@ -110,6 +118,8 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
         objects: project.objects,
         validator: options.validator,
       }),
+      bearerDigest: digestToken(randomBytes(TOKEN_BYTES).toString("base64url")),
+      readOnlyDigest: digestToken(randomBytes(TOKEN_BYTES).toString("base64url")),
     });
   }
   // A plain-HTTP bearer token must never leave the machine; TLS unlocks
@@ -130,14 +140,23 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
   ) {
     throw new DataError("invalid_argument", "The Hub port must be an integer from 0 through 65535.");
   }
-  const bearerToken = randomBytes(TOKEN_BYTES).toString("base64url");
-  const readOnlyToken = randomBytes(TOKEN_BYTES).toString("base64url");
-  const bearerDigest = digestToken(bearerToken);
-  const readOnlyDigest = digestToken(readOnlyToken);
+  // Tokens are minted per project: a Hub that served one pair for every
+  // namespace would give every team write access to every other team.
+  const projectTokens: HubProjectTokens[] = [];
+  for (const [projectId, runtime] of projects) {
+    const bearerToken = randomBytes(TOKEN_BYTES).toString("base64url");
+    const readOnlyToken = randomBytes(TOKEN_BYTES).toString("base64url");
+    projects.set(projectId, {
+      ...runtime,
+      bearerDigest: digestToken(bearerToken),
+      readOnlyDigest: digestToken(readOnlyToken),
+    });
+    projectTokens.push({ project_id: projectId, bearerToken, readOnlyToken });
+  }
 
   const handler = (request: IncomingMessage, response: ServerResponse): void => {
-    void handleRequest(request, response, projects, bearerDigest, readOnlyDigest).catch(
-      (error: unknown) => sendError(response, error),
+    void handleRequest(request, response, projects).catch((error: unknown) =>
+      sendError(response, error),
     );
   };
   const server: Server =
@@ -168,8 +187,7 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
     host: options.host,
     port: address.port,
     baseUrl: `${scheme}://${options.host === "::1" ? `[${options.host}]` : options.host}:${address.port}`,
-    bearerToken,
-    readOnlyToken,
+    projects: projectTokens,
     async close(): Promise<void> {
       if (!closed) {
         closed = true;
@@ -183,11 +201,8 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   projects: ReadonlyMap<string, HubProjectRuntime>,
-  bearerDigest: Buffer,
-  readOnlyDigest: Buffer,
 ): Promise<void> {
   response.setHeader("cache-control", "no-store");
-  const role = authorize(request, bearerDigest, readOnlyDigest);
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
 
@@ -201,11 +216,17 @@ async function handleRequest(
   }
   const projectId = decodeURIComponent(projectMatch[1] as string);
   const runtime = projects.get(projectId);
-  if (runtime === undefined) {
+  // The token is checked against THIS project, so a token for another
+  // namespace is indistinguishable from no token at all.
+  const role =
+    runtime === undefined
+      ? undefined
+      : authorize(request, runtime.bearerDigest, runtime.readOnlyDigest);
+  if (runtime === undefined || role === undefined) {
     throw new HubRequestError({
-      status: 404,
-      code: "not_found",
-      message: "This Hub instance does not serve the requested project.",
+      status: 401,
+      code: "unauthenticated",
+      message: "A valid Hub bearer token for this project is required.",
     });
   }
   const exchange = runtime.exchange;
@@ -327,17 +348,28 @@ async function handleRequest(
 
   if (resource === "packs:export" && request.method === "POST") {
     const body = await readJsonBody(request);
-    const pack = await exchange.exportPack(
-      body as unknown as Parameters<PackExchangeService["exportPack"]>[0],
+    assertExportCommand(body);
+    // Streamed, never persisted: one stored object per export would let any
+    // caller grow the Hub's disk without bound.
+    const bytes = await exchange.exportPackBytes(
+      body as unknown as Parameters<PackExchangeService["exportPackBytes"]>[0],
     );
-    workspace.registerVerifiedObjects([pack]);
-    response.writeHead(200, {
-      "content-type": PACK_MEDIA_TYPE,
-      "content-length": String(pack.byte_size),
-      etag: `"${pack.hash}"`,
-    });
-    for await (const chunk of await objects.open(pack.hash)) {
-      response.write(chunk);
+    response.writeHead(200, { "content-type": PACK_MEDIA_TYPE });
+    for await (const chunk of bytes) {
+      if (!response.write(chunk)) {
+        const settled = new AbortController();
+        try {
+          await Promise.race([
+            once(response, "drain", { signal: settled.signal }).catch(() => {}),
+            once(response, "close", { signal: settled.signal }).catch(() => {}),
+          ]);
+        } finally {
+          settled.abort();
+        }
+      }
+      if (response.destroyed) {
+        return;
+      }
     }
     response.end();
     return;
@@ -354,7 +386,7 @@ function authorize(
   request: IncomingMessage,
   readWriteDigest: Buffer,
   readOnlyDigest: Buffer,
-): HubRole {
+): HubRole | undefined {
   const header = request.headers.authorization;
   const match =
     typeof header === "string" ? /^Bearer ([A-Za-z0-9_-]{1,1024})$/i.exec(header) : null;
@@ -362,14 +394,7 @@ function authorize(
   const readWrite = match !== null && timingSafeEqual(candidate, readWriteDigest);
   const readOnly = match !== null && timingSafeEqual(candidate, readOnlyDigest);
   candidate.fill(0);
-  if (!readWrite && !readOnly) {
-    throw new HubRequestError({
-      status: 401,
-      code: "unauthenticated",
-      message: "A valid Hub bearer token is required.",
-    });
-  }
-  return readWrite ? "read-write" : "read-only";
+  return readWrite ? "read-write" : readOnly ? "read-only" : undefined;
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
@@ -435,7 +460,9 @@ function sendError(response: ServerResponse, error: unknown): void {
             ? 409
             : error.code === "resource_exhausted"
               ? 413
-              : 500;
+              : error.code === "unsupported"
+                ? 501
+                : 500;
   }
   writeJson(response, status, { error: { code, message } });
 }
@@ -447,4 +474,33 @@ function digestToken(token: string): Buffer {
 async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   server.closeAllConnections();
+}
+
+/** Export commands come from the network: their shape is not assumed. */
+function assertExportCommand(body: JsonObject): void {
+  const refNames = body["ref_names"];
+  const commitIds = body["commit_ids"];
+  const prerequisites = body["prerequisite_commit_ids"];
+  const message = body["message"];
+  const isStringArray = (value: unknown): boolean =>
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.length <= 64 &&
+      value.every((item) => typeof item === "string" && item.length > 0 && item.length <= 256));
+  if (
+    !isStringArray(refNames) ||
+    !isStringArray(commitIds) ||
+    !isStringArray(prerequisites) ||
+    body["created_by"] === null ||
+    typeof body["created_by"] !== "object" ||
+    Array.isArray(body["created_by"]) ||
+    (message !== undefined &&
+      (typeof message !== "string" || message.length === 0 || message.length > 2048))
+  ) {
+    throw new HubRequestError({
+      status: 400,
+      code: "invalid_argument",
+      message: "packs:export requires bounded ref names, commit ids, and an actor.",
+    });
+  }
 }

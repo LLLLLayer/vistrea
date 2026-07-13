@@ -40,6 +40,9 @@ const TUNING_PATCH_ID_PATTERN =
   /^patch_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const TUNING_APPLICATION_ID_PATTERN =
   /^tuningapp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const TAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const OBSERVATION_ID_PATTERN =
+  /^observation_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OPERATION_ID_PATTERN =
   /^operation_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OPERATION_STATES = new Set(["queued", "running", "succeeded", "failed", "cancelled"]);
@@ -111,6 +114,7 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "GetScreenState",
   "MergeScreenStates",
   "SplitScreenState",
+  "TagGraphVersion",
   "FindScreenPath",
   "CreateWikiNode",
   "UpdateWikiNode",
@@ -838,8 +842,10 @@ export class HostLocalApiClient {
         );
         const stateIds = command["state_ids"];
         if (
-          command["project_id"] === undefined ||
-          command["application_id"] === undefined ||
+          typeof command["project_id"] !== "string" ||
+          !PROJECT_ID_PATTERN.test(command["project_id"]) ||
+          typeof command["application_id"] !== "string" ||
+          !APPLICATION_ID_PATTERN.test(command["application_id"]) ||
           command["merged_by"] === undefined ||
           !Array.isArray(stateIds) ||
           stateIds.length < 2 ||
@@ -886,15 +892,19 @@ export class HostLocalApiClient {
         );
         const observationIds = command["observation_ids"];
         if (
-          command["project_id"] === undefined ||
-          command["application_id"] === undefined ||
+          typeof command["project_id"] !== "string" ||
+          !PROJECT_ID_PATTERN.test(command["project_id"]) ||
+          typeof command["application_id"] !== "string" ||
+          !APPLICATION_ID_PATTERN.test(command["application_id"]) ||
           command["split_by"] === undefined ||
           typeof command["state_id"] !== "string" ||
           !SCREEN_STATE_ID_PATTERN.test(command["state_id"]) ||
           !Array.isArray(observationIds) ||
           observationIds.length === 0 ||
           observationIds.length > 256 ||
-          observationIds.some((value) => typeof value !== "string" || value.length > 128) ||
+          observationIds.some(
+            (value) => typeof value !== "string" || !OBSERVATION_ID_PATTERN.test(value),
+          ) ||
           !Number.isSafeInteger(command["expected_graph_revision"]) ||
           (command["expected_graph_revision"] as number) < 1 ||
           (command["title"] !== undefined &&
@@ -916,6 +926,40 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentityCuration(value);
+      }
+      case "TagGraphVersion": {
+        const command = assertExactObject(
+          input,
+          ["project_id", "application_id", "tag_name"],
+          "Graph version tag input",
+        );
+        if (
+          typeof command["project_id"] !== "string" ||
+          !PROJECT_ID_PATTERN.test(command["project_id"]) ||
+          typeof command["application_id"] !== "string" ||
+          !APPLICATION_ID_PATTERN.test(command["application_id"]) ||
+          typeof command["tag_name"] !== "string" ||
+          !TAG_NAME_PATTERN.test(command["tag_name"])
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/version-tags",
+          command,
+          201,
+          options,
+        );
+        const version = requireObject(value);
+        assertKeys(version, [
+          "tag_name",
+          "screen_graph_id",
+          "source_graph_id",
+          "revision",
+          "state_count",
+          "transition_count",
+        ]);
+        return version;
       }
       case "FindScreenPath": {
         const query = assertExactObject(
@@ -1334,8 +1378,7 @@ export class HostLocalApiClient {
           !BUILD_ID_PATTERN.test(command["right_build_id"]) ||
           (command["baseline_tag"] !== undefined &&
             (typeof command["baseline_tag"] !== "string" ||
-              command["baseline_tag"].length === 0 ||
-              command["baseline_tag"].length > 128))
+              !TAG_NAME_PATTERN.test(command["baseline_tag"])))
         ) {
           throw invalidInput();
         }

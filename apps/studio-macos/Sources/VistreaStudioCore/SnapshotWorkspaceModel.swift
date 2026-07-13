@@ -66,7 +66,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isCapturing = false
     @Published public private(set) var operationError: String?
 
-    // Tuning preview state (Debug-only Host capability).
+    // Tuning preview state. The Host rejects these routes without an
+    // authorized Debug Runtime; Studio itself ships no build-time guard.
     @Published public private(set) var tuningPhase: EventTimelinePhase = .idle
     @Published public private(set) var activeTuning: [TuningApplicationSummary] = []
     @Published public private(set) var lastTuningApplication: TuningApplicationSummary?
@@ -103,6 +104,13 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isSplittingState = false
     @Published public private(set) var curationError: String?
     @Published public private(set) var graphConflictNote: String?
+    // The Screen Graph revision each open curation decision was taken
+    // against. A background reload advances `canvasGraph.revision`, so the
+    // submitted `expected_graph_revision` must come from here, never from the
+    // graph loaded at submit time.
+    @Published public private(set) var mergeDecisionRevision: UInt64?
+    @Published public private(set) var splitDecisionRevision: UInt64?
+    @Published public private(set) var splitDecisionStateID: String?
 
     // Design comparison workbench state.
     @Published public private(set) var designReferencesPhase: EventTimelinePhase = .idle
@@ -152,9 +160,11 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     /// Sleeps between exploration polls. Production always waits the fixed
     /// one-second interval — the pane never polls faster — while tests
-    /// replace this internal hook to script the loop deterministically.
-    var explorationPollSleep: @Sendable () async -> Void = {
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
+    /// replace this internal hook to script the loop deterministically. It
+    /// rethrows cancellation so the poll loop can honour a cancelled Task
+    /// instead of spinning.
+    var explorationPollSleep: @Sendable () async throws -> Void = {
+        try await Task.sleep(nanoseconds: 1_000_000_000)
     }
 
     public init(client: any HostClient) {
@@ -748,17 +758,88 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         mergeSelectionStateIDs = []
     }
 
+    /// Begins one merge decision against the Screen Graph revision that is on
+    /// screen right now. The Merge sheet calls this when it opens: a
+    /// background reload — a manual refresh, or the automatic reload after an
+    /// exploration succeeds — advances `canvasGraph.revision`, and submitting
+    /// that newer revision would launder a concurrent change into the user's
+    /// decision instead of conflicting with it.
+    public func beginMergeDecision() {
+        curationError = nil
+        graphConflictNote = nil
+        guard let graph = canvasGraph else {
+            mergeDecisionRevision = nil
+            curationError = "The Screen Graph is not loaded. Refresh the Canvas before merging."
+            return
+        }
+        mergeDecisionRevision = graph.revision
+    }
+
+    /// Ends the merge decision without submitting it.
+    public func endMergeDecision() {
+        mergeDecisionRevision = nil
+    }
+
+    /// Begins one split decision for the selected Screen State against the
+    /// graph revision that is on screen right now.
+    public func beginSplitDecision() {
+        curationError = nil
+        graphConflictNote = nil
+        guard let graph = canvasGraph, let stateID = selectedCanvasStateID else {
+            splitDecisionRevision = nil
+            splitDecisionStateID = nil
+            curationError = "Select a Screen State on a loaded Canvas before splitting it."
+            return
+        }
+        splitDecisionRevision = graph.revision
+        splitDecisionStateID = stateID
+    }
+
+    /// Ends the split decision without submitting it.
+    public func endSplitDecision() {
+        splitDecisionRevision = nil
+        splitDecisionStateID = nil
+    }
+
     /// Merges the selected states into the chosen survivor, guarded by the
-    /// loaded graph revision. A revision conflict reloads the graph and
-    /// leaves a changed-elsewhere note. Returns true when the merge
-    /// persisted.
+    /// revision the decision began against. A stale decision, and a revision
+    /// conflict the Host reports, both take the changed-elsewhere path
+    /// instead of overwriting concurrent curation. Returns true when the
+    /// merge persisted.
     public func mergeSelectedStates(into survivorID: String?, justification: String?) async -> Bool {
-        guard !isMergingStates,
-              mergeSelectionStateIDs.count >= 2,
-              let graph = canvasGraph,
+        guard !isMergingStates else {
+            return false
+        }
+        guard let graph = canvasGraph,
               let projectID = lastCanvasProjectID,
               let applicationID = lastCanvasApplicationID
         else {
+            curationError = "The Screen Graph is not loaded. Refresh the Canvas before merging."
+            return false
+        }
+        let stateIDs = mergeSelectionStateIDs
+        guard stateIDs.count >= 2 else {
+            curationError = "Select at least two active Screen States to merge."
+            return false
+        }
+        // A reload can drop the chosen survivor out of the selection; posting
+        // it would fail with an opaque identifier error instead of telling the
+        // user what changed.
+        if let survivorID, !stateIDs.contains(survivorID) {
+            curationError =
+                "The surviving state is no longer part of the selection. Choose a survivor from the current selection and merge again."
+            return false
+        }
+        guard let decisionRevision = mergeDecisionRevision else {
+            curationError =
+                "This merge was not opened against a loaded Screen Graph. Reopen the Merge sheet and try again."
+            return false
+        }
+        guard decisionRevision == graph.revision else {
+            // The graph reloaded under the open decision. The user decided
+            // against a revision that is no longer the loaded one.
+            noteGraphChangedElsewhere()
+            rearmOpenCurationDecisions()
             return false
         }
         isMergingStates = true
@@ -770,9 +851,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 MergeScreenStatesCommand(
                     projectID: projectID,
                     applicationID: applicationID,
-                    stateIDs: mergeSelectionStateIDs,
+                    stateIDs: stateIDs,
                     intoStateID: survivorID,
-                    expectedGraphRevision: graph.revision,
+                    expectedGraphRevision: decisionRevision,
                     mergedBy: .studio,
                     justification: justification
                 )
@@ -786,32 +867,60 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return false
         }
         mergeSelectionStateIDs = []
+        mergeDecisionRevision = nil
         await loadCanvas(projectID: projectID, applicationID: applicationID)
         return true
     }
 
     /// Splits the given observations out of the selected state, guarded by
-    /// the loaded graph revision. The moved set must be a strict subset.
-    /// Returns true when the split persisted.
+    /// the revision the decision began against. The moved set must be a
+    /// strict subset. Returns true when the split persisted.
     public func splitSelectedState(
         observationIDs: [String],
         title: String?,
         justification: String?
     ) async -> Bool {
-        guard !isSplittingState,
-              let stateID = selectedCanvasStateID,
-              let graph = canvasGraph,
+        guard !isSplittingState else {
+            return false
+        }
+        guard let graph = canvasGraph,
               let projectID = lastCanvasProjectID,
               let applicationID = lastCanvasApplicationID
         else {
+            curationError = "The Screen Graph is not loaded. Refresh the Canvas before splitting a state."
             return false
         }
-        let available = selectedCanvasStateObservationIDs
+        guard let stateID = selectedCanvasStateID else {
+            curationError = "Select a Screen State to split."
+            return false
+        }
+        guard let state = graph.states.first(where: { $0.id == stateID }) else {
+            curationError = "The selected Screen State is no longer part of the loaded Screen Graph."
+            return false
+        }
+        // A tombstone is a real, distinguishable reason — not a graph that
+        // changed elsewhere.
+        guard state.isActive else {
+            curationError =
+                "This Screen State was \(state.status) by identity curation. Only an active state can be split."
+            return false
+        }
+        let available = state.observationIDs
         guard !observationIDs.isEmpty,
               observationIDs.count < available.count,
               observationIDs.allSatisfy(available.contains)
         else {
             curationError = "Select at least one observation and leave at least one behind."
+            return false
+        }
+        guard let decisionRevision = splitDecisionRevision, splitDecisionStateID == stateID else {
+            curationError =
+                "This split was not opened for the selected Screen State. Reopen the Split sheet and try again."
+            return false
+        }
+        guard decisionRevision == graph.revision else {
+            noteGraphChangedElsewhere()
+            rearmOpenCurationDecisions()
             return false
         }
         isSplittingState = true
@@ -826,7 +935,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                     stateID: stateID,
                     observationIDs: observationIDs,
                     title: title,
-                    expectedGraphRevision: graph.revision,
+                    expectedGraphRevision: decisionRevision,
                     splitBy: .studio,
                     justification: justification
                 )
@@ -839,6 +948,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             )
             return false
         }
+        splitDecisionRevision = nil
+        splitDecisionStateID = nil
         await loadCanvas(projectID: projectID, applicationID: applicationID)
         await selectCanvasState(id: stateID)
         return true
@@ -855,11 +966,35 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         applicationID: String
     ) async {
         if Self.isConflict(error) {
-            graphConflictNote =
-                "The Screen Graph changed elsewhere. The latest graph has been reloaded; review it before retrying."
+            noteGraphChangedElsewhere()
             await loadCanvas(projectID: projectID, applicationID: applicationID)
+            rearmOpenCurationDecisions()
         } else {
             curationError = Self.message(for: error)
+        }
+    }
+
+    private func noteGraphChangedElsewhere() {
+        graphConflictNote =
+            "The Screen Graph changed elsewhere. The latest graph is shown; review it before retrying."
+    }
+
+    /// The user has now been shown the latest graph together with the
+    /// changed-elsewhere note, so a deliberate retry decides against the
+    /// revision that is on screen. A decision that was never opened stays
+    /// closed.
+    private func rearmOpenCurationDecisions() {
+        guard let revision = canvasGraph?.revision else {
+            mergeDecisionRevision = nil
+            splitDecisionRevision = nil
+            splitDecisionStateID = nil
+            return
+        }
+        if mergeDecisionRevision != nil {
+            mergeDecisionRevision = revision
+        }
+        if splitDecisionRevision != nil {
+            splitDecisionRevision = revision
         }
     }
 
@@ -878,6 +1013,19 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         return DesignOverlayProjection.regions(
             for: comparison,
             tree: snapshot.tree,
+            screenshot: snapshot.screenshot
+        )
+    }
+
+    /// Where the selected design reference's canvas lands on the selected
+    /// Snapshot's screenshot, in the same unit frame `differenceRegions` uses.
+    /// Nil when there is nothing to overlay.
+    public var designOverlayPlacement: DesignOverlayPlacement? {
+        guard let reference = selectedDesignReference, let snapshot = selectedSnapshot else {
+            return nil
+        }
+        return DesignOverlayProjection.placement(
+            for: reference,
             screenshot: snapshot.screenshot
         )
     }
@@ -1036,10 +1184,30 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
     // MARK: - Exploration Operations (device automation Host capability)
 
+    /// The canonical terminal Operation states. A run that reached one of
+    /// them is no longer addressable for cancellation.
+    private static let terminalExplorationStates: Set<String> = ["succeeded", "failed", "cancelled"]
+
+    /// True while an exploration Operation this Studio started is still
+    /// addressable on the Host: Cancel must stay reachable even when the poll
+    /// loop is no longer running (a superseded start, a torn-down model), so
+    /// the run can never be orphaned.
+    public var isExplorationRunAddressable: Bool {
+        guard explorationOperationID != nil else {
+            return false
+        }
+        guard let state = explorationState else {
+            return true
+        }
+        return !Self.terminalExplorationStates.contains(state)
+    }
+
     /// Starts one background exploration Operation and polls it to a
-    /// terminal state. A Host without a configured automation provider
-    /// rejects the run with HTTP 501 code `unsupported`; the message is
-    /// shown inline and the controls stay usable.
+    /// terminal state. The poll loop is bound to the Operation, not to the
+    /// Canvas pane: switching tabs never stops it. A Host without a
+    /// configured automation provider rejects the run with HTTP 501 code
+    /// `unsupported`; the message is shown inline and the controls stay
+    /// usable.
     public func startExploration(
         maximumActions: Int,
         maximumDepth: Int? = nil,
@@ -1056,39 +1224,43 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         explorationReport = nil
         explorationProgress = nil
         explorationLastEventMessage = nil
-        explorationState = nil
-        explorationOperationID = nil
         let command = ExplorationRunCommand(
             maximumActions: maximumActions,
             maximumDepth: maximumDepth,
             settleMilliseconds: settleMilliseconds,
             excludedStableIDs: excludedStableIDs.isEmpty ? nil : excludedStableIDs
         )
-        let operationID: String
+        let reference: ExplorationOperationRef
         do {
-            let ref = try await client.runExploration(command)
+            reference = try await client.runExploration(command)
             guard generation == explorationGeneration else {
                 return
             }
-            operationID = ref.operationID
-            explorationOperationID = ref.operationID
-            explorationState = ref.state
         } catch {
             guard generation == explorationGeneration else {
                 return
             }
             explorationError = Self.explorationMessage(for: error)
             isExploring = false
+            // The previous Operation identity survives a rejected start: a
+            // Host that rejects the run because one is already active must
+            // leave that run cancellable, not orphaned.
             return
         }
-        await pollExploration(operationID: operationID, generation: generation)
+        // Only an accepted run replaces the previous Operation identity.
+        explorationOperationID = reference.operationID
+        explorationState = reference.state
+        await pollExploration(operationID: reference.operationID, generation: generation)
     }
 
-    /// Requests cancellation of the running exploration. The Operation stays
-    /// running until the walk observes the request; the poll loop then shows
-    /// the terminal `cancelled` state.
+    /// Requests cancellation of the addressable exploration. The Operation
+    /// stays running until the walk observes the request; the poll loop then
+    /// shows the terminal `cancelled` state.
     public func cancelExploration() async {
-        guard isExploring, !isCancellingExploration, let operationID = explorationOperationID else {
+        guard !isCancellingExploration,
+              isExplorationRunAddressable,
+              let operationID = explorationOperationID
+        else {
             return
         }
         isCancellingExploration = true
@@ -1105,19 +1277,31 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
-    /// Stops the exploration poll loop without cancelling the Host-side run,
-    /// when the Canvas pane disappears or a newer request supersedes it.
+    /// Tears down the exploration poll loop without cancelling the Host-side
+    /// run, when the model itself is discarded or a newer request supersedes
+    /// it. The Canvas pane must never call this: a tab switch keeps the run
+    /// polling. The Operation identity survives so Cancel stays reachable.
     public func stopExplorationPolling() {
         explorationGeneration += 1
         isExploring = false
     }
 
     /// Polls the exploration Operation once per interval until it reaches a
-    /// terminal state or the generation guard supersedes the loop.
+    /// terminal state, the generation guard supersedes the loop, or the
+    /// enclosing Task is cancelled.
     private func pollExploration(operationID: String, generation: Int) async {
         while generation == explorationGeneration {
-            await explorationPollSleep()
-            guard generation == explorationGeneration else {
+            if Task.isCancelled {
+                return
+            }
+            do {
+                try await explorationPollSleep()
+            } catch {
+                // The only failure a sleep reports is cancellation: stop the
+                // loop instead of spinning through it.
+                return
+            }
+            guard !Task.isCancelled, generation == explorationGeneration else {
                 return
             }
             let record: ExplorationOperationRecord

@@ -66,6 +66,12 @@ if (
 const validator = await createRepositoryProtocolValidator({
   repositoryRoot: process.cwd(),
 });
+const workspaceRoots = new Set(projectPairs.map((pair) => pair.workspaceRoot as string));
+if (workspaceRoots.size !== projectPairs.length) {
+  // Two namespaces over one Workspace would collapse the isolation they claim.
+  process.stderr.write(USAGE);
+  process.exit(2);
+}
 const openWorkspaces = [] as Awaited<ReturnType<typeof LocalDataWorkspace.open>>[];
 const projects = [] as { project_id: string; workspace: never; objects: never }[];
 for (const pair of projectPairs) {
@@ -100,9 +106,11 @@ try {
   await handle.writeFile(
     `${JSON.stringify({
       hub_url: hub.baseUrl,
-      hub_token: hub.bearerToken,
-      hub_read_token: hub.readOnlyToken,
-      project_ids: projectPairs.map((pair) => pair.projectId),
+      projects: hub.projects.map((project) => ({
+        project_id: project.project_id,
+        hub_token: project.bearerToken,
+        hub_read_token: project.readOnlyToken,
+      })),
     })}\n`,
     "utf8",
   );

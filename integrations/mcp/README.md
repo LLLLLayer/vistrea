@@ -36,6 +36,7 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_get_screen_state` | `GetScreenState` | Read one Screen State with its representative Snapshot reference |
 | `vistrea_merge_screen_states` | `MergeScreenStates` | Manually collapse states that are one product screen |
 | `vistrea_split_screen_state` | `SplitScreenState` | Manually separate wrongly deduplicated observations |
+| `vistrea_tag_graph_version` | `TagGraphVersion` | Freeze the materialized graph as the baseline a build diff classifies against |
 | `vistrea_find_screen_path` | `FindScreenPath` | Find acyclic transition paths between two Screen States |
 | `vistrea_create_wiki_node` | `CreateWikiNode` | Create one Deep Wiki knowledge node |
 | `vistrea_update_wiki_node` | `UpdateWikiNode` | Revise one Deep Wiki node with optimistic concurrency |
@@ -51,14 +52,11 @@ This module is a runnable Model Context Protocol stdio server built with the off
 | `vistrea_list_validation_findings` | `ListValidationFindings` | Page Findings by run, status, and severity |
 | `vistrea_get_validation_finding` | `GetValidationFinding` | Load one Finding with evidence |
 | `vistrea_suppress_validation_finding` | `SuppressValidationFinding` | Suppress one open Finding with a justified reason |
-| `vistrea_compare_builds` | `CompareBuilds` | Diff observed coverage between two builds |
+| `vistrea_compare_builds` | `CompareBuilds` | Diff observed coverage between two builds, classifying removals against an optional baseline tag |
 | `vistrea_get_build_diff` | `GetBuildDiff` | Load one persisted Build Diff |
 | `vistrea_export_pack` | `ExportPack` | Export refs and commits as a portable `.vistrea-pack` Object |
 | `vistrea_import_pack` | `ImportPack` | Import a base64 `.vistrea-pack` into the local Workspace |
 | `vistrea_get_object` | `GetObject` | Download one content-addressed Object into a new local file |
-| `vistrea_run_exploration` | `RunExploration` | Start bounded deterministic exploration as a background Operation |
-| `vistrea_get_exploration_operation` | `GetExplorationOperation` | Read one exploration Operation with progress and its report |
-| `vistrea_cancel_exploration` | `CancelExploration` | Request cancellation of the running exploration Operation |
 | `vistrea_run_exploration` | `RunExploration` | Start bounded deterministic exploration as a background Operation |
 | `vistrea_get_exploration_operation` | `GetExplorationOperation` | Read one exploration Operation with progress and its report |
 | `vistrea_cancel_exploration` | `CancelExploration` | Request cancellation of the running exploration Operation |

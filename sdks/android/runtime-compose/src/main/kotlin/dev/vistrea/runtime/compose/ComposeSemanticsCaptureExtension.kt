@@ -21,18 +21,32 @@ import dev.vistrea.runtime.android.ViewSemanticsCaptureExtension
  * test-only hook is involved — and reads its `SemanticsOwner`'s unmerged
  * semantics tree.
  *
- * Every unmerged semantics node maps to one canonical `UiNode`: `testTag`
- * becomes `stable_id`, the declared `VistreaRole` fact (falling back to the
- * Compose `Role` and structural facts) becomes `role`, text and content
+ * Every placed unmerged semantics node maps to one canonical `UiNode`:
+ * `testTag` becomes `stable_id`, the declared `VistreaRole` fact (falling back
+ * to the Compose `Role` and structural facts) becomes `role`, text and content
  * description fill the shared content fields, and semantics actions become
  * observation-level node actions. Geometry converts from pixels to logical
  * points with the same density and frame origin the View walker uses, so a
  * Compose node's frame matches what an equally placed View would report.
  *
+ * Only placed nodes are captured. `SemanticsNode.children` filters detached
+ * and deactivated nodes but not unplaced ones, which is why Compose's own
+ * accessibility bridge applies an `isPlaced` filter of its own. A node that
+ * was never placed reports `Offset.Zero` for `positionInRoot`, so capturing it
+ * would emit a phantom node stacked on the Compose root's top-left corner that
+ * automation could target; worse, `LazyColumn` and `LazyRow` prefetch composes
+ * items ahead of the viewport, so the same screen would otherwise capture a
+ * different node set depending on scroll velocity and frame timing, and the
+ * differing structural digest would split one Screen State into several across
+ * runs. The filter keeps the captured node set — and therefore the structural
+ * digest — a function of what the layout actually placed.
+ *
  * The capture observes only: it never invokes semantics actions or
  * application business methods. Note the result is the semantics tree, not
  * the layout-node tree — composables without any semantics do not produce
- * nodes.
+ * nodes, and the semantics tree carries no rendering facts at all, which the
+ * host node declares once as an `android.capture.compose-visual-unavailable`
+ * Capture Limitation.
  */
 class ComposeSemanticsCaptureExtension : ViewSemanticsCaptureExtension {
     override val semanticsSource: String = "compose"
@@ -43,6 +57,7 @@ class ComposeSemanticsCaptureExtension : ViewSemanticsCaptureExtension {
     ): CapturedSemanticSubtree? {
         val owner = (view as? RootForTest)?.semanticsOwner ?: return null
         val environment = ComposeCaptureEnvironment(
+            treeId = context.treeId,
             hostFrameOriginX = context.hostFrameOriginX,
             hostFrameOriginY = context.hostFrameOriginY,
             density = context.density,
@@ -53,15 +68,35 @@ class ComposeSemanticsCaptureExtension : ViewSemanticsCaptureExtension {
         // already represented by the host View's own node; its children become
         // the host node's direct children.
         val directChildIds = appendChildren(
-            children = owner.unmergedRootSemanticsNode.children,
+            children = owner.unmergedRootSemanticsNode.placedChildren(),
             parentId = context.hostNodeId,
             parentPath = context.hostPath,
             context = context,
             environment = environment,
             output = nodes,
         )
-        return CapturedSemanticSubtree(directChildIds = directChildIds, nodes = nodes)
+        return CapturedSemanticSubtree(
+            directChildIds = directChildIds,
+            nodes = nodes,
+            hostLimitations = listOf(
+                composeVisualUnavailableLimitation(
+                    treeId = context.treeId,
+                    hostNodeId = context.hostNodeId,
+                ),
+            ),
+        )
     }
+
+    /**
+     * The semantic children the layout actually placed.
+     *
+     * `children` keeps measured-but-unplaced nodes — most visibly the items a
+     * lazy list prefetches ahead of the viewport — and those carry no real
+     * position, so they must never become captured nodes. `LayoutInfo.isPlaced`
+     * is the public form of the check Compose's accessibility bridge makes.
+     */
+    private fun SemanticsNode.placedChildren(): List<SemanticsNode> =
+        children.filter { it.layoutInfo.isPlaced }
 
     private fun appendChildren(
         children: List<SemanticsNode>,
@@ -87,7 +122,7 @@ class ComposeSemanticsCaptureExtension : ViewSemanticsCaptureExtension {
             config.getOrNull(SemanticsProperties.TestTag),
             path,
         )
-        val children = node.children
+        val children = node.placedChildren()
         val childIds = children.mapIndexed { index, child ->
             context.nodeIdFactory.nodeId(
                 child.config.getOrNull(SemanticsProperties.TestTag),

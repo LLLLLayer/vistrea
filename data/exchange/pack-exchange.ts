@@ -82,7 +82,18 @@ export class PackExchangeService implements ExchangeService {
     this.#validator = options.validator;
   }
 
-  async exportPack(command: ExportPackCommand): Promise<ObjectRef> {
+  /**
+   * The pack bytes for a set of refs WITHOUT persisting the pack as an
+   * object. Relays stream exports to callers; persisting one object per
+   * request would let a read-only caller grow the store without bound, since
+   * every export carries a fresh creation time and message.
+   */
+  async exportPackBytes(command: ExportPackCommand): Promise<ByteStream> {
+    const manifest = await this.#buildPackManifest(command);
+    return this.#packByteStream(manifest);
+  }
+
+  async #buildPackManifest(command: ExportPackCommand): Promise<PackManifestWire> {
     const refNames = uniqueSorted(command.ref_names ?? []);
     const headCommitIds = uniqueSorted(command.commit_ids ?? []);
     const prerequisiteHeadIds = uniqueSorted(command.prerequisite_commit_ids ?? []);
@@ -164,6 +175,11 @@ export class PackExchangeService implements ExchangeService {
     }
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.exchangePackManifest, manifest);
 
+    return manifest;
+  }
+
+  async exportPack(command: ExportPackCommand): Promise<ObjectRef> {
+    const manifest = await this.#buildPackManifest(command);
     const packRef = await this.#objects.put(this.#packByteStream(manifest), {
       media_type: PACK_MEDIA_TYPE,
       compression: "none",

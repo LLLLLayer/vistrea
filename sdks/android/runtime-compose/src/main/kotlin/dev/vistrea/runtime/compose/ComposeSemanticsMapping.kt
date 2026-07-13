@@ -10,6 +10,9 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.IntSize
 import dev.vistrea.protocol.v1.AccessibilityProperties
+import dev.vistrea.protocol.v1.CaptureLimitation
+import dev.vistrea.protocol.v1.CaptureLimitationScope
+import dev.vistrea.protocol.v1.CaptureLimitationSeverity
 import dev.vistrea.protocol.v1.Extensions
 import dev.vistrea.protocol.v1.NodeAction
 import dev.vistrea.protocol.v1.NodeId
@@ -18,11 +21,20 @@ import dev.vistrea.protocol.v1.RedactedContentField
 import dev.vistrea.protocol.v1.Rect
 import dev.vistrea.protocol.v1.StableId
 import dev.vistrea.protocol.v1.TextContent
+import dev.vistrea.protocol.v1.TreeId
 import dev.vistrea.protocol.v1.UiNode
+import dev.vistrea.runtime.android.CaptureContentLimits
 import kotlinx.serialization.json.JsonPrimitive
 
 /** The `native_type` recorded for every captured Compose semantics node. */
 internal const val COMPOSE_SEMANTICS_NATIVE_TYPE = "androidx.compose.ui.semantics.SemanticsNode"
+
+/**
+ * Recorded once on the Compose host node: the semantics tree exposes no
+ * rendering facts, so the whole Compose subtree carries no `visual`, no
+ * `z_index`, and no `source_context`.
+ */
+internal const val COMPOSE_VISUAL_UNAVAILABLE_CODE = "android.capture.compose-visual-unavailable"
 
 /** Pixel-space geometry of one Compose semantics node, host-relative. */
 internal data class ComposeNodeGeometry(
@@ -44,6 +56,8 @@ internal data class ComposeNodeIdentity(
 
 /** Capture environment shared by every node of one host View subtree. */
 internal data class ComposeCaptureEnvironment(
+    /** The tree the captured nodes belong to; scopes Capture Limitations. */
+    val treeId: TreeId,
     /** Host View frame origin in logical points, from the walker's frame math. */
     val hostFrameOriginX: Double,
     val hostFrameOriginY: Double,
@@ -51,6 +65,29 @@ internal data class ComposeCaptureEnvironment(
     val density: Double,
     /** Whether the host View itself is shown with a non-zero alpha. */
     val hostVisible: Boolean,
+)
+
+/**
+ * States plainly that the Compose semantics tree carries no rendering facts.
+ *
+ * `SemanticsNode` exposes identity, structure, text, state, and geometry, but
+ * no colors, fonts, alpha, drawing order, or composable source identity, and
+ * the only route to text layout is invoking a semantics action, which an
+ * observation-only capture must never do. Rather than inventing values, the
+ * host node declares the gap so design review, pixel comparison, and tuning
+ * read the absence as unavailable, not as defaults.
+ */
+internal fun composeVisualUnavailableLimitation(
+    treeId: TreeId,
+    hostNodeId: NodeId,
+): CaptureLimitation = CaptureLimitation(
+    code = COMPOSE_VISUAL_UNAVAILABLE_CODE,
+    severity = CaptureLimitationSeverity.WARNING,
+    message = "The Compose semantics tree exposes no rendering facts, so nodes below this " +
+        "host carry no visual properties, no z_index, and no source_context.",
+    scope = CaptureLimitationScope(treeId = treeId, nodeId = hostNodeId, field = "visual"),
+    retryable = false,
+    extensions = Extensions.empty(),
 )
 
 /**
@@ -84,13 +121,56 @@ internal fun mapComposeSemanticsNode(
     }
     val role = composeSemanticsRole(config)
     val actions = composeSemanticsActions(config)
-    val content = composeSemanticsContent(config)
     val invisibleToUser = config.contains(SemanticsProperties.InvisibleToUser)
+
+    // Every observed string is bounded against the canonical field limits and
+    // every loss is recorded, so one over-long Compose text node degrades to a
+    // flagged value instead of failing the whole Snapshot at Host validation.
+    val limitations = mutableListOf<CaptureLimitation>()
+    fun bounded(
+        value: String?,
+        field: String,
+        limit: Int = CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+    ): String? {
+        val result = CaptureContentLimits.bounded(
+            value = value,
+            limit = limit,
+            field = field,
+            treeId = environment.treeId,
+            nodeId = identity.nodeId,
+        )
+        result.limitation?.let(limitations::add)
+        return result.value
+    }
+
+    val observed = composeSemanticsContent(config)
+    val content = TextContent(
+        text = bounded(observed.text, "content.text"),
+        value = bounded(observed.value, "content.value"),
+        placeholder = bounded(
+            observed.placeholder,
+            "content.placeholder",
+            CaptureContentLimits.PLACEHOLDER_CODE_POINT_LIMIT,
+        ),
+        contentDescription = bounded(observed.contentDescription, "content.content_description"),
+        redactedFields = observed.redactedFields,
+    )
+    val stableId = config.getOrNull(SemanticsProperties.TestTag)?.let { tag ->
+        val parsed = runCatching { StableId(tag) }.getOrNull()
+        if (parsed == null) {
+            // A present but nonconforming testTag must not silently erase
+            // stable identity; report why it vanished.
+            limitations += CaptureContentLimits.invalidStableIdentifier(
+                treeId = environment.treeId,
+                nodeId = identity.nodeId,
+            )
+        }
+        parsed
+    }
+
     return UiNode(
         nodeId = identity.nodeId,
-        stableId = config.getOrNull(SemanticsProperties.TestTag)?.let { tag ->
-            runCatching { StableId(tag) }.getOrNull()
-        },
+        stableId = stableId,
         parentId = identity.parentId,
         childIds = identity.childIds,
         nativeType = COMPOSE_SEMANTICS_NATIVE_TYPE,
@@ -117,16 +197,22 @@ internal fun mapComposeSemanticsNode(
             },
         ),
         actions = actions,
+        // The semantics tree exposes no colors, fonts, alpha, drawing order,
+        // or composable source identity, so `visual`, `z_index`, and
+        // `source_context` stay absent instead of being invented; the host
+        // node declares that gap once, as a Capture Limitation.
         accessibility = AccessibilityProperties(
-            label = config.getOrNull(SemanticsProperties.ContentDescription)
-                ?.joinToString(separator = "\n")
-                ?.takeIf(String::isNotEmpty),
-            value = if (config.contains(SemanticsProperties.Password)) null else content.value,
+            label = bounded(observed.contentDescription, "accessibility.label"),
+            value = if (config.contains(SemanticsProperties.Password)) {
+                null
+            } else {
+                bounded(observed.value, "accessibility.value")
+            },
             role = role,
             hidden = invisibleToUser,
         ),
         relatedNodes = emptyList(),
-        captureLimitations = emptyList(),
+        captureLimitations = limitations.toList(),
         extensions = Extensions.of(
             mapOf(
                 "android.compose.semantics_node_id" to JsonPrimitive(identity.semanticsNodeId),

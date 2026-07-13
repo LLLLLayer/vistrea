@@ -13,7 +13,7 @@ Hub does not replace the local Workspace. It stores shared refs and remote copie
 
 ## Implemented first slice
 
-`startHubServer` is an optional pack relay over shared remote Workspaces (the Hub reuses the same Data layer as every local Workspace). It implements the contract's `GET refs`, `refs:resolve`, `refs:update` (explicit `RefUpdatePrecondition`, never force), `packs:import`, and `packs:export` for every configured project namespace, behind two per-run bearer tokens: read-write and read-only (the read-only role can list, resolve, and export but never mutate refs or import packs). Plain HTTP binds loopback interfaces only; configuring TLS (`--tls-cert`/`--tls-key` PEM files) unlocks non-loopback binds for cross-team collaboration.
+`startHubServer` is an optional pack relay over shared remote Workspaces (the Hub reuses the same Data layer as every local Workspace). It implements the contract's `GET refs`, `refs:resolve`, `refs:update` (explicit `RefUpdatePrecondition`; forced moves fail closed in the Data layer until the protected-ref policy exists), `packs:import`, and `packs:export` for every configured project namespace, behind a per-project token pair — read-write and read-only (the read-only role lists, resolves, and exports but never mutates refs or imports packs) — so a token for one namespace is not a token for another. Plain HTTP binds loopback interfaces only; configuring TLS (`--tls-cert`/`--tls-key` PEM files) unlocks non-loopback binds for cross-team collaboration.
 
 Run it standalone; the rotating token travels only through a mode-0600 connection descriptor:
 
@@ -27,3 +27,5 @@ node .build/typescript/services/hub/main.js \
 Auditing, discovery, collaboration endpoints, subscriptions, and richer role models remain later slices.
 
 See [Vistrea Hub API](../../docs/interfaces/HUB_API.md).
+
+Pack exports stream without persisting: storing one pack object per request would let any caller, including a read-only one, grow the Hub's object store without bound. `data/sync/hub-pack-sync.ts` is the client — it pushes with explicit fast-forwards, fetches, and reports divergent refs as conflicts — and has no CLI, MCP, or Studio surface yet.

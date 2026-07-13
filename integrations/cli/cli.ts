@@ -88,6 +88,7 @@ export async function runVistreaCli(
           "graph show --project <project_id> --application <application_id>",
           "graph get-state <screen_state_id>",
           "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]",
+          "graph tag --project <project_id> --application <application_id> --tag <tag_name>",
           "wiki create --json <command>",
           "wiki update <wiki_node_id> --json <command>",
           "wiki get <wiki_node_id>",
@@ -619,6 +620,23 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
         ...(graphId === undefined ? {} : { graph_id: graphId }),
         ...(depth === undefined ? {} : { maximum_depth: Number(depth) }),
         ...(maxPaths === undefined ? {} : { maximum_paths: Number(maxPaths) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "graph" && command[1] === "tag") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--project", "--application", "--tag"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    return invocation(
+      "TagGraphVersion",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+        tag_name: requireOption(values, "--tag"),
       },
       timeoutMilliseconds,
     );

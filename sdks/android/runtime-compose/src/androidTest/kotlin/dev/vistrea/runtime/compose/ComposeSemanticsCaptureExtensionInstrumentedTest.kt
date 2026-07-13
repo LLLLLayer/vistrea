@@ -7,26 +7,54 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.vistrea.protocol.v1.BuildId
 import dev.vistrea.protocol.v1.NodeAction
+import dev.vistrea.protocol.v1.NodeId
 import dev.vistrea.protocol.v1.ProjectId
 import dev.vistrea.protocol.v1.RuntimeSnapshot
 import dev.vistrea.protocol.v1.RuntimeSnapshotJson
 import dev.vistrea.protocol.v1.UiNode
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureAdapter
 import dev.vistrea.runtime.android.AndroidViewRuntimeCaptureConfiguration
+import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.junit.Test
 import org.junit.runner.RunWith
+
+/**
+ * Measures its content and deliberately never places it — exactly the state a
+ * lazy list leaves a prefetched item in. The child stays attached and active,
+ * so `SemanticsNode.children` still reports it, but it has no real position.
+ */
+@Composable
+private fun NeverPlaced(content: @Composable () -> Unit) {
+    Layout(content = content) { measurables, constraints ->
+        measurables.forEach { it.measure(constraints) }
+        layout(0, 0) { /* Intentionally place nothing. */ }
+    }
+}
 
 @RunWith(AndroidJUnit4::class)
 class ComposeSemanticsCaptureExtensionInstrumentedTest {

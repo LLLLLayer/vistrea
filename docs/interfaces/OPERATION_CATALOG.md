@@ -9,7 +9,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 ## Legend
 
 - Kind: `C` command, `Q` query, `S` stream.
-- Implemented operations currently execute synchronously over the authenticated loopback Host Local API and return their canonical result directly. The asynchronous `OperationRef` lifecycle (`GetOperationResult`, progress, cancellation) remains reserved; adapters must migrate long-running operations to it when it exists without changing behavior privately.
+- Implemented most operations execute synchronously (exploration is the exception: `RunExploration` returns an `OperationRef` that `GetExplorationOperation` polls and `CancelExploration` stops) over the authenticated loopback Host Local API and return their canonical result directly. The asynchronous `OperationRef` lifecycle (`GetOperationResult`, progress, cancellation) remains reserved; adapters must migrate long-running operations to it when it exists without changing behavior privately.
 - In the reserved tables, the `Request -> Result` column names the final typed result; `sync` returns that result immediately while `async` immediately returns `OperationRef`.
 - Data ports: `W` Workspace, `Sn` Snapshot, `Ob` Observation, `Ev` Runtime Event, `G` Screen Graph, `K` Wiki, `D` Design Review, `Va` Validation, `Op` Operation, `Vr` Version, `Obj` Object Store, `X` Exchange, `Sy` Sync.
 - A dash means no durable Data port, CLI command, or MCP tool exists for that cell.
@@ -17,7 +17,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 53 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
+All 54 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -68,6 +68,7 @@ All 53 operations below are implemented end to end through the Host Local API, t
 | `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` | `vistrea_get_screen_state` |
 | `MergeScreenStates` | C | `POST /v1/screen-graph/state-merges` | `screen merge` | `vistrea_merge_screen_states` |
 | `SplitScreenState` | C | `POST /v1/screen-graph/state-splits` | `screen split` | `vistrea_split_screen_state` |
+| `TagGraphVersion` | C | `POST /v1/screen-graph/version-tags` | `graph tag` | `vistrea_tag_graph_version` |
 | `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` | `vistrea_find_screen_path` |
 | `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` | `vistrea_run_exploration` |
 | `GetExplorationOperation` | Q | `GET /v1/exploration/operations/<id>` | `explore get` | `vistrea_get_exploration_operation` |
@@ -173,7 +174,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 | `PauseExploration` | C | `PauseExplorationCommand -> OperationRef` | sync | Exploration / Op | running operation | `explore pause` / — | 3 |
 | `ResumeExploration` | C | `ResumeExplorationCommand -> OperationRef` | sync | Exploration / Op | paused operation | `explore resume` / — | 3 |
 | `MarkTransitionStatus` | C | `MarkTransitionStatusCommand -> Transition` | sync | Exploration / G,Vr | expected revision | `screen transition-mark` / — | 3 |
-| `GetExplorationOperation` | Q | `GetOperationQuery -> ExplorationOperation` | sync | Operations / Op | operation visible | `explore status` / — | 3 |
 | `CompareScreenGraphs` | Q | `CompareGraphsQuery -> GraphDiff` | sync | Validation / G | both versions visible | `screen compare` / — | 4 |
 | `ExplainStateIdentity` | Q | `StateIdentityQuery -> StateIdentityExplanation` | sync | Exploration / G | identity evidence | `screen identity-explain` / — | 3 |
 

@@ -22,7 +22,29 @@ const PROJECT_ID = "project_019f0000-0000-7000-8000-000000000001";
 const REF_NAME = "teams/sync/main";
 const ACTOR = { kind: "agent", id: "vistrea-sync-test", extensions: {} };
 
+/** How many objects the party's store holds on disk. */
+async function countObjects(root: string): Promise<number> {
+  const entries = await fs.readdir(path.join(root, "objects"), {
+    recursive: true,
+    withFileTypes: true,
+  });
+  return entries.filter((entry) => entry.isFile()).length;
+}
+
+/** Tokens are per project: a Hub token never reaches another namespace. */
+function tokenFor(
+  hub: { readonly projects: readonly { project_id: string; bearerToken: string; readOnlyToken: string }[] },
+  projectId: string,
+): { bearerToken: string; readOnlyToken: string } {
+  const project = hub.projects.find((candidate) => candidate.project_id === projectId);
+  if (project === undefined) {
+    throw new Error(`The Hub does not serve ${projectId}.`);
+  }
+  return project;
+}
+
 interface Party {
+  readonly root: string;
   readonly workspace: MemoryDataStore;
   readonly objects: FileObjectStore;
   readonly sync: HubPackSync;
@@ -35,7 +57,7 @@ async function makeParty(t: TestContext, label: string): Promise<Party> {
   const workspace = new MemoryDataStore({ validator });
   const objects = await FileObjectStore.open({ workspaceRoot: root });
   const sync = new HubPackSync({ workspace, objects, validator });
-  return { workspace, objects, sync };
+  return { root, workspace, objects, sync };
 }
 
 async function seedCommit(
@@ -88,7 +110,7 @@ test("push and fetch move commits through the optional Hub and never force refs"
   t.after(() => hub.close());
   const remote: HubRemote = {
     baseUrl: hub.baseUrl,
-    bearerToken: hub.bearerToken,
+    bearerToken: tokenFor(hub, PROJECT_ID).bearerToken,
     projectId: PROJECT_ID,
   };
 
@@ -99,8 +121,13 @@ test("push and fetch move commits through the optional Hub and never force refs"
   const unauthorized = await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`);
   assert.equal(unauthorized.status, 401);
   await assert.rejects(
-    author.sync.listRemoteRefs({ ...remote, projectId: "project_019f0000-0000-7000-8000-0000000000ff" }),
-    (error: unknown) => isDataError(error, "not_found"),
+    author.sync.listRemoteRefs({
+      ...remote,
+      projectId: "project_019f0000-0000-7000-8000-0000000000ff",
+    }),
+    // The Hub does not disclose which namespaces it serves: a token that is
+    // not that project's token is simply not a token.
+    (error: unknown) => isDataError(error, "internal"),
   );
 
   const pushed = await author.sync.push({
@@ -195,8 +222,12 @@ test("the Hub isolates project namespaces and enforces read-only tokens", async 
 
   const author = await makeParty(t, "multi-author");
   const seeded = await seedCommit(author, "Record the multi-project graph.", '{"screens":["a"]}');
-  const remoteA = { baseUrl: hub.baseUrl, bearerToken: hub.bearerToken, projectId: PROJECT_ID };
-  const remoteB = { baseUrl: hub.baseUrl, bearerToken: hub.bearerToken, projectId: PROJECT_B };
+  const remoteA = { baseUrl: hub.baseUrl, bearerToken: tokenFor(hub, PROJECT_ID).bearerToken, projectId: PROJECT_ID };
+  const remoteB = {
+    baseUrl: hub.baseUrl,
+    bearerToken: tokenFor(hub, PROJECT_B).bearerToken,
+    projectId: PROJECT_B,
+  };
 
   const pushed = await author.sync.push({
     remote: remoteA,
@@ -212,7 +243,7 @@ test("the Hub isolates project namespaces and enforces read-only tokens", async 
   assert.equal(visible.remote_refs.length, 1);
 
   // The read-only token reads and exports but can never mutate.
-  const readOnlyRemote = { ...remoteA, bearerToken: hub.readOnlyToken };
+  const readOnlyRemote = { ...remoteA, bearerToken: tokenFor(hub, PROJECT_ID).readOnlyToken };
   const readListing = await author.sync.listRemoteRefs(readOnlyRemote);
   assert.equal(readListing.remote_refs.length, 1);
   const reader = await makeParty(t, "multi-reader");
@@ -234,6 +265,20 @@ test("the Hub isolates project namespaces and enforces read-only tokens", async 
     headers: { authorization: `Bearer ${"x".repeat(43)}` },
   });
   assert.equal(forbidden.status, 401);
+
+  // Tokens are per project: another team's token cannot read this namespace.
+  const crossProject = await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`, {
+    headers: { authorization: `Bearer ${tokenFor(hub, PROJECT_B).bearerToken}` },
+  });
+  assert.equal(crossProject.status, 401);
+
+  // Export streams without persisting: a read-only caller cannot grow the
+  // Hub's object store one pack per request.
+  const beforeExports = await countObjects(partyA.root);
+  for (let index = 0; index < 3; index += 1) {
+    await reader.sync.fetch({ remote: readOnlyRemote, ref_names: [REF_NAME], created_by: ACTOR });
+  }
+  assert.equal(await countObjects(partyA.root), beforeExports);
 });
 
 test("the Hub serves TLS when configured and refuses non-loopback plain HTTP", async (t) => {
@@ -287,7 +332,7 @@ test("the Hub serves TLS when configured and refuses non-loopback plain HTTP", a
   const status = await new Promise<number>((resolve, reject) => {
     const request = https.request(
       `${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`,
-      { ca: certificate, headers: { authorization: `Bearer ${hub.bearerToken}` } },
+      { ca: certificate, headers: { authorization: `Bearer ${tokenFor(hub, PROJECT_ID).bearerToken}` } },
       (response) => {
         response.resume();
         resolve(response.statusCode ?? 0);

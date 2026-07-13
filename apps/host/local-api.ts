@@ -180,6 +180,26 @@ export async function startHostLocalApi(
     objects: options.objects,
     validator: options.validator,
   });
+  // Version tagging freezes the materialized graph; it drives no device, so
+  // it must work on a Host with no automation provider configured.
+  const explorationCapture = {
+    captureSnapshot: (reason: CaptureSnapshotCommand["reason"]) =>
+      capture.execute({
+        include: { paths: ["trees", "screenshot"] },
+        screenshot: "reference" as const,
+        reason,
+      }),
+  };
+  const tagging = new ExplorationEngine({
+    workspace: options.workspace,
+    capture: explorationCapture,
+    automation: new AutomationEngine({
+      workspace: options.workspace,
+      validator: options.validator,
+      providers: [],
+    }),
+    graph,
+  });
   let explorationOperations: ExplorationOperationEngine | undefined;
   if (options.automationProvider !== undefined) {
     const automation = new AutomationEngine({
@@ -230,6 +250,7 @@ export async function startHostLocalApi(
         validation,
         buildDiffs,
         exchange,
+        exploration: tagging,
         ...(explorationOperations === undefined ? {} : { explorationOperations }),
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
         isRuntimeConnected: options.isRuntimeConnected ?? (() => true),
@@ -300,6 +321,7 @@ interface RequestHandlerContext {
   readonly validation: ValidationEngine;
   readonly buildDiffs: BuildDiffEngine;
   readonly exchange: PackExchangeService;
+  readonly exploration: ExplorationEngine;
   readonly explorationOperations?: ExplorationOperationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
   readonly isRuntimeConnected: () => boolean;
@@ -774,6 +796,22 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       ...(pathsValue === undefined ? {} : { maximum_paths: Number(pathsValue) }),
     });
     writeJson(response, 200, { paths } as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/screen-graph/version-tags") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["project_id", "application_id", "tag_name"],
+      ["project_id", "application_id", "tag_name"],
+    );
+    const version = context.exploration.tagGraphVersion(
+      command as unknown as Parameters<ExplorationEngine["tagGraphVersion"]>[0],
+    );
+    writeJson(response, 201, version as unknown as JsonObject);
     return;
   }
 

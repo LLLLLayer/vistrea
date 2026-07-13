@@ -52,6 +52,32 @@ enum CaptureContentLimits {
         )
     }
 
+    /// Reports a view that hosts content the capture cannot observe: it
+    /// declares an accessibility container yet exposes no elements, which is
+    /// how a SwiftUI hosting view presents itself while no app-level
+    /// accessibility runtime is active.
+    ///
+    /// Without this limitation the node would serialize as a childless leaf
+    /// with no recorded loss, so a consumer could not distinguish an empty
+    /// screen from an unobserved one, and the same screen would hash to two
+    /// different structural identities depending on whether an accessibility
+    /// runtime happened to be running.
+    static func contentNotObservable(
+        treeID: TreeID,
+        nodeID: NodeID
+    ) throws -> CaptureLimitation {
+        try CaptureLimitation(
+            code: "ios.capture.content-not-observable",
+            severity: .warning,
+            message: "This view declares an accessibility container but exposes no elements, so its hosted content (SwiftUI in particular) is only observable while an app-level accessibility runtime is active. The node is reported without children because its content was not observed, not because it is empty.",
+            scope: CaptureLimitationScope(treeID: treeID, nodeID: nodeID, field: "child_ids"),
+            // An identical re-capture cannot recover the content: it becomes
+            // observable only under a different capture condition, an active
+            // accessibility runtime, so a plain retry would loop.
+            retryable: false
+        )
+    }
+
     /// Reports an accessibilityIdentifier that cannot become a canonical
     /// `stable_id`, so vanished stable identity remains diagnosable.
     static func invalidStableIdentifier(

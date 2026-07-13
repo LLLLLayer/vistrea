@@ -1,7 +1,9 @@
 package dev.vistrea.runtime.android
 
 import android.view.View
+import dev.vistrea.protocol.v1.CaptureLimitation
 import dev.vistrea.protocol.v1.NodeId
+import dev.vistrea.protocol.v1.TreeId
 import dev.vistrea.protocol.v1.UiNode
 
 /**
@@ -22,6 +24,8 @@ fun interface ViewSemanticsNodeIdFactory {
 
 /** Everything a semantics capture extension needs from the View walker. */
 class ViewSemanticsCaptureContext(
+    /** The tree the captured nodes belong to; scopes Capture Limitations. */
+    val treeId: TreeId,
     /** The identifier the walker assigned to the host View's own node. */
     val hostNodeId: NodeId,
     /** The host View's traversal path; semantic child paths must extend it. */
@@ -47,10 +51,16 @@ class ViewSemanticsCaptureContext(
  * [directChildIds] identifies the host node's immediate semantic children in
  * order; [nodes] carries the whole flattened subtree in pre-order, with
  * parent and child identifiers already linked.
+ *
+ * [hostLimitations] are Capture Limitations the extension attributes to the
+ * host View's own node, for example facts an alternative UI toolkit cannot
+ * expose for the whole replaced subtree. The walker merges them into the host
+ * node's `capture_limitations`.
  */
 class CapturedSemanticSubtree(
     val directChildIds: List<NodeId>,
     val nodes: List<UiNode>,
+    val hostLimitations: List<CaptureLimitation> = emptyList(),
 ) {
     init {
         val nodeIds = nodes.map(UiNode::nodeId)

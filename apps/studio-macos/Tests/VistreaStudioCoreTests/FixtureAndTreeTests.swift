@@ -44,6 +44,47 @@ final class FixtureAndTreeTests: XCTestCase {
         }
     }
 
+    /// The shipped fixture development mode must exercise the surfaces the
+    /// README claims: a Snapshot alone leaves the Canvas answering 404 and
+    /// identity curation unreachable.
+    @MainActor
+    func testFixtureDevelopmentModeExercisesTheCanvasAndCuration() async throws {
+        let model = SnapshotWorkspaceModel(
+            client: FixtureWorkspace.makeClient(snapshot: try StudioTestFixtures.snapshot())
+        )
+
+        await model.refresh()
+
+        XCTAssertEqual(model.contentPhase, .content)
+        XCTAssertEqual(model.canvasPhase, .content, "The fixture Canvas is not a 404.")
+        XCTAssertEqual(model.canvasStates.count, 3)
+        XCTAssertEqual(model.wikiPhase, .content)
+        XCTAssertEqual(model.issuesPhase, .content)
+
+        // Merge is reachable: two active states can be selected and merged.
+        let stateIDs = model.canvasStates.map(\.id)
+        model.toggleMergeSelection(stateID: stateIDs[1])
+        model.toggleMergeSelection(stateID: stateIDs[2])
+        XCTAssertEqual(model.mergeSelectionStateIDs.count, 2)
+        model.beginMergeDecision()
+        let merged = await model.mergeSelectedStates(into: nil, justification: nil)
+        XCTAssertTrue(merged)
+        XCTAssertEqual(model.canvasGraph?.revision, 2)
+
+        // Split is reachable: the entry state carries two observations.
+        let entryID = try XCTUnwrap(model.canvasGraph?.entryStateIDs.first)
+        await model.selectCanvasState(id: entryID)
+        XCTAssertEqual(model.selectedCanvasStateObservationIDs.count, 2)
+        model.beginSplitDecision()
+        let split = await model.splitSelectedState(
+            observationIDs: [model.selectedCanvasStateObservationIDs[1]],
+            title: "Home variant",
+            justification: nil
+        )
+        XCTAssertTrue(split)
+        XCTAssertEqual(model.canvasGraph?.revision, 3)
+    }
+
     func testPresentationExposesCanonicalScenarioExtension() throws {
         let source = try StudioTestFixtures.data(
             "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"

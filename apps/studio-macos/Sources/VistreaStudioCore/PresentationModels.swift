@@ -357,6 +357,24 @@ public struct ScreenshotPresentation: Equatable, Sendable {
             height: evidence.coverage.height
         )
     }
+
+    init(
+        hash: String,
+        mediaType: String,
+        byteSize: UInt64,
+        logicalName: String?,
+        pixelWidth: UInt64,
+        pixelHeight: UInt64,
+        coverage: RectPresentation
+    ) {
+        self.hash = hash
+        self.mediaType = mediaType
+        self.byteSize = byteSize
+        self.logicalName = logicalName
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.coverage = coverage
+    }
 }
 
 public struct SnapshotPresentation: Equatable, Sendable {

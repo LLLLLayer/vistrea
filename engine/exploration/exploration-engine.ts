@@ -116,7 +116,8 @@ export class ExplorationEngine {
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   }
 
-  async explore(command: ExploreCommand, hooks: ExplorationRunHooks = {}): Promise<ExplorationReport> {
+  /** Rejects an out-of-range walk before any device session is opened. */
+  assertExploreBounds(command: ExploreCommand): void {
     if (
       !Number.isSafeInteger(command.maximum_actions) ||
       command.maximum_actions < 1 ||
@@ -133,8 +134,19 @@ export class ExplorationEngine {
       throw new DataError("invalid_argument", "maximum_depth is outside the supported range.");
     }
     const settleMilliseconds = command.settle_milliseconds ?? DEFAULT_SETTLE_MILLISECONDS;
+    if (
+      !Number.isSafeInteger(settleMilliseconds) ||
+      settleMilliseconds < 0 ||
+      settleMilliseconds > 60_000
+    ) {
+      throw new DataError(
+        "invalid_argument",
+        "settle_milliseconds is outside the supported range.",
+      );
+    }
     const excluded = command.excluded_stable_ids ?? [];
     if (
+      !Array.isArray(excluded) ||
       excluded.length > 128 ||
       excluded.some(
         (value) => typeof value !== "string" || value.length === 0 || value.length > 256,
@@ -142,7 +154,13 @@ export class ExplorationEngine {
     ) {
       throw new DataError("invalid_argument", "excluded_stable_ids is invalid.");
     }
-    const excludedStableIds = new Set(excluded);
+  }
+
+  async explore(command: ExploreCommand, hooks: ExplorationRunHooks = {}): Promise<ExplorationReport> {
+    this.assertExploreBounds(command);
+    const maximumDepth = command.maximum_depth ?? 8;
+    const settleMilliseconds = command.settle_milliseconds ?? DEFAULT_SETTLE_MILLISECONDS;
+    const excludedStableIds = new Set(command.excluded_stable_ids ?? []);
 
     let snapshot = await this.#capture.captureSnapshot("before_action");
     let observed = this.#graph.recordStateObservation({

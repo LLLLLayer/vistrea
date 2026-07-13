@@ -91,6 +91,19 @@ export class ExplorationOperationEngine {
     ) {
       throw new DataError("invalid_argument", "actor_id is invalid.");
     }
+    // Bounds are the walk's contract: reject them before an Operation exists
+    // and before a real device session is opened, never after.
+    this.#exploration.assertExploreBounds({
+      maximum_actions: command.maximum_actions,
+      ...(command.maximum_depth === undefined ? {} : { maximum_depth: command.maximum_depth }),
+      ...(command.settle_milliseconds === undefined
+        ? {}
+        : { settle_milliseconds: command.settle_milliseconds }),
+      ...(command.excluded_stable_ids === undefined
+        ? {}
+        : { excluded_stable_ids: command.excluded_stable_ids }),
+      automation_session_id: "",
+    });
     const operationId = this.#ids.next("operation");
     const createdAt = this.#workspace.clock.now();
     const created: OperationRef = {

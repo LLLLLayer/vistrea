@@ -49,6 +49,10 @@ public actor FixtureHostClient: HostClient {
     /// How many times the Screen Graph was requested; lets tests prove the
     /// Canvas refreshed after exploration succeeded.
     public private(set) var screenGraphLoadCount = 0
+    /// How many identity curation commands reached this Host, accepted or
+    /// rejected; lets tests prove a stale decision was never submitted.
+    public private(set) var mergeCount = 0
+    public private(set) var splitCount = 0
     /// A deterministic counter so fixture-minted identifiers and timestamps
     /// stay reproducible across runs.
     private var mintedCount: UInt64 = 0
@@ -512,6 +516,7 @@ public actor FixtureHostClient: HostClient {
     // MARK: - Canvas identity curation
 
     public func mergeScreenStates(_ command: MergeScreenStatesCommand) async throws -> IdentityCurationResult {
+        mergeCount += 1
         guard let graph = canvasGraph else {
             throw Self.serverError(404, code: "not_found", message: "The Screen Graph does not exist yet.")
         }
@@ -609,6 +614,7 @@ public actor FixtureHostClient: HostClient {
     }
 
     public func splitScreenState(_ command: SplitScreenStateCommand) async throws -> IdentityCurationResult {
+        splitCount += 1
         guard let graph = canvasGraph else {
             throw Self.serverError(404, code: "not_found", message: "The Screen Graph does not exist yet.")
         }
@@ -1094,6 +1100,116 @@ public struct UnavailableHostClient: HostClient {
         throw error
     }
     public func cancelExploration(id: String) async throws -> ExplorationOperationRef { throw error }
+}
+
+/// The canonical fixture-backed development Workspace.
+///
+/// A `FixtureHostClient` built from Snapshots alone has no materialized Screen
+/// Graph, so the Canvas answers 404 and identity curation is unreachable. This
+/// composition adds the deterministic Screen Graph, Deep Wiki, and Review Issue
+/// documents the panes need, so fixture mode exercises every read and write
+/// flow the product claims — without a Host and without inventing Runtime
+/// evidence: the Snapshot, its screenshot Object metadata, and the design
+/// baseline still come from the canonical fixture.
+public enum FixtureWorkspace {
+    public static let projectID = "project_019f0000-0000-7000-8000-000000000001"
+
+    public static func makeClient(snapshot: RuntimeSnapshot) -> FixtureHostClient {
+        FixtureHostClient(
+            snapshots: [snapshot],
+            reviewIssues: reviewIssues(),
+            canvasGraph: canvasGraph(),
+            wikiNodes: wikiNodes()
+        )
+    }
+
+    /// Three observed Screen States: the entry state carries two observations
+    /// so a split is possible, and two active siblings make a merge possible.
+    public static func canvasGraph() -> CanvasGraph {
+        let home = "screenstate_019f0000-0000-7000-8000-0000000000c1"
+        let catalog = "screenstate_019f0000-0000-7000-8000-0000000000c2"
+        let catalogVariant = "screenstate_019f0000-0000-7000-8000-0000000000c3"
+        return CanvasGraph(
+            screenGraphID: "graph_019f0000-0000-7000-8000-0000000000c0",
+            revision: 1,
+            entryStateIDs: [home],
+            states: [
+                CanvasStateSummary(
+                    screenStateID: home,
+                    title: "Home",
+                    kind: "screen",
+                    status: "active",
+                    observationIDs: [
+                        "observation_019f0000-0000-7000-8000-0000000000d1",
+                        "observation_019f0000-0000-7000-8000-0000000000d2",
+                    ]
+                ),
+                CanvasStateSummary(
+                    screenStateID: catalog,
+                    title: "Catalog",
+                    kind: "screen",
+                    status: "active",
+                    observationIDs: ["observation_019f0000-0000-7000-8000-0000000000d3"]
+                ),
+                CanvasStateSummary(
+                    screenStateID: catalogVariant,
+                    title: "Catalog (loading)",
+                    kind: "screen",
+                    status: "active",
+                    observationIDs: ["observation_019f0000-0000-7000-8000-0000000000d4"]
+                ),
+            ],
+            transitions: [
+                CanvasTransitionSummary(
+                    transitionID: "transition_019f0000-0000-7000-8000-0000000000e1",
+                    sourceStateID: home,
+                    targetStateID: catalog,
+                    occurrenceCount: 3
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "transition_019f0000-0000-7000-8000-0000000000e2",
+                    sourceStateID: home,
+                    targetStateID: catalogVariant,
+                    occurrenceCount: 1
+                ),
+            ]
+        )
+    }
+
+    public static func wikiNodes() -> [WikiNodeSummary] {
+        [
+            WikiNodeSummary(
+                wikiNodeID: "wiki_019f0000-0000-7000-8000-0000000000f1",
+                kind: "screen",
+                title: "Home screen",
+                summary: "The entry screen of the Demo application.",
+                status: "published",
+                labels: ["demo", "entry"]
+            ),
+            WikiNodeSummary(
+                wikiNodeID: "wiki_019f0000-0000-7000-8000-0000000000f2",
+                kind: "component",
+                title: "Primary action button",
+                summary: "The shared call-to-action component.",
+                status: "draft",
+                labels: ["component"]
+            ),
+        ]
+    }
+
+    public static func reviewIssues() -> [ReviewIssueSummary] {
+        [
+            ReviewIssueSummary(
+                issueID: "issue_019f0000-0000-7000-8000-0000000000a1",
+                revision: 1,
+                title: "Primary action is 8 pt left of the design baseline",
+                category: "layout",
+                severity: "minor",
+                state: "open",
+                updatedAt: "2026-07-12T00:00:00Z"
+            ),
+        ]
+    }
 }
 
 public enum CanonicalFixtureLoader {

@@ -169,6 +169,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
       "vistrea_search_wiki",
       "vistrea_split_screen_state",
       "vistrea_suppress_validation_finding",
+      "vistrea_tag_graph_version",
       "vistrea_transition_review_issue",
       "vistrea_unlink_wiki_node",
       "vistrea_update_wiki_node",

@@ -10,14 +10,18 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.IntSize
+import dev.vistrea.protocol.v1.CaptureLimitationSeverity
 import dev.vistrea.protocol.v1.NodeAction
 import dev.vistrea.protocol.v1.NodeId
 import dev.vistrea.protocol.v1.Rect
 import dev.vistrea.protocol.v1.RedactedContentField
 import dev.vistrea.protocol.v1.RuntimeIdentifierFactory
+import dev.vistrea.protocol.v1.TreeId
+import dev.vistrea.runtime.android.CaptureContentLimits
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
@@ -130,6 +134,7 @@ class ComposeSemanticsMappingTest {
             ),
             identity = identity(),
             environment = ComposeCaptureEnvironment(
+                treeId = TREE_ID,
                 hostFrameOriginX = 10.0,
                 hostFrameOriginY = 20.0,
                 density = 2.0,
@@ -216,7 +221,7 @@ class ComposeSemanticsMappingTest {
     }
 
     @Test
-    fun `test tag becomes the stable identifier and invalid tags are dropped`() {
+    fun `test tag becomes the stable identifier and invalid tags are reported`() {
         val tagged = mapComposeSemanticsNode(
             config = config { this[SemanticsProperties.TestTag] = "demo.compose.button" },
             geometry = geometry(),
@@ -224,7 +229,9 @@ class ComposeSemanticsMappingTest {
             environment = environment(),
         )
         assertEquals("demo.compose.button", tagged.stableId?.value)
+        assertTrue(tagged.captureLimitations.isEmpty())
 
+        // A dropped identifier must stay diagnosable instead of vanishing.
         val invalid = mapComposeSemanticsNode(
             config = config { this[SemanticsProperties.TestTag] = " leading space" },
             geometry = geometry(),
@@ -232,6 +239,85 @@ class ComposeSemanticsMappingTest {
             environment = environment(),
         )
         assertNull(invalid.stableId)
+        val limitation = invalid.captureLimitations.single()
+        assertEquals("android.capture.stable-id-invalid", limitation.code)
+        assertEquals(CaptureLimitationSeverity.WARNING, limitation.severity)
+        assertEquals(TREE_ID, limitation.scope?.treeId)
+        assertEquals(identity().nodeId, limitation.scope?.nodeId)
+        assertEquals("stable_id", limitation.scope?.field)
+    }
+
+    @Test
+    fun `over-long text truncates on a code-point boundary and records the loss`() {
+        // A single astral-plane code point is two UTF-16 units, so a naive
+        // length cut would split a surrogate pair.
+        val emoji = "😀"
+        val overLimit = emoji.repeat(CaptureContentLimits.TEXT_CODE_POINT_LIMIT + 10)
+        val node = mapComposeSemanticsNode(
+            config = config {
+                this[SemanticsProperties.Text] = listOf(AnnotatedString(overLimit))
+                this[SemanticsProperties.ContentDescription] = listOf(overLimit)
+            },
+            geometry = geometry(),
+            identity = identity(),
+            environment = environment(),
+        )
+
+        val text = assertNotNull(node.content.text)
+        assertEquals(
+            CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+            text.codePointCount(0, text.length),
+        )
+        assertTrue(text.endsWith(emoji))
+        val description = assertNotNull(node.content.contentDescription)
+        assertEquals(
+            CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+            description.codePointCount(0, description.length),
+        )
+        assertEquals(description, node.accessibility?.label)
+
+        val fields = node.captureLimitations
+            .filter { it.code == "android.capture.text-truncated" }
+            .map { it.scope?.field }
+        assertEquals(
+            listOf("content.text", "content.content_description", "accessibility.label"),
+            fields,
+        )
+        assertTrue(node.captureLimitations.all { it.scope?.nodeId == identity().nodeId })
+    }
+
+    @Test
+    fun `in-limit text passes through untouched`() {
+        val node = mapComposeSemanticsNode(
+            config = config {
+                this[SemanticsProperties.Text] = listOf(AnnotatedString("a".repeat(CaptureContentLimits.TEXT_CODE_POINT_LIMIT)))
+            },
+            geometry = geometry(),
+            identity = identity(),
+            environment = environment(),
+        )
+        assertEquals(CaptureContentLimits.TEXT_CODE_POINT_LIMIT, node.content.text?.length)
+        assertTrue(node.captureLimitations.isEmpty())
+    }
+
+    @Test
+    fun `the host node declares that compose exposes no rendering facts`() {
+        val limitation = composeVisualUnavailableLimitation(TREE_ID, nodeId("compose-host"))
+        assertEquals("android.capture.compose-visual-unavailable", limitation.code)
+        assertEquals(CaptureLimitationSeverity.WARNING, limitation.severity)
+        assertEquals(TREE_ID, limitation.scope?.treeId)
+        assertEquals(nodeId("compose-host"), limitation.scope?.nodeId)
+
+        // No visual, z-index, or source context is invented for a Compose node.
+        val node = mapComposeSemanticsNode(
+            config = config { this[SemanticsProperties.Text] = listOf(AnnotatedString("Hello")) },
+            geometry = geometry(),
+            identity = identity(),
+            environment = environment(),
+        )
+        assertNull(node.visual)
+        assertNull(node.zIndex)
+        assertNull(node.sourceContext)
     }
 
     @Test
@@ -270,6 +356,7 @@ class ComposeSemanticsMappingTest {
     )
 
     private fun environment(hostVisible: Boolean = true) = ComposeCaptureEnvironment(
+        treeId = TREE_ID,
         hostFrameOriginX = 0.0,
         hostFrameOriginY = 0.0,
         density = 1.0,
@@ -278,4 +365,8 @@ class ComposeSemanticsMappingTest {
 
     private fun nodeId(seed: String): NodeId =
         NodeId(RuntimeIdentifierFactory.deterministic("node", seed))
+
+    private companion object {
+        val TREE_ID = TreeId(RuntimeIdentifierFactory.deterministic("tree", "compose-mapping-test"))
+    }
 }

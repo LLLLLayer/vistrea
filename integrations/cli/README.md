@@ -33,6 +33,7 @@ vistrea graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <s
 vistrea graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]
 vistrea graph show --project <project_id> --application <application_id>
 vistrea graph get-state <screen_state_id>
+vistrea graph tag --project <project_id> --application <application_id> --tag <tag_name>
 vistrea screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]
 vistrea screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]
 vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]
@@ -55,9 +56,6 @@ vistrea validate get-build-diff <build_diff_id>
 vistrea pack export --json <command>
 vistrea pack import --file <path>
 vistrea object get --hash <sha256:...> --output <path>
-vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]
-vistrea explore get <operation_id>
-vistrea explore cancel <operation_id>
 vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]
 vistrea explore get <operation_id>
 vistrea explore cancel <operation_id>

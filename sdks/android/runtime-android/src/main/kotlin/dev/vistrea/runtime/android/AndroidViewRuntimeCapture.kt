@@ -29,6 +29,7 @@ import dev.vistrea.protocol.v1.AccessibilityProperties
 import dev.vistrea.protocol.v1.BuildId
 import dev.vistrea.protocol.v1.CapabilitySet
 import dev.vistrea.protocol.v1.CaptureLimitation
+import dev.vistrea.protocol.v1.CaptureLimitationScope
 import dev.vistrea.protocol.v1.CaptureLimitationSeverity
 import dev.vistrea.protocol.v1.Color
 import dev.vistrea.protocol.v1.ColorSpace
@@ -193,7 +194,7 @@ class AndroidViewRuntimeCaptureAdapter(
                 treeId = treeId,
                 treeMoment = treeMoment,
                 display = display,
-                hierarchy = captureHierarchy(rootView, snapshotRawId, display.density),
+                hierarchy = captureHierarchy(rootView, snapshotRawId, treeId, display.density),
                 screenshot = if (includeScreenshot) drawScreenshot(rootView) else null,
             ),
         )
@@ -426,6 +427,7 @@ class AndroidViewRuntimeCaptureAdapter(
     private fun captureHierarchy(
         rootView: View,
         snapshotRawId: String,
+        treeId: TreeId,
         density: Double,
     ): HierarchyCapture {
         val idFactory = ViewSemanticsNodeIdFactory { stableSeed, path ->
@@ -448,7 +450,7 @@ class AndroidViewRuntimeCaptureAdapter(
             val current = stack.removeLast()
             orderedViews += current
             capturedNodeCount += 1
-            val subtree = captureSemanticSubtree(current, density, idFactory)
+            val subtree = captureSemanticSubtree(current, treeId, density, idFactory)
             if (subtree != null) {
                 capturedNodeCount += subtree.capture.nodes.size
                 if (capturedNodeCount > configuration.maximumNodeCount) {
@@ -484,11 +486,13 @@ class AndroidViewRuntimeCaptureAdapter(
             nodes += captureNode(
                 NodeCaptureInput(
                     view = item.view,
+                    treeId = treeId,
                     nodeId = nodeId,
                     parentId = parentId,
                     childIds = childIds,
                     density = density,
                     semanticsSource = subtree?.source,
+                    hostLimitations = subtree?.capture?.hostLimitations ?: emptyList(),
                 ),
             )
             subtree?.let { nodes += it.capture.nodes }
@@ -506,6 +510,7 @@ class AndroidViewRuntimeCaptureAdapter(
 
     private fun captureSemanticSubtree(
         item: TraversalItem,
+        treeId: TreeId,
         density: Double,
         idFactory: ViewSemanticsNodeIdFactory,
     ): SemanticSubtreeCapture? {
@@ -514,6 +519,7 @@ class AndroidViewRuntimeCaptureAdapter(
         }
         val hostFrame = frameInDisplay(item.view, density)
         val context = ViewSemanticsCaptureContext(
+            treeId = treeId,
             hostNodeId = idFactory.nodeId(stableIdentifier(item.view)?.value, item.path),
             hostPath = item.path,
             hostFrameOriginX = hostFrame.x,
@@ -539,7 +545,13 @@ class AndroidViewRuntimeCaptureAdapter(
         } else {
             null
         }
-        val stableId = stableIdentifier(view)
+        // Every observed string is bounded against the canonical field limits
+        // and every loss is recorded, so one over-long TextView degrades this
+        // node instead of failing the whole Snapshot at Host validation.
+        val limitations = mutableListOf<CaptureLimitation>()
+        limitations += interopLimitations(input)
+        limitations += input.hostLimitations
+        val stableId = boundedStableIdentifier(view, input, limitations)
         val role = role(view)
         return UiNode(
             nodeId = input.nodeId,
@@ -554,7 +566,7 @@ class AndroidViewRuntimeCaptureAdapter(
             bounds = Rect(0.0, 0.0, view.width / density, view.height / density),
             zIndex = view.z.toDouble(),
             clipped = visibleRect?.let { it != frame },
-            content = content(view),
+            content = content(view, input, limitations),
             state = NodeState(
                 visible = view.visibility == View.VISIBLE && view.alpha > 0 && hasVisibleRect,
                 enabled = view.isEnabled,
@@ -565,20 +577,45 @@ class AndroidViewRuntimeCaptureAdapter(
             actions = actions(view),
             visual = visual(view, density),
             accessibility = AccessibilityProperties(
-                label = view.contentDescription?.toString(),
-                value = accessibilityValue(view),
+                label = bounded(
+                    view.contentDescription?.toString(),
+                    CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+                    "accessibility.label",
+                    input,
+                    limitations,
+                ),
+                value = bounded(
+                    accessibilityValue(view),
+                    CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+                    "accessibility.value",
+                    input,
+                    limitations,
+                ),
                 role = role,
                 hidden = view.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO ||
                     view.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
             ),
             sourceContext = SourceContext(component = view.javaClass.name),
             relatedNodes = emptyList(),
-            captureLimitations = captureLimitations(input),
+            captureLimitations = limitations.toList(),
             extensions = nodeExtensions(view, input.semanticsSource),
         )
     }
 
-    private fun captureLimitations(input: NodeCaptureInput): List<CaptureLimitation> {
+    /** Truncates one observed field and collects the limitation it produced. */
+    private fun bounded(
+        value: String?,
+        limit: Int,
+        field: String,
+        input: NodeCaptureInput,
+        limitations: MutableList<CaptureLimitation>,
+    ): String? {
+        val result = CaptureContentLimits.bounded(value, limit, field, input.treeId, input.nodeId)
+        result.limitation?.let(limitations::add)
+        return result.value
+    }
+
+    private fun interopLimitations(input: NodeCaptureInput): List<CaptureLimitation> {
         val view = input.view
         if (input.semanticsSource == null || view !is ViewGroup || view.childCount == 0) {
             return emptyList()
@@ -589,6 +626,11 @@ class AndroidViewRuntimeCaptureAdapter(
                 severity = CaptureLimitationSeverity.INFO,
                 message = "A semantics extension replaced this subtree, so its " +
                     "${view.childCount} embedded child View(s) were not walked.",
+                scope = CaptureLimitationScope(
+                    treeId = input.treeId,
+                    nodeId = input.nodeId,
+                    field = "child_ids",
+                ),
                 retryable = false,
                 extensions = Extensions.empty(),
             ),
@@ -651,10 +693,21 @@ class AndroidViewRuntimeCaptureAdapter(
         )
     }
 
-    private fun content(view: View): TextContent {
-        val description = view.contentDescription?.toString()
+    private fun content(
+        view: View,
+        input: NodeCaptureInput,
+        limitations: MutableList<CaptureLimitation>,
+    ): TextContent {
+        fun bounded(value: String?, field: String, limit: Int = CaptureContentLimits.TEXT_CODE_POINT_LIMIT) =
+            bounded(value, limit, field, input, limitations)
+
+        val description = bounded(view.contentDescription?.toString(), "content.content_description")
         if (view is EditText) {
-            val placeholder = view.hint?.toString()
+            val placeholder = bounded(
+                view.hint?.toString(),
+                "content.placeholder",
+                CaptureContentLimits.PLACEHOLDER_CODE_POINT_LIMIT,
+            )
             if (isPassword(view)) {
                 return TextContent(
                     placeholder = placeholder,
@@ -665,17 +718,17 @@ class AndroidViewRuntimeCaptureAdapter(
                     ),
                 )
             }
-            val value = view.text?.toString()
+            val observed = view.text?.toString()
             return TextContent(
-                text = value,
-                value = value,
+                text = bounded(observed, "content.text"),
+                value = bounded(observed, "content.value"),
                 placeholder = placeholder,
                 contentDescription = description,
             )
         }
         if (view is TextView) {
             return TextContent(
-                text = view.text?.toString(),
+                text = bounded(view.text?.toString(), "content.text"),
                 contentDescription = description,
             )
         }
@@ -770,18 +823,38 @@ class AndroidViewRuntimeCaptureAdapter(
         return if (values.isEmpty()) Extensions.empty() else Extensions.of(values)
     }
 
-    private fun stableIdentifier(view: View): StableId? {
-        val candidates = buildList {
-            (view.tag as? String)?.takeIf(String::isNotBlank)?.let(::add)
-            view.transitionName?.takeIf(String::isNotBlank)?.let(::add)
-            view.contentDescription?.toString()?.takeIf(String::isNotBlank)?.let(::add)
-            if (view.id != View.NO_ID) {
-                runCatching { view.resources.getResourceName(view.id) }.getOrNull()?.let(::add)
-            }
+    private fun stableIdentifierCandidates(view: View): List<String> = buildList {
+        (view.tag as? String)?.takeIf(String::isNotBlank)?.let(::add)
+        view.transitionName?.takeIf(String::isNotBlank)?.let(::add)
+        view.contentDescription?.toString()?.takeIf(String::isNotBlank)?.let(::add)
+        if (view.id != View.NO_ID) {
+            runCatching { view.resources.getResourceName(view.id) }.getOrNull()?.let(::add)
         }
-        return candidates.firstNotNullOfOrNull { candidate ->
+    }
+
+    private fun stableIdentifier(view: View): StableId? =
+        stableIdentifierCandidates(view).firstNotNullOfOrNull { candidate ->
             runCatching { StableId(candidate) }.getOrNull()
         }
+
+    /**
+     * Resolves the stable identifier and, when the View offered identifiers
+     * but none of them is a canonical `stable_id`, records why stable identity
+     * vanished instead of dropping it silently.
+     */
+    private fun boundedStableIdentifier(
+        view: View,
+        input: NodeCaptureInput,
+        limitations: MutableList<CaptureLimitation>,
+    ): StableId? {
+        val candidates = stableIdentifierCandidates(view)
+        val stableId = candidates.firstNotNullOfOrNull { candidate ->
+            runCatching { StableId(candidate) }.getOrNull()
+        }
+        if (stableId == null && candidates.isNotEmpty()) {
+            limitations += CaptureContentLimits.invalidStableIdentifier(input.treeId, input.nodeId)
+        }
+        return stableId
     }
 
     private fun frameInDisplay(view: View, density: Double): Rect {
@@ -877,11 +950,13 @@ private data class TraversalItem(
 
 private data class NodeCaptureInput(
     val view: View,
+    val treeId: TreeId,
     val nodeId: NodeId,
     val parentId: NodeId?,
     val childIds: List<NodeId>,
     val density: Double,
     val semanticsSource: String? = null,
+    val hostLimitations: List<CaptureLimitation> = emptyList(),
 )
 
 private data class SemanticSubtreeCapture(

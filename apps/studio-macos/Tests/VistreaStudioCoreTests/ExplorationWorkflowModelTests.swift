@@ -112,27 +112,80 @@ final class ExplorationWorkflowModelTests: XCTestCase {
         XCTAssertFalse(model.isExploring)
     }
 
-    func testStoppingThePaneHaltsThePollLoopAndSupersedesTheRun() async throws {
+    /// The defect: the Canvas pane used to stop the poll loop on
+    /// `onDisappear`, so switching tabs orphaned the running Operation — no
+    /// progress, no report, no Canvas refresh, and no reachable Cancel. An
+    /// exploration belongs to the run, not to the visible tab.
+    func testTabSwitchKeepsTheRunPollingAndRefreshesTheCanvas() async throws {
         let snapshot = try StudioTestFixtures.snapshot()
         let client = FixtureHostClient(snapshots: [snapshot], canvasGraph: Self.fixtureGraph())
         let model = SnapshotWorkspaceModel(client: client)
         await model.refresh()
-        // The pane disappears before the first poll fires.
+        let canvasLoadsBeforeExploration = await client.screenGraphLoadCount
+
+        // Every poll happens with the Canvas pane hidden: the user switched to
+        // another tab as soon as the run started. The pane owns no exploration
+        // lifecycle, so nothing is torn down.
+        let observations = PollObservations()
+        model.explorationPollSleep = { [weak model] in
+            guard let model else { return }
+            await observations.record(
+                isExploring: await model.isExploring,
+                operationID: await model.explorationOperationID,
+                isAddressable: await model.isExplorationRunAddressable
+            )
+        }
+
+        await model.startExploration(maximumActions: 20)
+
+        // The run settled on its own while the pane was away.
+        let operationID = try XCTUnwrap(model.explorationOperationID)
+        XCTAssertEqual(model.explorationState, "succeeded")
+        XCTAssertNotNil(model.explorationReport)
+        XCTAssertNil(model.explorationError)
+        XCTAssertFalse(model.isExploring)
+        // The Canvas refreshed automatically, exactly as it does with the pane
+        // on screen.
+        let canvasLoadsAfterExploration = await client.screenGraphLoadCount
+        XCTAssertEqual(canvasLoadsAfterExploration, canvasLoadsBeforeExploration + 1)
+        // Throughout the hidden run the Operation stayed this Studio's: the
+        // Explore button stayed disabled, the identity stayed known, and Cancel
+        // stayed reachable.
+        let polls = await observations.records
+        XCTAssertGreaterThanOrEqual(polls.count, 4)
+        XCTAssertTrue(polls.allSatisfy(\.isExploring))
+        XCTAssertTrue(polls.allSatisfy(\.isAddressable))
+        XCTAssertTrue(polls.allSatisfy { $0.operationID == operationID })
+        // A settled run is no longer addressable, so Cancel disappears.
+        XCTAssertFalse(model.isExplorationRunAddressable)
+    }
+
+    /// Cancel must still reach the Host-side run when this Studio is no longer
+    /// polling it, and a rejected start must never drop the previous run's
+    /// identity — otherwise a still-running exploration becomes unstoppable.
+    func testAStoppedPollLoopKeepsTheRunCancellable() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let client = FixtureHostClient(snapshots: [snapshot], canvasGraph: Self.fixtureGraph())
+        let model = SnapshotWorkspaceModel(client: client)
+        await model.refresh()
+        // The poll loop is torn down before the first poll fires.
         model.explorationPollSleep = { [weak model] in
             await model?.stopExplorationPolling()
         }
 
         await model.startExploration(maximumActions: 20)
 
-        // The generation guard stopped the loop before any status poll.
         let pollCount = await client.explorationPollCount
-        XCTAssertEqual(pollCount, 0)
+        XCTAssertEqual(pollCount, 0, "The generation guard stopped the loop before any status poll.")
         XCTAssertFalse(model.isExploring)
         XCTAssertNil(model.explorationError)
         XCTAssertEqual(model.explorationState, "running")
+        let firstOperationID = try XCTUnwrap(model.explorationOperationID)
+        XCTAssertTrue(model.isExplorationRunAddressable, "Cancel stays reachable.")
 
-        // A superseding start degrades honestly while the Host-side run is
-        // still active.
+        // A superseding start is rejected because the Host-side run is still
+        // active. The rejected start must keep the previous Operation
+        // addressable instead of clearing it.
         model.explorationPollSleep = {}
         await model.startExploration(maximumActions: 20)
         XCTAssertEqual(
@@ -140,5 +193,29 @@ final class ExplorationWorkflowModelTests: XCTestCase {
             "conflict: An exploration operation is already running."
         )
         XCTAssertFalse(model.isExploring)
+        XCTAssertEqual(model.explorationOperationID, firstOperationID)
+        XCTAssertTrue(model.isExplorationRunAddressable)
+
+        // Cancel reaches the still-running Operation.
+        await model.cancelExploration()
+        let record = try await client.getExplorationOperation(id: firstOperationID)
+        XCTAssertEqual(record.operation.state, "cancelled")
+    }
+}
+
+/// Records what the workspace exposed on each exploration poll.
+private actor PollObservations {
+    struct Record {
+        let isExploring: Bool
+        let operationID: String?
+        let isAddressable: Bool
+    }
+
+    private(set) var records: [Record] = []
+
+    func record(isExploring: Bool, operationID: String?, isAddressable: Bool) {
+        records.append(
+            Record(isExploring: isExploring, operationID: operationID, isAddressable: isAddressable)
+        )
     }
 }

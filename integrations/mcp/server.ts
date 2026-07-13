@@ -545,6 +545,23 @@ export const VISTREA_MCP_TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: "vistrea_tag_graph_version",
+    title: "Tag Graph Version",
+    description:
+      "Freeze the materialized Screen Graph under a version tag, the baseline a build diff classifies regressions against.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["project_id", "application_id", "tag_name"],
+      properties: {
+        project_id: { type: "string", maxLength: 128 },
+        application_id: { type: "string", maxLength: 256 },
+        tag_name: { type: "string", minLength: 1, maxLength: 128 },
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+  },
+  {
     name: "vistrea_merge_screen_states",
     title: "Merge Screen States",
     description:
@@ -1101,6 +1118,7 @@ const TOOL_OPERATIONS = new Map<string, ImplementedHostOperation>([
   ["vistrea_observe_transition", "RecordTransitionObservation"],
   ["vistrea_get_screen_graph", "GetScreenGraph"],
   ["vistrea_get_screen_state", "GetScreenState"],
+  ["vistrea_tag_graph_version", "TagGraphVersion"],
   ["vistrea_merge_screen_states", "MergeScreenStates"],
   ["vistrea_split_screen_state", "SplitScreenState"],
   ["vistrea_find_screen_path", "FindScreenPath"],
