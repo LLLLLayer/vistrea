@@ -5,6 +5,8 @@ export {
   SCREEN_STATE_KINDS,
   ScreenGraphEngine,
   deterministicGraphId,
+  type AnnotateScreenStateCommand,
+  type AnnotateScreenStateResult,
   type GetScreenGraphQuery,
   type RecordStateObservationCommand,
   type RecordStateObservationResult,

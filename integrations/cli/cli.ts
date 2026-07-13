@@ -161,6 +161,7 @@ export async function runVistreaCli(
           "object get --hash <sha256:...> --output <path>",
           "screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]",
           "screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]",
+          "screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n> [--actor <id>]",
           "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
@@ -748,6 +749,36 @@ function parseArguments(
         expected_graph_revision: Number(revision),
         merged_by: cliActor(values.get("--actor")),
         ...(justification === undefined ? {} : { justification }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "screen" && command[1] === "annotate" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--project", "--application", "--labels", "--summary", "--revision", "--actor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const revision = requireOption(values, "--revision");
+    if (!/^[1-9][0-9]{0,8}$/.test(revision)) {
+      throw invalidArguments();
+    }
+    const labels = values.get("--labels");
+    const summary = values.get("--summary");
+    if (labels === undefined && summary === undefined) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "AnnotateScreenState",
+      {
+        project_id: requireOption(values, "--project"),
+        application_id: requireOption(values, "--application"),
+        state_id: command[2] as string,
+        ...(labels === undefined ? {} : { labels: labels.length === 0 ? [] : labels.split(",") }),
+        ...(summary === undefined ? {} : { summary }),
+        expected_graph_revision: Number(revision),
+        annotated_by: cliActor(values.get("--actor")),
       },
       timeoutMilliseconds,
     );

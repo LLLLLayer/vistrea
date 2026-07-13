@@ -140,6 +140,24 @@ export interface SplitScreenStateCommand {
   readonly justification?: string;
 }
 
+export interface AnnotateScreenStateCommand {
+  readonly project_id: string;
+  readonly application_id: string;
+  readonly state_id: string;
+  /** Replaces the state's labels; an empty array clears them. */
+  readonly labels?: readonly string[];
+  /** Replaces the one-sentence summary; an empty string clears it. */
+  readonly summary?: string;
+  readonly expected_graph_revision: number;
+  readonly annotated_by: JsonObject;
+}
+
+export interface AnnotateScreenStateResult {
+  readonly screen_graph_id: string;
+  readonly graph_revision: number;
+  readonly state: ScreenState;
+}
+
 export interface IdentityCurationResult {
   readonly screen_graph_id: string;
   readonly graph_revision: number;
@@ -739,6 +757,65 @@ export class ScreenGraphEngine {
         state: persisted.states.find(
           (state) => state.screen_state_id === newStateId,
         ) as ScreenState,
+      };
+    });
+  }
+
+  /**
+   * Sets or clears a state's labels and one-sentence summary. Annotations are
+   * knowledge, not identity: they never move observations or change what a
+   * state matches, so both an agent and an operator may write them freely —
+   * guarded only by the graph revision they read, exactly like curation.
+   */
+  annotateScreenState(command: AnnotateScreenStateCommand): AnnotateScreenStateResult {
+    this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.annotated_by);
+    if (command.labels === undefined && command.summary === undefined) {
+      throw new DataError("invalid_argument", "An annotation sets labels, a summary, or both.");
+    }
+    if (command.labels !== undefined) {
+      const unique = new Set(command.labels);
+      if (
+        unique.size !== command.labels.length ||
+        command.labels.some((label) => label.length === 0 || label.length > 128)
+      ) {
+        throw new DataError("invalid_argument", "Labels are unique strings of 1 to 128 characters.");
+      }
+    }
+    if (command.summary !== undefined && command.summary.length > 280) {
+      throw new DataError("invalid_argument", "A summary is at most 280 characters.");
+    }
+    return this.#write((unit) => {
+      const graph = this.#loadCurationGraph(unit, command);
+      const state = this.#requireActiveState(graph, command.state_id);
+      const now = this.#workspace.clock.now();
+      let updated: JsonObject = {
+        ...state,
+        revision: (state["revision"] as number) + 1,
+        last_seen: now,
+      };
+      if (command.labels !== undefined) {
+        updated =
+          command.labels.length === 0
+            ? withoutKey(updated, "labels")
+            : { ...updated, labels: [...command.labels] };
+      }
+      if (command.summary !== undefined) {
+        updated =
+          command.summary.length === 0
+            ? withoutKey(updated, "summary")
+            : { ...updated, summary: command.summary };
+      }
+      graph.states = graph.states.map((candidate) =>
+        (candidate["screen_state_id"] as string) === command.state_id ? updated : candidate,
+      );
+      const persisted = this.#persistGraph(unit, graph);
+      const annotated = persisted.states.find(
+        (candidate) => candidate.screen_state_id === command.state_id,
+      ) as ScreenState;
+      return {
+        screen_graph_id: persisted.screen_graph_id,
+        graph_revision: persisted.revision,
+        state: annotated,
       };
     });
   }

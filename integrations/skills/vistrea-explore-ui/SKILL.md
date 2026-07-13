@@ -25,6 +25,7 @@ Available operations:
 | Resolve one state | `graph get-state <screen_state_id>` |
 | Find a path between states | `graph find-path --from <id> --to <id>` |
 | Merge states that are one screen | `screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> --actor <id> [--justification <text>]` |
+| Label and summarize a state | `screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n>` |
 | Split one state into two screens | `screen split --project <id> --application <id> --state <id> --observations a,b [--title <text>] --revision <n> --actor <id> [--justification <text>]` |
 
 ## Workflow
@@ -51,6 +52,12 @@ Available operations:
 7. Curation is auditable and reversible. Every merge and split records an
    actor, an optional justification, and a decision on the graph; splitting a
    wrongly merged structure gives that structure its own identity back.
+8. Annotate what you learned: after a walk, give each discovered state a
+   one-sentence `--summary` of what the screen is for and a few `--labels`
+   (e.g. entry, checkout, error). Read the state's tree and screenshot first;
+   describe what is actually there, not what the scenario name implies. Pass
+   the graph revision you read; users edit the same fields in Studio, so a
+   conflict means re-read and re-judge.
 
 ## Boundaries
 

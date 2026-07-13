@@ -34,6 +34,7 @@ the envelope's error code.
 | Find a path between states | `graph find-path --from <id> --to <id>` |
 | Freeze the graph as a named version | `graph tag --project <id> --application <id> --tag <name>` |
 | Merge states that are one screen | `screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> --actor <id> [--justification <text>]` |
+| Label and summarize a state | `screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n>` |
 | Split one state into two screens | `screen split --project <id> --application <id> --state <id> --observations a,b [--title <text>] --revision <n> --actor <id> [--justification <text>]` |
 
 ## Workflow
@@ -59,6 +60,12 @@ the envelope's error code.
    observations that belong to the other screen out of it.
 7. When a walk completes a coverage milestone, freeze it with `graph tag` so
    later comparisons have a fixed reference.
+8. Annotate what you learned: after a walk, give each discovered state a
+   one-sentence `--summary` of what the screen is for and a few `--labels`
+   (e.g. entry, checkout, error). Read the state's tree and screenshot first;
+   describe what is actually there, not what the scenario name implies. Pass
+   the graph revision you read; users edit the same fields in Studio, so a
+   conflict means re-read and re-judge.
 
 ## Boundaries
 

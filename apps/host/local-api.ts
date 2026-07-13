@@ -884,6 +884,39 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     return;
   }
 
+  if (pathname === "/v1/screen-graph/state-annotations") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "project_id",
+        "application_id",
+        "state_id",
+        "labels",
+        "summary",
+        "expected_graph_revision",
+        "annotated_by",
+      ],
+      ["project_id", "application_id", "state_id", "expected_graph_revision", "annotated_by"],
+      {
+        project_id: "string",
+        application_id: "string",
+        state_id: "string",
+        labels: "string_array",
+        summary: "string",
+        expected_graph_revision: "integer",
+        annotated_by: "object",
+      },
+    );
+    const result = context.graph.annotateScreenState(
+      command as unknown as Parameters<ScreenGraphEngine["annotateScreenState"]>[0],
+    );
+    writeJson(response, 200, result as unknown as JsonObject);
+    return;
+  }
+
   if (pathname === "/v1/exploration/operations") {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);

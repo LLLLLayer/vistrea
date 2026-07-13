@@ -394,7 +394,7 @@ Vistrea exposes the same Engine use cases through:
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-The implemented Agent slice exposes 54 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, exploration Operations, the Deep Wiki, validation, build diffs, portable packs, and object downloads — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite or artifact paths. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
+The implemented Agent slice exposes 55 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, exploration Operations, the Deep Wiki, validation, build diffs, portable packs, and object downloads — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite or artifact paths. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
 
 Additional Skill concepts:
 

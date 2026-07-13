@@ -15,7 +15,10 @@
     "ObservationTimeRange": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["started_at", "ended_at"],
+      "required": [
+        "started_at",
+        "ended_at"
+      ],
       "properties": {
         "started_at": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
@@ -66,7 +69,12 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["ios", "android"] }
+          "items": {
+            "enum": [
+              "ios",
+              "android"
+            ]
+          }
         },
         "account_profile_ids": {
           "type": "array",
@@ -102,15 +110,30 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["light", "dark", "system", "custom"] }
+          "items": {
+            "enum": [
+              "light",
+              "dark",
+              "system",
+              "custom"
+            ]
+          }
         },
         "device_kinds": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["simulator", "emulator", "real_device"] }
+          "items": {
+            "enum": [
+              "simulator",
+              "emulator",
+              "real_device"
+            ]
+          }
         },
-        "observation_time_range": { "$ref": "#/$defs/ObservationTimeRange" },
+        "observation_time_range": {
+          "$ref": "#/$defs/ObservationTimeRange"
+        },
         "version_selector": {
           "$ref": "https://vistrea.dev/schema/v1/commit.schema.json#/$defs/VersionSelector"
         },
@@ -122,7 +145,9 @@
     "ActionTarget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["extensions"],
+      "required": [
+        "extensions"
+      ],
       "properties": {
         "snapshot_id": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
@@ -141,13 +166,38 @@
         }
       },
       "anyOf": [
-        { "properties": { "node_id": true }, "required": ["node_id"] },
-        { "properties": { "stable_id": true }, "required": ["stable_id"] },
-        { "properties": { "point": true }, "required": ["point"] }
+        {
+          "properties": {
+            "node_id": true
+          },
+          "required": [
+            "node_id"
+          ]
+        },
+        {
+          "properties": {
+            "stable_id": true
+          },
+          "required": [
+            "stable_id"
+          ]
+        },
+        {
+          "properties": {
+            "point": true
+          },
+          "required": [
+            "point"
+          ]
+        }
       ],
       "dependentRequired": {
-        "node_id": ["snapshot_id"],
-        "point": ["snapshot_id"]
+        "node_id": [
+          "snapshot_id"
+        ],
+        "point": [
+          "snapshot_id"
+        ]
       }
     },
     "TextInput": {
@@ -155,10 +205,19 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["representation", "value", "extensions"],
+          "required": [
+            "representation",
+            "value",
+            "extensions"
+          ],
           "properties": {
-            "representation": { "const": "literal" },
-            "value": { "type": "string", "maxLength": 65536 },
+            "representation": {
+              "const": "literal"
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 65536
+            },
             "extensions": {
               "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
             }
@@ -167,11 +226,23 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["representation", "value_digest", "extensions"],
+          "required": [
+            "representation",
+            "value_digest",
+            "extensions"
+          ],
           "properties": {
-            "representation": { "const": "redacted" },
-            "value_digest": { "$ref": "#/$defs/Sha256Digest" },
-            "display_hint": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "representation": {
+              "const": "redacted"
+            },
+            "value_digest": {
+              "$ref": "#/$defs/Sha256Digest"
+            },
+            "display_hint": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
             "extensions": {
               "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
             }
@@ -180,13 +251,23 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["representation", "generator", "extensions"],
+          "required": [
+            "representation",
+            "generator",
+            "extensions"
+          ],
           "properties": {
-            "representation": { "const": "generated" },
+            "representation": {
+              "const": "generated"
+            },
             "generator": {
               "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ResourceRef"
             },
-            "display_hint": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "display_hint": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
             "extensions": {
               "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
             }
@@ -197,14 +278,39 @@
     "ActionParameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["extensions"],
+      "required": [
+        "extensions"
+      ],
       "properties": {
-        "direction": { "enum": ["up", "down", "left", "right"] },
-        "distance": { "type": "number", "exclusiveMinimum": 0 },
-        "duration_ms": { "type": "number", "minimum": 0 },
-        "text_input": { "$ref": "#/$defs/TextInput" },
-        "key": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "application_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "direction": {
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "distance": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "duration_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "text_input": {
+          "$ref": "#/$defs/TextInput"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "application_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
         "extensions": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
         }
@@ -247,9 +353,20 @@
           "minLength": 1,
           "maxLength": 1024
         },
-        "risk": { "enum": ["safe", "sensitive", "dangerous", "forbidden"] },
-        "target": { "$ref": "#/$defs/ActionTarget" },
-        "parameters": { "$ref": "#/$defs/ActionParameters" },
+        "risk": {
+          "enum": [
+            "safe",
+            "sensitive",
+            "dangerous",
+            "forbidden"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/ActionTarget"
+        },
+        "parameters": {
+          "$ref": "#/$defs/ActionParameters"
+        },
         "extensions": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
         }
@@ -258,56 +375,102 @@
         {
           "if": {
             "properties": {
-              "kind": { "enum": ["tap", "long_press", "type_text", "clear_text"] }
+              "kind": {
+                "enum": [
+                  "tap",
+                  "long_press",
+                  "type_text",
+                  "clear_text"
+                ]
+              }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "properties": { "target": true },
-            "required": ["target"]
+            "properties": {
+              "target": true
+            },
+            "required": [
+              "target"
+            ]
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "type_text" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "type_text"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
               "parameters": {
                 "type": "object",
-                "properties": { "text_input": true },
-                "required": ["text_input"]
+                "properties": {
+                  "text_input": true
+                },
+                "required": [
+                  "text_input"
+                ]
               }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "enum": ["swipe", "scroll"] } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "enum": [
+                  "swipe",
+                  "scroll"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
               "parameters": {
                 "type": "object",
-                "properties": { "direction": true },
-                "required": ["direction"]
+                "properties": {
+                  "direction": true
+                },
+                "required": [
+                  "direction"
+                ]
               }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "launch" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "launch"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
               "parameters": {
                 "type": "object",
-                "properties": { "application_id": true },
-                "required": ["application_id"]
+                "properties": {
+                  "application_id": true
+                },
+                "required": [
+                  "application_id"
+                ]
               }
             }
           }
@@ -317,13 +480,30 @@
     "ScreenStateIdentity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["strategy", "extensions"],
+      "required": [
+        "strategy",
+        "extensions"
+      ],
       "properties": {
         "strategy": {
-          "enum": ["semantic", "structural", "visual", "composite", "manual"]
+          "enum": [
+            "semantic",
+            "structural",
+            "visual",
+            "composite",
+            "manual"
+          ]
         },
-        "route": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "controller": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "controller": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
         "stable_node_ids": {
           "type": "array",
           "minItems": 1,
@@ -332,8 +512,12 @@
             "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/StableId"
           }
         },
-        "layout_digest": { "$ref": "#/$defs/Sha256Digest" },
-        "screenshot_digest": { "$ref": "#/$defs/Sha256Digest" },
+        "layout_digest": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
+        "screenshot_digest": {
+          "$ref": "#/$defs/Sha256Digest"
+        },
         "manual_key": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/StableId"
         },
@@ -345,18 +529,54 @@
         }
       },
       "anyOf": [
-        { "properties": { "route": true }, "required": ["route"] },
-        { "properties": { "controller": true }, "required": ["controller"] },
         {
-          "properties": { "stable_node_ids": true },
-          "required": ["stable_node_ids"]
+          "properties": {
+            "route": true
+          },
+          "required": [
+            "route"
+          ]
         },
-        { "properties": { "layout_digest": true }, "required": ["layout_digest"] },
         {
-          "properties": { "screenshot_digest": true },
-          "required": ["screenshot_digest"]
+          "properties": {
+            "controller": true
+          },
+          "required": [
+            "controller"
+          ]
         },
-        { "properties": { "manual_key": true }, "required": ["manual_key"] }
+        {
+          "properties": {
+            "stable_node_ids": true
+          },
+          "required": [
+            "stable_node_ids"
+          ]
+        },
+        {
+          "properties": {
+            "layout_digest": true
+          },
+          "required": [
+            "layout_digest"
+          ]
+        },
+        {
+          "properties": {
+            "screenshot_digest": true
+          },
+          "required": [
+            "screenshot_digest"
+          ]
+        },
+        {
+          "properties": {
+            "manual_key": true
+          },
+          "required": [
+            "manual_key"
+          ]
+        }
       ]
     },
     "ScreenState": {
@@ -386,9 +606,27 @@
         "revision": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Revision"
         },
-        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
-        "kind": { "enum": ["screen", "modal", "overlay", "transient"] },
-        "status": { "enum": ["active", "merged", "split", "deprecated"] },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "kind": {
+          "enum": [
+            "screen",
+            "modal",
+            "overlay",
+            "transient"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "merged",
+            "split",
+            "deprecated"
+          ]
+        },
         "canonical_snapshot_id": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
         },
@@ -400,7 +638,9 @@
             "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
           }
         },
-        "identity": { "$ref": "#/$defs/ScreenStateIdentity" },
+        "identity": {
+          "$ref": "#/$defs/ScreenStateIdentity"
+        },
         "first_seen": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
         },
@@ -439,6 +679,11 @@
             "maxLength": 128
           }
         },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280
+        },
         "extensions": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"
         }
@@ -446,12 +691,25 @@
       "allOf": [
         {
           "if": {
-            "properties": { "status": { "enum": ["merged", "split"] } },
-            "required": ["status"]
+            "properties": {
+              "status": {
+                "enum": [
+                  "merged",
+                  "split"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
           },
           "then": {
-            "properties": { "superseded_by_state_ids": true },
-            "required": ["superseded_by_state_ids"]
+            "properties": {
+              "superseded_by_state_ids": true
+            },
+            "required": [
+              "superseded_by_state_ids"
+            ]
           }
         }
       ]
@@ -500,8 +758,17 @@
             "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
           }
         },
-        "status": { "enum": ["observed", "expected", "deprecated", "unreachable"] },
-        "confidence": { "$ref": "#/$defs/Confidence" },
+        "status": {
+          "enum": [
+            "observed",
+            "expected",
+            "deprecated",
+            "unreachable"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
         "occurrence_count": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/SafeUnsignedInteger"
         },
@@ -518,13 +785,25 @@
       "allOf": [
         {
           "if": {
-            "properties": { "status": { "const": "observed" } },
-            "required": ["status"]
+            "properties": {
+              "status": {
+                "const": "observed"
+              }
+            },
+            "required": [
+              "status"
+            ]
           },
           "then": {
             "properties": {
-              "observation_ids": { "type": "array", "minItems": 1 },
-              "occurrence_count": { "type": "integer", "minimum": 1 }
+              "observation_ids": {
+                "type": "array",
+                "minItems": 1
+              },
+              "occurrence_count": {
+                "type": "integer",
+                "minimum": 1
+              }
             }
           }
         }
@@ -554,14 +833,29 @@
         "protocol_version": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ProtocolVersion"
         },
-        "kind": { "enum": ["state", "transition", "runtime_event", "artifact"] },
+        "kind": {
+          "enum": [
+            "state",
+            "transition",
+            "runtime_event",
+            "artifact"
+          ]
+        },
         "observed_at": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/EventTime"
         },
         "runtime_context": {
           "$ref": "https://vistrea.dev/schema/v1/runtime-context.schema.json#/$defs/RuntimeContext"
         },
-        "capture_source": { "enum": ["sdk", "automation", "manual", "import", "validation"] },
+        "capture_source": {
+          "enum": [
+            "sdk",
+            "automation",
+            "manual",
+            "import",
+            "validation"
+          ]
+        },
         "session_id": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
         },
@@ -607,7 +901,9 @@
             "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
           }
         },
-        "confidence": { "$ref": "#/$defs/Confidence" },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
         "capabilities": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/CapabilitySet"
         },
@@ -624,26 +920,45 @@
         }
       },
       "dependentRequired": {
-        "supersedes_observation_id": ["correction_reason"]
+        "supersedes_observation_id": [
+          "correction_reason"
+        ]
       },
       "allOf": [
         {
           "if": {
-            "properties": { "kind": { "const": "state" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "state"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "required": ["screen_state_id"],
+            "required": [
+              "screen_state_id"
+            ],
             "properties": {
               "screen_state_id": true,
-              "snapshot_ids": { "type": "array", "minItems": 1 }
+              "snapshot_ids": {
+                "type": "array",
+                "minItems": 1
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "transition" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "transition"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "required": [
@@ -661,28 +976,51 @@
               "target_state_id": true,
               "before_snapshot_id": true,
               "after_snapshot_id": true,
-              "snapshot_ids": { "type": "array", "minItems": 2 }
+              "snapshot_ids": {
+                "type": "array",
+                "minItems": 2
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "runtime_event" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "runtime_event"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "runtime_event_ids": { "type": "array", "minItems": 1 }
+              "runtime_event_ids": {
+                "type": "array",
+                "minItems": 1
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "artifact" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "artifact"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "properties": { "artifact_ids": { "type": "array", "minItems": 1 } }
+            "properties": {
+              "artifact_ids": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
           }
         }
       ]
@@ -712,9 +1050,17 @@
             "manual"
           ]
         },
-        "score": { "$ref": "#/$defs/Confidence" },
-        "weight": { "$ref": "#/$defs/Confidence" },
-        "explanation": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "score": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "weight": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
         "resource_refs": {
           "type": "array",
           "items": {
@@ -760,8 +1106,22 @@
         "created_by": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/ActorRef"
         },
-        "source": { "enum": ["automatic", "manual", "import"] },
-        "kind": { "enum": ["create", "match", "merge", "split", "reject"] },
+        "source": {
+          "enum": [
+            "automatic",
+            "manual",
+            "import"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "create",
+            "match",
+            "merge",
+            "split",
+            "reject"
+          ]
+        },
         "input_state_ids": {
           "type": "array",
           "uniqueItems": true,
@@ -784,11 +1144,15 @@
             "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
           }
         },
-        "confidence": { "$ref": "#/$defs/Confidence" },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
         "evidence": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/IdentityEvidence" }
+          "items": {
+            "$ref": "#/$defs/IdentityEvidence"
+          }
         },
         "supersedes_decision_id": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/TypedUuidV7"
@@ -800,61 +1164,126 @@
       "allOf": [
         {
           "if": {
-            "properties": { "kind": { "const": "create" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "create"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "input_state_ids": { "type": "array", "maxItems": 0 },
-              "output_state_ids": { "type": "array", "minItems": 1, "maxItems": 1 }
+              "input_state_ids": {
+                "type": "array",
+                "maxItems": 0
+              },
+              "output_state_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "match" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "match"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "input_state_ids": { "type": "array", "minItems": 1, "maxItems": 1 },
-              "output_state_ids": { "type": "array", "minItems": 1, "maxItems": 1 }
+              "input_state_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "output_state_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "merge" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "merge"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "input_state_ids": { "type": "array", "minItems": 2 },
-              "output_state_ids": { "type": "array", "minItems": 1, "maxItems": 1 }
+              "input_state_ids": {
+                "type": "array",
+                "minItems": 2
+              },
+              "output_state_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "split" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "split"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "input_state_ids": { "type": "array", "minItems": 1, "maxItems": 1 },
-              "output_state_ids": { "type": "array", "minItems": 2 }
+              "input_state_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "output_state_ids": {
+                "type": "array",
+                "minItems": 2
+              }
             }
           }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "reject" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "reject"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
-              "input_state_ids": { "type": "array", "minItems": 1 },
-              "output_state_ids": { "type": "array", "maxItems": 0 }
+              "input_state_ids": {
+                "type": "array",
+                "minItems": 1
+              },
+              "output_state_ids": {
+                "type": "array",
+                "maxItems": 0
+              }
             }
           }
         }
@@ -890,7 +1319,9 @@
         "materialized_at": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Timestamp"
         },
-        "context": { "$ref": "#/$defs/GraphContext" },
+        "context": {
+          "$ref": "#/$defs/GraphContext"
+        },
         "entry_state_ids": {
           "type": "array",
           "uniqueItems": true,
@@ -900,23 +1331,33 @@
         },
         "states": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ScreenState" }
+          "items": {
+            "$ref": "#/$defs/ScreenState"
+          }
         },
         "actions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/Action" }
+          "items": {
+            "$ref": "#/$defs/Action"
+          }
         },
         "transitions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/Transition" }
+          "items": {
+            "$ref": "#/$defs/Transition"
+          }
         },
         "observations": {
           "type": "array",
-          "items": { "$ref": "#/$defs/Observation" }
+          "items": {
+            "$ref": "#/$defs/Observation"
+          }
         },
         "identity_decisions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/StateIdentityDecision" }
+          "items": {
+            "$ref": "#/$defs/StateIdentityDecision"
+          }
         },
         "extensions": {
           "$ref": "https://vistrea.dev/schema/v1/common.schema.json#/$defs/Extensions"

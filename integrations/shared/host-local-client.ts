@@ -114,6 +114,7 @@ export const IMPLEMENTED_HOST_OPERATIONS = [
   "GetScreenState",
   "MergeScreenStates",
   "SplitScreenState",
+  "AnnotateScreenState",
   "TagGraphVersion",
   "FindScreenPath",
   "CreateWikiNode",
@@ -926,6 +927,53 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentityCuration(value);
+      }
+      case "AnnotateScreenState": {
+        const command = assertExactObject(
+          input,
+          [
+            "project_id",
+            "application_id",
+            "state_id",
+            "labels",
+            "summary",
+            "expected_graph_revision",
+            "annotated_by",
+          ],
+          "State annotation input",
+          true,
+        );
+        const labels = command["labels"];
+        if (
+          typeof command["project_id"] !== "string" ||
+          !PROJECT_ID_PATTERN.test(command["project_id"]) ||
+          typeof command["application_id"] !== "string" ||
+          !APPLICATION_ID_PATTERN.test(command["application_id"]) ||
+          command["annotated_by"] === undefined ||
+          typeof command["state_id"] !== "string" ||
+          !SCREEN_STATE_ID_PATTERN.test(command["state_id"]) ||
+          !Number.isSafeInteger(command["expected_graph_revision"]) ||
+          (command["expected_graph_revision"] as number) < 1 ||
+          (labels === undefined && command["summary"] === undefined) ||
+          (labels !== undefined &&
+            (!Array.isArray(labels) ||
+              labels.length > 32 ||
+              labels.some(
+                (value) => typeof value !== "string" || value.length === 0 || value.length > 128,
+              ))) ||
+          (command["summary"] !== undefined &&
+            (typeof command["summary"] !== "string" || command["summary"].length > 280))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/screen-graph/state-annotations",
+          command,
+          200,
+          options,
+        );
+        return validateStateAnnotation(value);
       }
       case "TagGraphVersion": {
         const command = assertExactObject(
@@ -2059,6 +2107,23 @@ function validateValidationConfigurationInput(value: unknown): void {
   ) {
     throw invalidInput();
   }
+}
+
+function validateStateAnnotation(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["screen_graph_id", "graph_revision", "state"]);
+  const graphId = result["screen_graph_id"];
+  const revision = result["graph_revision"];
+  if (
+    typeof graphId !== "string" ||
+    !SCREEN_GRAPH_ID_PATTERN.test(graphId) ||
+    !Number.isSafeInteger(revision) ||
+    (revision as number) < 1
+  ) {
+    throw invalidHostResult();
+  }
+  requireObject(result["state"]);
+  return result;
 }
 
 function validateIdentityCuration(value: JsonValue): JsonObject {

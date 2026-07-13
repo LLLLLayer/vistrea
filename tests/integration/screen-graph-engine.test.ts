@@ -738,3 +738,71 @@ test("a capture that could not observe its content never enters the graph", asyn
   assert.equal(graph.observations.length, 1);
   assert.equal(graph.transitions.length, 0);
 });
+
+test("annotations carry knowledge without touching identity", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const first = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000e1");
+  persistSnapshots(workspace, [first]);
+  const observed = engine.recordStateObservation({
+    snapshot_id: first["snapshot_id"] as string,
+    title: "Home",
+    entry: true,
+  });
+  const graphQuery = {
+    project_id: (first["runtime_context"] as JsonObject)["project_id"] as string,
+    application_id: (first["runtime_context"] as JsonObject)["application_id"] as string,
+  };
+  const actor = { kind: "agent", id: "vistrea-annotator", extensions: {} };
+
+  const annotated = engine.annotateScreenState({
+    ...graphQuery,
+    state_id: observed.screen_state.screen_state_id,
+    labels: ["entry", "storefront"],
+    summary: "The landing screen with the catalog and tabs.",
+    expected_graph_revision: observed.graph_revision,
+    annotated_by: actor,
+  });
+  assert.deepEqual(annotated.state["labels"], ["entry", "storefront"]);
+  assert.equal(annotated.state["summary"], "The landing screen with the catalog and tabs.");
+  assert.equal(annotated.state.revision, observed.screen_state.revision + 1);
+  // Identity is untouched: the same structure still deduplicates into it.
+  const identity = annotated.state["identity"] as JsonObject;
+  assert.equal(identity["strategy"], "structural");
+
+  // A stale revision conflicts instead of overwriting someone else's edit.
+  assert.throws(
+    () =>
+      engine.annotateScreenState({
+        ...graphQuery,
+        state_id: observed.screen_state.screen_state_id,
+        summary: "A competing edit.",
+        expected_graph_revision: observed.graph_revision,
+        annotated_by: actor,
+      }),
+    (error: unknown) => isDataError(error) && error.code === "conflict",
+  );
+
+  // Clearing: an empty array and an empty string remove the fields entirely.
+  const cleared = engine.annotateScreenState({
+    ...graphQuery,
+    state_id: observed.screen_state.screen_state_id,
+    labels: [],
+    summary: "",
+    expected_graph_revision: annotated.graph_revision,
+    annotated_by: actor,
+  });
+  assert.equal(cleared.state["labels"], undefined);
+  assert.equal(cleared.state["summary"], undefined);
+
+  // Setting neither is a caller mistake, not a no-op write.
+  assert.throws(
+    () =>
+      engine.annotateScreenState({
+        ...graphQuery,
+        state_id: observed.screen_state.screen_state_id,
+        expected_graph_revision: cleared.graph_revision,
+        annotated_by: actor,
+      }),
+    (error: unknown) => isDataError(error) && error.code === "invalid_argument",
+  );
+});

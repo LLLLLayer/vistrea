@@ -17,7 +17,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 54 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 55 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -68,6 +68,7 @@ All 54 operations below are implemented end to end through the Host Local API an
 | `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` |
 | `MergeScreenStates` | C | `POST /v1/screen-graph/state-merges` | `screen merge` |
 | `SplitScreenState` | C | `POST /v1/screen-graph/state-splits` | `screen split` |
+| `AnnotateScreenState` | C | `POST /v1/screen-graph/state-annotations` | `screen annotate` |
 | `TagGraphVersion` | C | `POST /v1/screen-graph/version-tags` | `graph tag` |
 | `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` |
 | `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` |

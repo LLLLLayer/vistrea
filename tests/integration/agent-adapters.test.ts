@@ -451,6 +451,33 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     2,
   );
 
+  // Knowledge annotations round-trip through the CLI: an agent labels and
+  // summarizes a state, and the graph carries it for every reader.
+  const annotate = await runCli(
+    [
+      "screen",
+      "annotate",
+      observedScreenState["screen_state_id"] as string,
+      "--project",
+      runtimeContext["project_id"] as string,
+      "--application",
+      runtimeContext["application_id"] as string,
+      "--labels",
+      "entry,storefront",
+      "--summary",
+      "Landing screen with the catalog.",
+      "--revision",
+      String(graphDocument["revision"]),
+    ],
+    environment,
+  );
+  assert.equal(annotate.exitCode, 0, annotate.stdout);
+  const annotatedState = (parseCliEnvelope(annotate.stdout).data as JsonObject)[
+    "state"
+  ] as JsonObject;
+  assert.deepEqual(annotatedState["labels"], ["entry", "storefront"]);
+  assert.equal(annotatedState["summary"], "Landing screen with the catalog.");
+
   // Deep Wiki: create, revise, search, link, and backlinks round trip.
   const wikiCreate = await runCli(
     [
