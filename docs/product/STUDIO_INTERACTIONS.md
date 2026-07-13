@@ -15,6 +15,15 @@ The selected Workspace, project, ref, build, device context, and Screen State re
 
 ## 2. Information architecture
 
+Entering a Workspace, Studio scopes to one application and one version
+(build) chosen in the persistent context bar; the Screen State Canvas is the
+landing surface for that scope. Snapshots are evidence subordinate to Screen
+States: the primary way to reach a screenshot or a view tree is selecting a
+state on the Canvas and opening its single-screen Inspector, not browsing a
+raw capture list. A flat Snapshot library remains available as a secondary
+evidence view. Runtime events belong to the bottom timeline panel and to the
+selected state's evidence; they are not a standalone sidebar destination.
+
 Primary navigation:
 
 ```text
