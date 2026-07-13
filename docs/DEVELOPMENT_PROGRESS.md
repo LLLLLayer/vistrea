@@ -131,7 +131,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `77a2cb1` | Refused Snapshots whose content the capture could not observe, so an unobservable SwiftUI tree cannot become identity. |
 | `a6191f4` | Kept a Studio exploration addressable across tab switches and its curation revision guard honest against background reloads. |
 | `a52c64c` | Filtered unplaced Compose nodes, bounded captured text, and reported the Compose visual gap instead of fabricating it. |
-| `6e2f417` | Focused the agent surface on exploration and assets with MCP toolsets and an installable Claude Code plugin. |
+| `1216dfd` | Focused the agent surface on exploration and assets with MCP toolsets and an installable Claude Code plugin. |
 
 ## Native vertical-loop evidence
 
