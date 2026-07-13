@@ -105,6 +105,92 @@ class AndroidViewRuntimeCaptureInstrumentedTest : InstrumentationTestCase() {
         )
     }
 
+    fun testOverLongTextTruncatesAndRecordsTheLimitation() {
+        lateinit var captured: AndroidViewRuntimeCaptureResult
+        val emoji = "😀"
+        val overLimit = emoji.repeat(CaptureContentLimits.TEXT_CODE_POINT_LIMIT + 32)
+        val overLimitHint = "h".repeat(CaptureContentLimits.PLACEHOLDER_CODE_POINT_LIMIT + 32)
+        instrumentation.runOnMainSync {
+            val context = instrumentation.targetContext
+            val root = FrameLayout(context).apply { tag = ROOT_ID }
+            val console = EditText(context).apply {
+                tag = CONSOLE_ID
+                contentDescription = overLimit
+                setText(overLimit)
+                hint = overLimitHint
+            }
+            root.addView(console, FrameLayout.LayoutParams(MATCH_PARENT, CONTROL_HEIGHT_PX))
+            layoutRoot(root)
+            captured = adapter().capture(root, includeScreenshot = false)
+        }
+
+        val snapshot = captured.snapshot
+        val tree = snapshot.trees.single()
+        val console = requireNotNull(tree.payload.inlineNodes).single { it.stableId?.value == CONSOLE_ID }
+        val text = requireNotNull(console.content.text)
+        // Truncation cuts on a code-point boundary, so the last emoji survives
+        // whole instead of leaving a lone surrogate that no consumer can read.
+        assertEquals(
+            CaptureContentLimits.TEXT_CODE_POINT_LIMIT,
+            text.codePointCount(0, text.length),
+        )
+        assertTrue(text.endsWith(emoji))
+        assertEquals(text, console.content.value)
+        assertEquals(text, console.accessibility?.value)
+        assertEquals(
+            CaptureContentLimits.PLACEHOLDER_CODE_POINT_LIMIT,
+            requireNotNull(console.content.placeholder).length,
+        )
+
+        // The loss is reported per canonical field with the node scope, so the
+        // Snapshot stays schema-valid instead of failing Host validation.
+        val truncated = console.captureLimitations.filter {
+            it.code == "android.capture.text-truncated"
+        }
+        assertEquals(
+            listOf(
+                "content.content_description",
+                "content.placeholder",
+                "content.text",
+                "content.value",
+                "accessibility.label",
+                "accessibility.value",
+            ),
+            truncated.map { it.scope?.field },
+        )
+        assertTrue(truncated.all { it.scope?.treeId == tree.treeId && it.scope?.nodeId == console.nodeId })
+        assertEquals(snapshot, RuntimeSnapshotJson.decode(RuntimeSnapshotJson.encode(snapshot)))
+    }
+
+    fun testInvalidStableIdentifierIsReportedInsteadOfSilentlyDropped() {
+        lateinit var captured: AndroidViewRuntimeCaptureResult
+        instrumentation.runOnMainSync {
+            val context = instrumentation.targetContext
+            val root = FrameLayout(context).apply { tag = ROOT_ID }
+            // A blank-prefixed tag is not a canonical stable_id; the View has
+            // no other identifier, so stable identity vanishes.
+            val invalid = Button(context).apply {
+                tag = " not a stable id"
+                text = "Open"
+            }
+            root.addView(invalid, FrameLayout.LayoutParams(MATCH_PARENT, CONTROL_HEIGHT_PX))
+            layoutRoot(root)
+            captured = adapter().capture(root, includeScreenshot = false)
+        }
+
+        val nodes = requireNotNull(captured.snapshot.trees.single().payload.inlineNodes)
+        val button = nodes.single { it.role == "button" }
+        assertNull(button.stableId)
+        val limitation = button.captureLimitations.single()
+        assertEquals("android.capture.stable-id-invalid", limitation.code)
+        assertEquals("stable_id", limitation.scope?.field)
+        assertEquals(button.nodeId, limitation.scope?.nodeId)
+
+        // A View with a valid identifier reports nothing.
+        val root = nodes.single { it.stableId?.value == ROOT_ID }
+        assertTrue(root.captureLimitations.isEmpty())
+    }
+
     fun testNodeLimitAndMainThreadFailClosed() {
         lateinit var root: FrameLayout
         instrumentation.runOnMainSync {
@@ -245,6 +331,7 @@ class AndroidViewRuntimeCaptureInstrumentedTest : InstrumentationTestCase() {
         const val ROOT_ID = "demo.capture.root"
         const val BUTTON_ID = "demo.capture.button"
         const val PASSWORD_ID = "demo.capture.password"
+        const val CONSOLE_ID = "demo.capture.console"
         const val ROOT_WIDTH_PX = 360
         const val ROOT_HEIGHT_PX = 640
         const val CONTROL_HEIGHT_PX = 96
