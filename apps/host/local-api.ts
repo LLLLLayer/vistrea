@@ -807,6 +807,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["project_id", "application_id", "tag_name"],
       ["project_id", "application_id", "tag_name"],
+      { project_id: "string", application_id: "string", tag_name: "string" },
     );
     const version = context.exploration.tagGraphVersion(
       command as unknown as Parameters<ExplorationEngine["tagGraphVersion"]>[0],
@@ -831,6 +832,15 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         "justification",
       ],
       ["project_id", "application_id", "state_ids", "expected_graph_revision", "merged_by"],
+      {
+        project_id: "string",
+        application_id: "string",
+        state_ids: "string_array",
+        into_state_id: "string",
+        expected_graph_revision: "integer",
+        merged_by: "object",
+        justification: "string",
+      },
     );
     const result = context.graph.mergeScreenStates(
       command as unknown as Parameters<ScreenGraphEngine["mergeScreenStates"]>[0],
@@ -856,6 +866,16 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         "justification",
       ],
       ["project_id", "application_id", "state_id", "observation_ids", "expected_graph_revision", "split_by"],
+      {
+        project_id: "string",
+        application_id: "string",
+        state_id: "string",
+        observation_ids: "string_array",
+        title: "string",
+        expected_graph_revision: "integer",
+        split_by: "object",
+        justification: "string",
+      },
     );
     const result = context.graph.splitScreenState(
       command as unknown as Parameters<ScreenGraphEngine["splitScreenState"]>[0],
@@ -1358,10 +1378,14 @@ function requireRuntimeTuning(context: RequestHandlerContext): RuntimeTuningPort
 }
 
 /** Structural command parsing; protocol-value validation stays in the Engine. */
+/** The command field shapes the Host checks before it trusts a body. */
+type CommandFieldType = "string" | "string_array" | "integer" | "object";
+
 function parseCommandObject(
   input: unknown,
   allowedKeys: readonly string[],
   requiredKeys: readonly string[] = allowedKeys,
+  types: Readonly<Record<string, CommandFieldType>> = {},
 ): JsonObject {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
     throw invalidArgument("The command body must be a JSON object.");
@@ -1378,8 +1402,35 @@ function parseCommandObject(
       throw invalidArgument(`Missing required command field: ${key}.`);
     }
   }
+  // The Host is the trust boundary. Checking only field names lets a wrong type
+  // reach the Engine, where `new Set("abc")` becomes three plausible state ids
+  // and the caller gets a misleading not_found instead of the real complaint.
+  for (const [key, expected] of Object.entries(types)) {
+    if (!(key in value) || value[key] === undefined) {
+      continue;
+    }
+    const actual = value[key];
+    const matches =
+      expected === "string"
+        ? typeof actual === "string"
+        : expected === "integer"
+          ? typeof actual === "number" && Number.isSafeInteger(actual)
+          : expected === "string_array"
+            ? Array.isArray(actual) && actual.every((item) => typeof item === "string")
+            : actual !== null && typeof actual === "object" && !Array.isArray(actual);
+    if (!matches) {
+      throw invalidArgument(`The ${key} command field must be ${COMMAND_TYPE_NAMES[expected]}.`);
+    }
+  }
   return value;
 }
+
+const COMMAND_TYPE_NAMES: Readonly<Record<CommandFieldType, string>> = {
+  string: "a string",
+  string_array: "an array of strings",
+  integer: "an integer",
+  object: "an object",
+};
 
 function parseReviewIssueQuery(url: URL): { states?: string[]; design_reference_id?: string } | undefined {
   const allowed = new Set(["states", "design_reference_id", "limit", "cursor"]);

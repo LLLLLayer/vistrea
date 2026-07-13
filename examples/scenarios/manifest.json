@@ -26,7 +26,10 @@
         "validation.rules": "planned",
         "validation.build-diff": "planned"
       },
-      "limitations": []
+      "limitations": [
+        "SwiftUI content is described by synthesizing nodes from accessibility elements, so it is only observable while an accessibility runtime is active. A dormant capture reports ios.capture.content-not-observable and the Screen Graph refuses it as identity evidence.",
+        "Synthesized SwiftUI element nodes carry no bounds, z_index, clipped, or visual facts; only the UIKit view hierarchy contributes geometry."
+      ]
     },
     "android": {
       "implementation_status": "in-progress",
@@ -44,7 +47,11 @@
         "validation.rules": "planned",
         "validation.build-diff": "planned"
       },
-      "limitations": []
+      "limitations": [
+        "Compose content is described by its semantics tree, not its composition tree, so a node exists only where a composable declares semantics. Nodes that are measured but not placed (LazyList prefetch) are excluded, because they carry no layout truth.",
+        "Compose semantics expose no z_index, color, or font, and the only route to text layout is an action an observation-only capture must not invoke. Compose host nodes report android.capture.compose-visual-unavailable, and the screenshot remains the visual truth for those subtrees.",
+        "Automatic View event observation is not implemented; the Demo App reports transient events explicitly through the bounded recorder."
+      ]
     }
   },
   "profiles": [

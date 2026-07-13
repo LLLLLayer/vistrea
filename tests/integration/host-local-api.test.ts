@@ -772,6 +772,44 @@ test("Host Local API records deduplicated Screen States, Transitions, and paths"
     body: JSON.stringify({ snapshot_id: "snapshot_019f0000-0000-7000-8000-00000000dead" }),
   });
   assert.equal(missingSnapshot.status, 400);
+
+  // The Host is the trust boundary: a curation body whose field names are right
+  // but whose types are wrong is rejected here, not reinterpreted downstream.
+  // `new Set("ab")` would otherwise pass for two plausible state ids.
+  const mistypedMerge = await authorizedFetch(api, "/v1/screen-graph/state-merges", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      project_id: homeSnapshot.runtime_context.project_id,
+      application_id: homeSnapshot.runtime_context.application_id,
+      state_ids: "ab",
+      expected_graph_revision: 3,
+      merged_by: { kind: "human", id: "reviewer", extensions: {} },
+    }),
+  });
+  assert.equal(mistypedMerge.status, 400);
+  assert.match(
+    ((await mistypedMerge.json()) as { error: { message: string } }).error.message,
+    /state_ids command field must be an array of strings/,
+  );
+
+  const mistypedRevision = await authorizedFetch(api, "/v1/screen-graph/state-splits", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      project_id: homeSnapshot.runtime_context.project_id,
+      application_id: homeSnapshot.runtime_context.application_id,
+      state_id: observedBody.screen_state.screen_state_id,
+      observation_ids: ["observation_019f0000-0000-7000-8000-00000000ab01"],
+      expected_graph_revision: "3",
+      split_by: { kind: "human", id: "reviewer", extensions: {} },
+    }),
+  });
+  assert.equal(mistypedRevision.status, 400);
+  assert.match(
+    ((await mistypedRevision.json()) as { error: { message: string } }).error.message,
+    /expected_graph_revision command field must be an integer/,
+  );
 });
 
 test("Host Local API moves a portable pack between two Workspaces", async (t) => {

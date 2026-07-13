@@ -1,6 +1,6 @@
 ---
 name: vistrea-verify-change
-description: Validate persisted Runtime evidence with the core rule set and compare coverage between builds through the authenticated Vistrea Host. Use when a user asks to validate a Snapshot or the Screen Graph, run the CI quality gate, triage or suppress validation findings, or diff what two builds actually exhibited.
+description: Validate persisted Runtime evidence with the core rule set, freeze a baseline graph version, and compare coverage between builds through the authenticated Vistrea Host. Use when a user asks to validate a Snapshot or the Screen Graph, run the CI quality gate, triage or suppress validation findings, diff what two builds actually exhibited, or gate a release on coverage regressions.
 ---
 
 # Verify a change with validators and build diffs
@@ -24,7 +24,8 @@ Available operations:
 | Read a run | `validate get-run <id>` | `vistrea_get_validation_run` |
 | Page findings | `validate findings [--statuses open]` | `vistrea_list_validation_findings` |
 | Suppress with a reason | `validate suppress <finding_id> --json <command>` | `vistrea_suppress_validation_finding` |
-| Diff two builds | `validate build-diff --project <id> --application <id> --left <build> --right <build>` | `vistrea_compare_builds` |
+| Freeze a baseline | `graph tag --project <id> --application <id> --tag <name>` | `vistrea_tag_graph_version` |
+| Diff two builds | `validate build-diff --project <id> --application <id> --left <build> --right <build>` (add `--baseline <tag>` to classify removals) | `vistrea_compare_builds` |
 
 ## Workflow
 
@@ -39,14 +40,25 @@ Available operations:
 5. For release comparisons, run the build diff between the previous and the
    new build; `removed` entries are screens or transitions the new build no
    longer exhibited and deserve attention first.
-6. In CI, wire the gate's exit code directly; keep the JSON report as the
-   pipeline artifact.
+6. A removal is only a regression against something. Tag the graph version a
+   release is expected to preserve (`graph tag ... --tag v1.4`), then pass
+   `--baseline v1.4` to the diff: each removal carries
+   `extensions["vistrea.baseline"].classification`, which is `regression` when
+   the baseline exhibited the screen and `expected` when it did not. Screens the
+   baseline never had are intentional removals, not new breakage.
+7. In CI, wire the gate's exit code directly; keep the JSON report as the
+   pipeline artifact. `--baseline-tag <tag>` makes the gate fail on
+   `regression` removals only, so an intentionally deleted screen does not
+   block the pipeline.
 
 ## Failure and safety rules
 
 - Validators judge persisted evidence; they never execute app actions.
 - A missing Screen Graph or unknown build is an input problem — capture and
   observe first, do not fabricate coverage.
+- An unknown baseline tag is an input problem too: freeze the baseline from a
+  graph the team actually observed. Never re-tag a name to make a gate pass —
+  the tag is the evidence the comparison rests on.
 - Do not suppress findings to make a gate pass without recording who decided
   and why.
 - Never expose bearer tokens, Workspace paths, or raw storage details.

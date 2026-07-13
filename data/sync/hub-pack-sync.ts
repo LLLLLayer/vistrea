@@ -11,9 +11,11 @@ import {
 import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../exchange/index.js";
 
 // Plain HTTP stays loopback-only so the bearer token never leaves the
-// machine unencrypted; HTTPS remotes may live anywhere.
+// machine unencrypted; HTTPS remotes may live anywhere. The port is optional:
+// a deployed Hub answers on the default 443 and states no port, and demanding
+// one rejected every real remote while accepting only local test servers.
 const REMOTE_URL_PATTERN =
-  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9.\-]{1,255}):[0-9]{1,5}$/;
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
 const MAXIMUM_PACK_BYTES = 256 * 1024 * 1024;
 
 export interface HubRemote {
