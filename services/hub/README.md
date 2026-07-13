@@ -28,4 +28,4 @@ Auditing, discovery, collaboration endpoints, subscriptions, and richer role mod
 
 See [Vistrea Hub API](../../docs/interfaces/HUB_API.md).
 
-Pack exports stream without persisting: storing one pack object per request would let any caller, including a read-only one, grow the Hub's object store without bound. `data/sync/hub-pack-sync.ts` is the client — it pushes with explicit fast-forwards, fetches, and reports divergent refs as conflicts — and has no CLI, MCP, or Studio surface yet.
+Pack exports stream without persisting: storing one pack object per request would let any caller, including a read-only one, grow the Hub's object store without bound. `data/sync/hub-pack-sync.ts` is the client — it pushes with explicit fast-forwards, fetches, and reports divergent refs as conflicts — and has no CLI or Studio surface yet.
