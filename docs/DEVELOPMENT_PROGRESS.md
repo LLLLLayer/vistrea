@@ -132,6 +132,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `a6191f4` | Kept a Studio exploration addressable across tab switches and its curation revision guard honest against background reloads. |
 | `a52c64c` | Filtered unplaced Compose nodes, bounded captured text, and reported the Compose visual gap instead of fabricating it. |
 | `1216dfd` | Focused the agent surface on exploration and assets with MCP toolsets and an installable Claude Code plugin. |
+| `671fec4` | Retired the MCP server per ADR-0008; the CLI with `VISTREA_CLI_TOOLSETS` focus is the single agent adapter. |
 
 ## Native vertical-loop evidence
 
