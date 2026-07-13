@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 
+import { runIosDriverCommand } from "./ios-driver.js";
 import {
   HostClientError,
   createCorrelationId,
@@ -26,7 +27,7 @@ const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
 export const VISTREA_CLI_TOOLSETS = {
   workspace: ["workspace"],
   assets: ["snapshot", "events", "object", "pack"],
-  exploration: ["explore", "graph", "screen"],
+  exploration: ["explore", "graph", "screen", "driver"],
   knowledge: ["wiki"],
   verification: ["design", "issue", "tuning", "validate"],
 } as const;
@@ -83,6 +84,8 @@ interface ParsedInvocation {
   readonly saveOutput?: (result: JsonObject) => Promise<JsonObject>;
   readonly timeoutMilliseconds?: number;
   readonly help?: true;
+  /** Local toolchain command handled without a Host connection. */
+  readonly driver?: readonly string[];
 }
 
 interface CliEnvelope {
@@ -165,11 +168,20 @@ export async function runVistreaCli(
           "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
+          "driver ios doctor",
+          "driver ios prepare",
+          "driver ios up [--device <udid>] [--simulator <udid>] [--port <n>] [--team <id>] [--app-project <path>]",
         ].filter(
           (line) => enabledGroups === undefined || enabledGroups.has(line.split(" ")[0] as string),
         ),
         format: "json",
       });
+      return 0;
+    }
+    if (invocation.driver !== undefined) {
+      const result = await runIosDriverCommand(invocation.driver);
+      writeEnvelope(runtime, context, result.data);
+      await result.untilShutdown;
       return 0;
     }
     const input =
@@ -266,6 +278,9 @@ function parseArguments(
       "unsupported",
       `The ${command[0]} commands are not exposed by this toolset configuration.`,
     );
+  }
+  if (command[0] === "driver" && command[1] === "ios") {
+    return { input: {}, driver: command.slice(2) };
   }
   if (command[0] === "workspace" && command[1] === "status" && command.length === 2) {
     return invocation("GetWorkspaceStatus", {}, timeoutMilliseconds);

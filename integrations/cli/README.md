@@ -94,12 +94,26 @@ There is intentionally no token command-line option. Do not place the token in a
 
 Phase 0B capture waits for the current Host endpoint and returns its canonical `RuntimeSnapshot` directly. When the durable asynchronous `CaptureSnapshot` operation lifecycle in the Operation Catalog is implemented, this adapter must advance to immediate `OperationRef` plus `GetOperationResult` without changing capture behavior privately.
 
+## Local driver commands
+
+`driver ios <doctor|prepare|up>` manages the iOS automation driver
+(WebDriverAgent) on the local machine and needs no Host connection. These are
+toolchain helpers, not Host operations, so they are deliberately absent from
+the operation catalog. `prepare` clones the pinned release
+(tag and commit are constants in `ios-driver.ts`; any other commit is
+refused). `up` boots a Simulator by default or signs for a real device with
+`--device <udid>` — the team comes from `--team`/`VISTREA_WDA_TEAM_ID`, the
+`--app-project`'s `DEVELOPMENT_TEAM`, or a single Keychain development
+identity; private keys never leave the Keychain. It refuses a port that is
+already serving, prints the ready `--wda-url` envelope, and runs until
+Ctrl+C. They belong to the `exploration` toolset.
+
 ## Toolset focus
 
 `VISTREA_CLI_TOOLSETS` selects which named command surfaces the CLI exposes,
 keyed by the first command word: `workspace` (always on), `assets`
 (`snapshot`, `events`, `object`, `pack`), `exploration` (`explore`, `graph`,
-`screen`), `knowledge` (`wiki`), and `verification` (`design`, `issue`,
+`screen`, `driver`), `knowledge` (`wiki`), and `verification` (`design`, `issue`,
 `tuning`, `validate`). Unset means every surface. A masked command group
 disappears from `help` and fails closed as `unsupported` (exit 6) at dispatch;
 an unknown set name is `invalid_argument` (exit 2) naming the valid sets.

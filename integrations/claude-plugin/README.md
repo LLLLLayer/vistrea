@@ -25,9 +25,10 @@ repository root. There is no bundled server; the CLI is the agent surface.
    JavaScript.
 2. Start a Host (`node .build/typescript/apps/host/serve.js --workspace
    <abs-path> --connection-file <abs-path>`), with an automation provider if
-   exploration should execute device actions. For iOS, `pnpm wda up` boots a
-   pinned WebDriverAgent (Simulator by default, `--device <udid>` for
-   hardware) and prints the exact `--wda-url` to pass.
+   exploration should execute device actions. For iOS,
+   `pnpm --silent vistrea driver ios up` boots a pinned WebDriverAgent
+   (Simulator by default, `--device <udid>` for hardware) and prints the
+   exact `--wda-url` to pass.
 3. Export the credentials from the connection descriptor, plus the toolset
    focus, before launching Claude Code:
 

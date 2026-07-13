@@ -133,6 +133,19 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     focusedCommands.some((line) => line.startsWith("explore run")),
     true,
   );
+  // Local driver commands live in the exploration toolset: masked without it,
+  // and answering without any Host connection when enabled.
+  const maskedDriver = await runCli(["driver", "ios", "doctor"], {
+    ...environment,
+    VISTREA_CLI_TOOLSETS: "assets",
+  });
+  assert.equal(maskedDriver.exitCode, 6);
+  const driverDoctor = await runCli(["driver", "ios", "doctor"], focusedEnvironment);
+  assert.equal(driverDoctor.exitCode, 0, driverDoctor.stdout);
+  const doctorData = parseCliEnvelope(driverDoctor.stdout).data as JsonObject;
+  assert.notEqual(doctorData["usb_forwarders"], undefined);
+  assert.equal(Array.isArray(doctorData["development_teams"]), true);
+
   const unknownToolset = await runCli(["workspace", "status"], {
     ...environment,
     VISTREA_CLI_TOOLSETS: "bogus,assets",

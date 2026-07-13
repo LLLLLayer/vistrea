@@ -11,7 +11,7 @@ Screen Graph, and records the walk as one auditable Operation. It requires a
 Host started with a configured automation provider
 (`--automation adb --automation-serial <serial>` or
 `--automation wda --wda-url <loopback-url>`); without one the operations fail
-closed as `unsupported`. `pnpm wda up` (from the repository root) boots a
+closed as `unsupported`. The CLI's local `driver ios up` command boots a
 pinned WebDriverAgent and prints the ready `--wda-url`.
 
 Available operations:
