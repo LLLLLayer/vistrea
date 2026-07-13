@@ -41,7 +41,7 @@ pnpm test:scenarios       # scenario suite tests
 
 Single test file: `node --test tests/contract/<file>.test.mjs` for protocol tests; for TypeScript-backed tests, `pnpm build:host && node --test .build/typescript/tests/integration/<file>.test.js`. Filter cases inside a file with `node --test --test-name-pattern "<pattern>" <file>`.
 
-Real-device end-to-end loops are opt-in and create dedicated temporary devices: `pnpm test:e2e:ios-real-vertical` needs an installed iOS Simulator runtime, while `pnpm test:e2e:android-real-vertical` needs an installed API 36+ AVD. The automation lanes share those requirements: `pnpm test:e2e:android-real-automation` drives real input through `adb`, and `pnpm test:e2e:ios-real-automation` additionally needs a local WebDriverAgent checkout exported as `VISTREA_WDA_PROJECT=<checkout>/WebDriverAgent.xcodeproj` (without it the test skips with instructions). The scripts set the required `VISTREA_RUN_*` gate variables.
+Real-device end-to-end loops are opt-in and create dedicated temporary devices: `pnpm test:e2e:ios-real-vertical` needs an installed iOS Simulator runtime, while `pnpm test:e2e:android-real-vertical` needs an installed API 36+ AVD. The automation lanes share those requirements: `pnpm test:e2e:android-real-automation` drives real input through `adb`, and `pnpm test:e2e:ios-real-automation` additionally needs a local WebDriverAgent checkout exported as `VISTREA_WDA_PROJECT=<checkout>/WebDriverAgent.xcodeproj` (without it the test skips with instructions); `pnpm wda prepare` creates a pinned one, and `pnpm wda up` boots WebDriverAgent interactively and prints the Host's `--wda-url`. The scripts set the required `VISTREA_RUN_*` gate variables.
 
 Swift packages, from the repository root:
 
