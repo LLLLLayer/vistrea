@@ -59,6 +59,21 @@ internal object ScenarioContentFactory {
                 single(container) { VersionScenarioViews.regression(activity, fixture, profileId) }
             }
         },
+        "demo.store.navigation" to { runtime ->
+            with(runtime) { StoreNavigationScenarioController(activity, container, fixture) }
+        },
+        "demo.store.search" to { runtime ->
+            with(runtime) { single(container) { StoreScenarioViews.search(activity, fixture) } }
+        },
+        "demo.store.sheet" to { runtime ->
+            with(runtime) { single(container) { StoreScenarioViews.sheet(activity, fixture) } }
+        },
+        "demo.store.cart-states" to { runtime -> CartStatesScenarioController(runtime) },
+        "demo.mixed.declarative" to { runtime ->
+            with(runtime) {
+                single(container) { MixedDeclarativeScenarioViews.declarative(activity, fixture) }
+            }
+        },
     )
 
     fun create(runtime: ScenarioRuntimeContext): ScenarioController {

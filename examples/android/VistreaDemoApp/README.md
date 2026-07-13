@@ -11,7 +11,9 @@ The project does not own a second Scenario manifest. `syncScenarioContracts` cop
 ../../scenarios/fixtures/v1/*.json
 ```
 
-The runtime repository decodes those assets directly. All 12 required Scenario IDs are available from the launcher. Shared stable node IDs are assigned to both Android `contentDescription` and `tag` whenever the node is visible.
+The runtime repository decodes those assets directly. All 17 required Scenario IDs are available from the launcher. Shared stable node IDs are assigned to both Android `contentDescription` and `tag` whenever the node is visible; the Compose-rendered `demo.mixed.declarative` scenario assigns them as test-tag semantics instead.
+
+The storefront catalog of `demo.store.navigation` is a fixed window of exactly five homogeneous rows that never carries per-row stable IDs. Drag gestures rebind which deterministic catalog items back those rows in whole-row steps, so a scrolled catalog always captures as a structurally identical tree in which only text content differs.
 
 ## Build and test
 
@@ -45,7 +47,7 @@ Omitting the Scenario extra opens the manifest-driven chooser. Omitting the prof
 
 ## Compose capture wiring
 
-The Debug Runtime wiring registers `ComposeSemanticsCaptureExtension` from `dev.vistrea:runtime-compose` on the capture adapter, so any `AndroidComposeView` content would capture as real per-node semantic trees. The demo screens themselves remain View-based because the shared cross-platform Scenario manifest defines no Compose-specific behavior; the Compose capture path is exercised by the SDK's `:runtime-compose:connectedDebugAndroidTest` instead of demo UI. This dependency is Debug-only: the Release APK contains no Compose or other AndroidX classes.
+The Debug Runtime wiring registers `ComposeSemanticsCaptureExtension` from `dev.vistrea:runtime-compose` on the capture adapter, so `AndroidComposeView` content captures as real per-node semantic trees. The `demo.mixed.declarative` scenario renders through Jetpack Compose in the Debug variant: its content lives in the `:mixed-declarative` module, which the app consumes through `debugImplementation` only, because the Compose compiler refuses any compilation without the Compose runtime on its classpath. The Release variant shows an honest framework-only fallback that binds none of the scenario's stable nodes. The Release APK contains no Compose or other AndroidX classes.
 
 ## Security boundary
 

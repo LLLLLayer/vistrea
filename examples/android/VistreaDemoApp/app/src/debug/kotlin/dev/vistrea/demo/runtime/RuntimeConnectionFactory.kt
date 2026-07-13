@@ -58,9 +58,9 @@ internal object RuntimeConnectionFactory {
                     adapterVersion = "0.1.0",
                 ),
                 // Any Compose content behind an AndroidComposeView captures as
-                // real semantic nodes; the demo scenarios themselves remain
-                // View-based because the shared cross-platform scenario
-                // manifest defines no Compose-specific behavior yet.
+                // real semantic nodes; the demo.mixed.declarative scenario
+                // renders through Compose in this Debug variant and relies on
+                // this extension for its contracted stable nodes.
                 semanticsExtensions = listOf(ComposeSemanticsCaptureExtension()),
             )
             val provider = AndroidViewRuntimeSnapshotCaptureProvider(

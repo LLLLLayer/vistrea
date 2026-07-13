@@ -14,7 +14,7 @@ class ScenarioContractTest {
     private val suite = ScenarioContractRepository(fileSource(generatedRoot)).load()
 
     @Test
-    fun allTwelveRequiredScenarioIdsDecodeFromCopiedFixtures() {
+    fun allSeventeenRequiredScenarioIdsDecodeFromCopiedFixtures() {
         assertEquals(REQUIRED_SCENARIO_IDS, suite.fixturesById.keys)
         assertEquals(REQUIRED_SCENARIO_IDS, suite.manifest.scenarios.mapTo(linkedSetOf()) { it.scenario_id })
         assertTrue(suite.manifest.scenarios.all { it.required })
@@ -67,6 +67,46 @@ class ScenarioContractTest {
     }
 
     @Test
+    fun storefrontNavigationFixtureDefinesTabStackAndScrollPaths() {
+        val fixture = suite.fixture("demo.store.navigation")
+        assertEquals("demo.state.store-shop", fixture.reset.entry_state_id)
+        assertEquals(
+            listOf(
+                "demo.state.store-shop" to "demo.state.store-shop",
+                "demo.state.store-shop" to "demo.state.store-detail",
+                "demo.state.store-detail" to "demo.state.store-reviews",
+                "demo.state.store-reviews" to "demo.state.store-detail",
+                "demo.state.store-detail" to "demo.state.store-shop",
+                "demo.state.store-shop" to "demo.state.store-shop",
+                "demo.state.store-shop" to "demo.state.store-profile",
+                "demo.state.store-profile" to "demo.state.store-shop",
+            ),
+            fixture.steps.map { it.from_state_id to it.to_state_id },
+        )
+        assertEquals(
+            listOf("launch", "tap", "tap", "back", "back", "swipe", "tap", "tap"),
+            fixture.steps.map { it.action.kind },
+        )
+    }
+
+    @Test
+    fun searchFixtureTypedAndClearedQueriesReturnToTheEntryState() {
+        val fixture = suite.fixture("demo.store.search")
+        assertEquals("demo.state.search", fixture.reset.entry_state_id)
+        assertEquals(
+            listOf("launch", "type_text", "clear_text", "type_text", "clear_text"),
+            fixture.steps.map { it.action.kind },
+        )
+        assertEquals(
+            setOf("QUERY_MATCHING", "QUERY_UNMATCHED"),
+            fixture.steps.mapNotNull { it.action.input_alias }.toSet(),
+        )
+        fixture.steps.filter { it.action.kind == "clear_text" }.forEach { step ->
+            assertEquals("demo.state.search", step.to_state_id)
+        }
+    }
+
+    @Test
     fun launchArgumentsAcceptCanonicalAndEnvironmentStyleExtras() {
         val canonical = LaunchArguments.resolve(
             mapOf(
@@ -107,6 +147,11 @@ class ScenarioContractTest {
             "demo.safety.dangerous",
             "demo.version.new-feature",
             "demo.version.regression",
+            "demo.store.navigation",
+            "demo.store.search",
+            "demo.store.sheet",
+            "demo.store.cart-states",
+            "demo.mixed.declarative",
         )
     }
 }

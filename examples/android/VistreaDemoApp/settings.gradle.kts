@@ -16,6 +16,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "VistreaDemoApp"
 include(":app")
+include(":mixed-declarative")
 
 includeBuild("../../../sdks/android") {
     dependencySubstitution {

@@ -64,6 +64,14 @@ android {
     }
 
     sourceSets.getByName("main").assets.srcDir(generatedScenarioAssets)
+
+    testOptions {
+        unitTests {
+            // Robolectric proves the snap catalog's structural invariant on
+            // the real View class from plain JVM unit tests.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 kotlin {
@@ -79,7 +87,14 @@ dependencies {
     debugImplementation("dev.vistrea:runtime-android:0.1.0")
     debugImplementation("dev.vistrea:runtime-compose:0.1.0")
     debugImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // The demo.mixed.declarative scenario renders through Jetpack Compose in
+    // the Debug variant only. All Compose code lives in the :mixed-declarative
+    // module because the Compose compiler refuses any compilation without the
+    // Compose runtime on its classpath, and the Release APK must stay
+    // framework-only, which verify-runtime-release-boundary.sh proves.
+    debugImplementation(project(":mixed-declarative"))
     testImplementation(kotlin("test-junit"))
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 tasks.named("preBuild").configure {
