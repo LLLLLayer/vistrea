@@ -67,6 +67,30 @@ function withExtraNode(snapshot: Record<string, unknown>): Record<string, unknow
   return copy;
 }
 
+function withSecondExtraNode(snapshot: Record<string, unknown>): Record<string, unknown> {
+  const copy = structuredClone(snapshot);
+  const trees = copy["trees"] as JsonObject[];
+  const tree = trees[0] as { payload: { inline_nodes: JsonObject[] } };
+  const root = tree.payload.inline_nodes[0] as { node_id: string; child_ids: string[] };
+  const addedId = "node_019f0000-0000-7000-8000-00000000eeee";
+  root.child_ids = [...root.child_ids, addedId];
+  tree.payload.inline_nodes.push({
+    node_id: addedId,
+    parent_id: root.node_id,
+    stable_id: "demo.home.other_banner",
+    child_ids: [],
+    native_type: "UIImageView",
+    role: "image",
+    content: {},
+    state: { visible: true, enabled: true },
+    actions: [],
+    capture_limitations: [],
+    related_nodes: [],
+    extensions: {},
+  });
+  return copy;
+}
+
 interface EngineContext {
   readonly workspace: MemoryDataStore;
   readonly engine: ScreenGraphEngine;
@@ -401,6 +425,92 @@ test("manual merge collapses states, re-points transitions, and aliases dedup", 
     variantRepeat.screen_state.screen_state_id,
     homeState.screen_state.screen_state_id,
   );
+});
+
+test("merging states that share an action coalesces the duplicate transition", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const home = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000e1");
+  const variantA = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000e2",
+  );
+  const homeAgain = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000e3");
+  const variantB = withSnapshotId(
+    withSecondExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000e4",
+  );
+  const homeThird = withSnapshotId(base, "snapshot_019f0000-0000-7000-8000-0000000000e5");
+  const variantAAgain = withSnapshotId(
+    withExtraNode(base),
+    "snapshot_019f0000-0000-7000-8000-0000000000e6",
+  );
+  persistSnapshots(workspace, [home, variantA, homeAgain, variantB, homeThird, variantAAgain]);
+  const runtimeContext = home["runtime_context"] as JsonObject;
+  const graphQuery = {
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+  };
+  const action = {
+    kind: "tap" as const,
+    requested_effect: "Open the variant",
+    target: { stable_id: "demo.home.open_catalog" },
+  };
+
+  engine.recordStateObservation({
+    snapshot_id: home["snapshot_id"] as string,
+    title: "Home",
+    entry: true,
+  });
+  // The same action reaches two structurally distinct variants, so the graph
+  // holds two transitions that a merge collapses onto one endpoint pair.
+  const toA = engine.recordTransitionObservation({
+    before_snapshot_id: home["snapshot_id"] as string,
+    after_snapshot_id: variantA["snapshot_id"] as string,
+    action,
+  });
+  const toB = engine.recordTransitionObservation({
+    before_snapshot_id: homeAgain["snapshot_id"] as string,
+    after_snapshot_id: variantB["snapshot_id"] as string,
+    action,
+  });
+  assert.notEqual(toA.transition.transition_id, toB.transition.transition_id);
+  assert.notEqual(toA.target_state_id, toB.target_state_id);
+
+  const before = engine.getGraph(graphQuery);
+  engine.mergeScreenStates({
+    ...graphQuery,
+    state_ids: [toA.target_state_id, toB.target_state_id],
+    expected_graph_revision: before.revision,
+    merged_by: CURATOR,
+  });
+
+  // One transition survives with both observations; a duplicate dedup key
+  // would strand occurrences no future observation can ever reach.
+  const graph = engine.getGraph(graphQuery);
+  assert.equal(graph.transitions.length, 1);
+  const survivor = graph.transitions[0] as unknown as JsonObject;
+  assert.equal((survivor["observation_ids"] as readonly string[]).length, 2);
+  assert.equal(survivor["occurrence_count"], 2);
+  const keys = graph.transitions.map(
+    (transition) => (transition["extensions"] as JsonObject)["vistrea.transition_key"],
+  );
+  assert.equal(new Set(keys).size, keys.length);
+  // Every transition observation names the surviving transition.
+  for (const observation of graph.observations as readonly JsonObject[]) {
+    if (observation["kind"] === "transition") {
+      assert.equal(observation["transition_id"], survivor["transition_id"]);
+    }
+  }
+
+  // A later observation of the same action accumulates on the survivor.
+  const repeat = engine.recordTransitionObservation({
+    before_snapshot_id: homeThird["snapshot_id"] as string,
+    after_snapshot_id: variantAAgain["snapshot_id"] as string,
+    action,
+  });
+  assert.equal(repeat.created, false);
+  assert.equal(repeat.transition["occurrence_count"], 3);
+  assert.equal(engine.getGraph(graphQuery).transitions.length, 1);
 });
 
 test("manual split separates observations into a manual-identity state", async () => {

@@ -492,6 +492,67 @@ export class ScreenGraphEngine {
           },
         };
       });
+      // Re-pointing can land two transitions on the same (source, target,
+      // action): they are one transition now, so coalesce them instead of
+      // leaving a duplicate whose occurrences no future observation reaches.
+      const transitionsByKey = new Map<string, JsonObject>();
+      const droppedTransitionIds = new Set<string>();
+      const coalesced: JsonObject[] = [];
+      for (const transition of graph.transitions) {
+        const key = (transition["extensions"] as JsonObject)["vistrea.transition_key"];
+        const existing = typeof key === "string" ? transitionsByKey.get(key) : undefined;
+        if (existing === undefined) {
+          if (typeof key === "string") {
+            transitionsByKey.set(key, transition);
+          }
+          coalesced.push(transition);
+          continue;
+        }
+        const observationIds = uniqueStrings([
+          ...(existing["observation_ids"] as readonly string[]),
+          ...(transition["observation_ids"] as readonly string[]),
+        ]);
+        const survivingTransition: JsonObject = {
+          ...existing,
+          revision: (existing["revision"] as number) + 1,
+          observation_ids: observationIds,
+          occurrence_count: observationIds.length,
+          first_seen: minimumTimestamp([
+            existing["first_seen"] as string,
+            transition["first_seen"] as string,
+          ]),
+          last_seen: maximumTimestamp([
+            existing["last_seen"] as string,
+            transition["last_seen"] as string,
+          ]),
+        };
+        transitionsByKey.set(key as string, survivingTransition);
+        coalesced[coalesced.indexOf(existing)] = survivingTransition;
+        droppedTransitionIds.add(transition["transition_id"] as string);
+      }
+      graph.transitions = coalesced;
+      // Observations of a dropped transition must name the surviving one, or
+      // the graph would carry dangling transition references.
+      graph.observations = graph.observations.map((observation) => {
+        if (
+          observation["kind"] !== "transition" ||
+          !droppedTransitionIds.has(observation["transition_id"] as string)
+        ) {
+          return observation;
+        }
+        const owner = graph.transitions.find((transition) =>
+          (transition["observation_ids"] as readonly string[]).includes(
+            observation["observation_id"] as string,
+          ),
+        ) as JsonObject;
+        return {
+          ...observation,
+          transition_id: owner["transition_id"] as string,
+          source_state_id: owner["source_state_id"] as string,
+          target_state_id: owner["target_state_id"] as string,
+        };
+      });
+
       graph.entry_state_ids = uniqueStrings(
         graph.entry_state_ids.map((stateId) => (absorbedIds.has(stateId) ? targetId : stateId)),
       );
