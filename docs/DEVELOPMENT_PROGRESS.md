@@ -139,6 +139,10 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `0acea8d` | Implemented the storefront scenarios in the Android Demo App with a fixed-window snap catalog and a Compose mixed module. |
 | `cdaef1b` | Raised both automation acceptances to a second storefront-deep exploration walk. |
 | `7a1eb97` | Hardened the device lanes against a loaded host: ANR-dialog suppression, focus-gated bounded tap retries, and one-shot token reinstallation. |
+| `3c7898e` | Made a visible Canvas follow the graph revision of any writer, growing live under agent- and CLI-driven exploration. |
+| `5965761` | Named unnamed Screen States after their prominent text instead of the alphabetically first stable id. |
+| `e9df359` | Refused injected input while the device display is locked or asleep, ending plausible fake transitions from lockscreen taps. |
+| `cb745cf` | Restructured Studio to the interaction design's IA: scope-first context bar, Canvas landing, single-screen Inspector, evidence library, timeline strip, and real-pixel 3D layers. |
 | `acde11d` | Moved the iOS driver bootstrap into the product CLI as `driver ios`, masked with the exploration toolset. |
 
 ## Native vertical-loop evidence
@@ -261,6 +265,8 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-13 | Android storefront implementation | `./gradlew assembleDebug assembleRelease test lintDebug`; `verify-runtime-release-boundary.sh`; API 36 emulator functional pass | 24 tests per variant, all builds and lint green, release boundary exit 0 with the Compose :mixed-declarative module kept debug-only; on-device catalog swipe kept a byte-identical structure signature at constant node count |
 | 2026-07-13 | Storefront-deep Android automation acceptance | `pnpm test:e2e:android-real-automation` | 1 of 1 passed end to end: the original walk (3 states, 5 actions) plus the storefront relaunch walk (4 states, 7 actions, frontier_exhausted) with `acceptance/explored-store` freezing 7 states; six prior instrumented reruns under host load isolated and fixed the SystemUI ANR dialog, the API 36 dialog probe, and the one-shot token relaunch miss |
 | 2026-07-13 | iOS storefront automation acceptance | `VISTREA_WDA_PROJECT=<pinned cache> pnpm test:e2e:ios-real-automation` | Blocked by the host machine: a concurrent real-device xcodebuild session drove the load average above 375, and three attempts died in successive environment stages (simulator boot, app launch) before any product assertion; the lane's boot window is widened and the run is pending a calm machine |
+| 2026-07-13 | Real-device AI exploration with a live Canvas | Real Android device (AIN065) via adb: `explore run` from the CLI while Studio watched | Two AI-driven walks (storefront 4 states / 7 actions, cart 2 states / 3 actions, both frontier_exhausted) executed real input on the physical phone; the Canvas grew per action through the new revision watch; every step persisted a snapshot with a content-addressed screenshot (35 observations, 11 transitions, revision 26); a locked phone mid-walk exposed and motivated the display-interactivity guard |
+| 2026-07-13 | Studio IA restructure and real-pixel 3D | `swift test --package-path apps/studio-macos`; `swift build -c release`; fixture launch smoke | 89 of 89 tests (was 78) and the Release build passed: scope derivation, state-driven inspector resolution, missing-canonical degrade, timeline strip summary, and clamped crop math each have direct tests |
 
 ## Known follow-up gaps
 
