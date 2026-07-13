@@ -1319,6 +1319,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 return
             }
             explorationState = record.operation.state
+            let previousCompletedUnits = explorationProgress?.completedUnits
             explorationProgress = record.latestProgress
             explorationLastEventMessage = record.latestEventMessage
             switch record.operation.state {
@@ -1332,13 +1333,22 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 isExploring = false
                 return
             default:
+                // The walk records observations as it goes, so the Canvas
+                // grows while the device is still walking: every executed
+                // action may have discovered a state, and waiting for the
+                // run to settle would hide exactly the live picture an
+                // operator watches an exploration for.
+                if record.latestProgress?.completedUnits != previousCompletedUnits {
+                    await refreshCanvasAfterExploration()
+                }
                 continue
             }
         }
     }
 
-    /// Discovered states belong on the Canvas immediately, so a succeeded
-    /// run reloads the same Screen Graph the Canvas last showed.
+    /// Discovered states belong on the Canvas immediately — during the walk
+    /// after every executed action, and once more when the run settles — so
+    /// this reloads the same Screen Graph the Canvas last showed.
     private func refreshCanvasAfterExploration() async {
         guard let projectID = lastCanvasProjectID, let applicationID = lastCanvasApplicationID else {
             return

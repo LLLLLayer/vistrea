@@ -59,9 +59,10 @@ final class ExplorationWorkflowModelTests: XCTestCase {
             model.explorationLastEventMessage,
             "Tapped demo.explore.step3 and discovered a new state"
         )
-        // A succeeded run reloads the Canvas Screen Graph automatically.
+        // The Canvas grew live during the walk (one refresh per in-flight
+        // progress tick) and reloaded once more when the run succeeded.
         let canvasLoadsAfterExploration = await client.screenGraphLoadCount
-        XCTAssertEqual(canvasLoadsAfterExploration, canvasLoadsBeforeExploration + 1)
+        XCTAssertEqual(canvasLoadsAfterExploration, canvasLoadsBeforeExploration + 4)
         XCTAssertEqual(model.canvasPhase, .content)
     }
 
@@ -144,10 +145,11 @@ final class ExplorationWorkflowModelTests: XCTestCase {
         XCTAssertNotNil(model.explorationReport)
         XCTAssertNil(model.explorationError)
         XCTAssertFalse(model.isExploring)
-        // The Canvas refreshed automatically, exactly as it does with the pane
-        // on screen.
+        // The Canvas grew live while the device was still walking — one
+        // refresh per in-flight progress tick — and refreshed once more when
+        // the run settled, exactly as it does with the pane on screen.
         let canvasLoadsAfterExploration = await client.screenGraphLoadCount
-        XCTAssertEqual(canvasLoadsAfterExploration, canvasLoadsBeforeExploration + 1)
+        XCTAssertEqual(canvasLoadsAfterExploration, canvasLoadsBeforeExploration + 4)
         // Throughout the hidden run the Operation stayed this Studio's: the
         // Explore button stayed disabled, the identity stayed known, and Cancel
         // stayed reachable.
