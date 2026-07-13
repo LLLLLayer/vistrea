@@ -913,7 +913,7 @@ export class ScreenGraphEngine {
         screen_state_id: stateId,
         protocol_version: PROTOCOL_VERSION,
         revision: 1,
-        title: input.title ?? defaultStateTitle(identity),
+        title: input.title ?? defaultStateTitle(snapshot, identity),
         kind: input.stateKind ?? "screen",
         status: "active",
         canonical_snapshot_id: input.snapshotId,
@@ -1144,10 +1144,56 @@ export class ScreenGraphEngine {
   }
 }
 
-function defaultStateTitle(identity: StructuralIdentity): string {
-  const root = identity.stable_node_ids[0];
-  if (root !== undefined) {
-    return root;
+/**
+ * Derives a human title for a state nobody named. A screen's heading is
+ * usually the shortest prominent text near the top of the tree: chrome
+ * banners run long, list rows carry prices and descriptions, and the
+ * heading ("Shop", "Detail") is terse. Header-role nodes win outright when
+ * a platform reports them. Sorted stable node ids are deliberately not
+ * used — the alphabetically first id on every Demo screen was the Debug
+ * Inspector launcher, which named every explored state after a button.
+ */
+function defaultStateTitle(snapshot: RuntimeSnapshot, identity: StructuralIdentity): string {
+  const candidates: { text: string; role: string }[] = [];
+  const trees = ((snapshot as unknown as JsonObject)["trees"] ?? []) as readonly JsonObject[];
+  for (const tree of trees) {
+    const payload = tree["payload"] as JsonObject;
+    const nodes = new Map<string, JsonObject>();
+    for (const node of ((payload["inline_nodes"] ?? []) as readonly JsonObject[])) {
+      nodes.set(node["node_id"] as string, node);
+    }
+    const visit = (nodeId: string): void => {
+      if (candidates.length >= 8) {
+        return;
+      }
+      const node = nodes.get(nodeId);
+      if (node === undefined) {
+        return;
+      }
+      const text = (((node["content"] ?? {}) as JsonObject)["text"] as string | undefined)?.trim();
+      if (text !== undefined && text.length >= 2 && text.length <= 64) {
+        candidates.push({ text, role: (node["role"] as string | undefined) ?? "" });
+      }
+      for (const childId of ((node["child_ids"] ?? []) as readonly string[])) {
+        visit(childId);
+      }
+    };
+    for (const rootId of ((tree["root_node_ids"] ?? []) as readonly string[])) {
+      visit(rootId);
+    }
+  }
+  const header = candidates.find((candidate) => candidate.role === "header");
+  if (header !== undefined) {
+    return header.text;
+  }
+  let best: string | undefined;
+  for (const candidate of candidates) {
+    if (best === undefined || candidate.text.length < best.length) {
+      best = candidate.text;
+    }
+  }
+  if (best !== undefined) {
+    return best;
   }
   return `Screen ${identity.layout_digest.slice("sha256:".length, "sha256:".length + 8)}`;
 }

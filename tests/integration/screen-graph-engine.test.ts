@@ -162,6 +162,10 @@ test("structural identity dedups repeated observations and separates changed str
   });
   assert.equal(distinct.created, true);
   assert.notEqual(distinct.screen_state.screen_state_id, initial.screen_state.screen_state_id);
+  // A state nobody named takes its title from the screen's prominent text,
+  // never from the alphabetically first stable id (which on every Demo
+  // screen was the Debug Inspector launcher).
+  assert.equal(distinct.screen_state["title"], "Open catalog");
 
   const graph = engine.getGraph({
     project_id: (first["runtime_context"] as JsonObject)["project_id"] as string,
