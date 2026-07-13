@@ -1,6 +1,54 @@
 import Foundation
 import VistreaRuntimeModels
 
+/// One Application + Version (build) scope observed in the Workspace. The
+/// context bar picks exactly one scope; the Canvas, the state Inspector, and
+/// the Evidence library below all belong to it.
+public struct WorkspaceScope: Equatable, Hashable, Sendable, Identifiable {
+    public let projectID: String
+    public let applicationID: String
+    public let applicationVersion: String
+    public let buildID: String
+
+    public var id: String {
+        "\(projectID)|\(applicationID)|\(applicationVersion)|\(buildID)"
+    }
+
+    /// The picker label: the application plus its version.
+    public var title: String {
+        "\(applicationID) · \(applicationVersion)"
+    }
+
+    public init(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) {
+        self.projectID = projectID
+        self.applicationID = applicationID
+        self.applicationVersion = applicationVersion
+        self.buildID = buildID
+    }
+}
+
+/// Derives the selectable Application + Version scopes from the Workspace
+/// contents. There is no dedicated Host route for this: the distinct runtime
+/// contexts across the listed Snapshots are the observable truth.
+public enum WorkspaceScopeDerivation {
+    /// The distinct (project, application, version, build) scopes across the
+    /// items, in first-appearance order. The Snapshot list is newest-first,
+    /// so the first scope is the most recently captured one.
+    public static func scopes(from items: [SnapshotListItem]) -> [WorkspaceScope] {
+        var seen = Set<WorkspaceScope>()
+        var result: [WorkspaceScope] = []
+        for item in items where seen.insert(item.scope).inserted {
+            result.append(item.scope)
+        }
+        return result
+    }
+}
+
 public struct SnapshotListItem: Identifiable, Equatable, Sendable {
     public let id: String
     public let capturedAt: String
@@ -8,6 +56,8 @@ public struct SnapshotListItem: Identifiable, Equatable, Sendable {
     public let applicationVersion: String
     public let platform: String
     public let device: String
+    /// The Application + Version scope this Snapshot was captured in.
+    public let scope: WorkspaceScope
 
     public init(summary: SnapshotSummary) {
         id = summary.snapshotID.rawValue
@@ -16,6 +66,12 @@ public struct SnapshotListItem: Identifiable, Equatable, Sendable {
         applicationVersion = summary.runtimeContext.applicationVersion
         platform = summary.runtimeContext.platform.rawValue
         device = summary.runtimeContext.device.model
+        scope = WorkspaceScope(
+            projectID: summary.runtimeContext.projectID.rawValue,
+            applicationID: summary.runtimeContext.applicationID,
+            applicationVersion: summary.runtimeContext.applicationVersion,
+            buildID: summary.runtimeContext.buildID.rawValue
+        )
     }
 
     public init(snapshot: RuntimeSnapshot) {
@@ -72,7 +128,7 @@ public struct RectPresentation: Equatable, Sendable {
         height = rect.height
     }
 
-    init(x: Double, y: Double, width: Double, height: Double) {
+    public init(x: Double, y: Double, width: Double, height: Double) {
         self.x = x
         self.y = y
         self.width = width
@@ -473,6 +529,72 @@ public enum LayerProjection {
         }
         for child in node.children {
             append(node: child, depth: depth + 1, into: &result)
+        }
+    }
+}
+
+/// Maps 3D layer geometry into the screenshot raster so the Inspector can
+/// texture each layer with the node's real pixels.
+public enum LayerTextureProjection {
+    /// The pixel-space crop rect of one logical-point `frame` inside a
+    /// screenshot that covers `coverage` logical points at
+    /// `pixelWidth` × `pixelHeight` raster pixels.
+    ///
+    /// The frame is translated into the covered region, scaled by the per-axis
+    /// pixel scale (`pixelWidth / coverage.width`, `pixelHeight /
+    /// coverage.height`), and intersected with the raster bounds. The origin is
+    /// the raster's top-left corner — exactly what `CGImage.cropping(to:)`
+    /// consumes; any bottom-left texture-space flip is the renderer's concern.
+    /// Returns nil for degenerate geometry or a frame entirely outside the
+    /// covered region: those layers keep a placeholder instead of stretching
+    /// pixels they were never captured in.
+    public static func pixelCropRect(
+        frame: RectPresentation,
+        coverage: RectPresentation,
+        pixelWidth: Double,
+        pixelHeight: Double
+    ) -> RectPresentation? {
+        guard coverage.width > 0, coverage.height > 0,
+              pixelWidth > 0, pixelHeight > 0,
+              frame.width > 0, frame.height > 0
+        else {
+            return nil
+        }
+        let scaleX = pixelWidth / coverage.width
+        let scaleY = pixelHeight / coverage.height
+        let x = (frame.x - coverage.x) * scaleX
+        let y = (frame.y - coverage.y) * scaleY
+        let minX = max(x, 0)
+        let minY = max(y, 0)
+        let maxX = min(x + frame.width * scaleX, pixelWidth)
+        let maxY = min(y + frame.height * scaleY, pixelHeight)
+        guard maxX > minX, maxY > minY else {
+            return nil
+        }
+        return RectPresentation(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+}
+
+/// The collapsed one-line summary of the bottom timeline strip.
+public enum EventTimelineStripPresentation {
+    public static func summary(
+        phase: EventTimelinePhase,
+        eventCount: Int,
+        gapCount: Int
+    ) -> String {
+        switch phase {
+        case .idle, .loading:
+            return "Loading Runtime events…"
+        case .empty:
+            return "No Runtime events have been persisted yet."
+        case let .failure(message):
+            return message
+        case .content:
+            var parts = ["\(eventCount) event\(eventCount == 1 ? "" : "s")"]
+            if gapCount > 0 {
+                parts.append("\(gapCount) reported gap\(gapCount == 1 ? "" : "s")")
+            }
+            return parts.joined(separator: " · ")
         }
     }
 }

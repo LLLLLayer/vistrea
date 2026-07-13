@@ -46,6 +46,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var detailPhase: SnapshotDetailPhase = .idle
     @Published public private(set) var screenshotPhase: ScreenshotEvidencePhase = .none
     @Published public private(set) var snapshots: [SnapshotListItem] = []
+    // The Application + Version scopes derived from the Workspace contents.
+    // The context bar picks one; the Canvas and the Evidence library follow.
+    @Published public private(set) var availableScopes: [WorkspaceScope] = []
+    @Published public private(set) var selectedScope: WorkspaceScope?
     @Published public private(set) var selectedSnapshotID: String?
     @Published public private(set) var selectedSnapshot: SnapshotPresentation?
     @Published public private(set) var selectedNodeID: String?
@@ -199,17 +203,17 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
         do {
             let page = try await client.listSnapshots()
-            if let first = page.items.first {
-                await loadCanvas(
-                    projectID: first.runtimeContext.projectID.rawValue,
-                    applicationID: first.runtimeContext.applicationID
-                )
+            snapshots = page.items.map(SnapshotListItem.init(summary:))
+            applyDerivedScopes()
+            if let scope = selectedScope {
+                // The Canvas is the landing surface for the selected scope:
+                // it loads with the scope, before any Snapshot is selected.
+                await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
             } else {
                 canvasPhase = .empty
                 canvasGraph = nil
                 canvasStates = []
             }
-            snapshots = page.items.map(SnapshotListItem.init(summary:))
             guard !snapshots.isEmpty else {
                 clearSelection()
                 contentPhase = .empty
@@ -218,7 +222,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             contentPhase = .content
             let targetID = selectedSnapshotID.flatMap { selectedID in
                 snapshots.contains(where: { $0.id == selectedID }) ? selectedID : nil
-            } ?? snapshots[0].id
+            } ?? scopedSnapshots.first?.id ?? snapshots[0].id
             await selectSnapshot(id: targetID)
         } catch {
             clearSelection()
@@ -226,10 +230,51 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
+    // MARK: - Application + Version scope
+
+    /// The Evidence library: the Snapshots captured in the selected scope.
+    public var scopedSnapshots: [SnapshotListItem] {
+        guard let scope = selectedScope else {
+            return snapshots
+        }
+        return snapshots.filter { $0.scope == scope }
+    }
+
+    /// Selects one Application + Version scope from the context bar. The
+    /// Canvas reloads for the scope's Screen Graph and the state selection is
+    /// reset; nothing else about the Workspace is touched.
+    public func selectScope(_ scope: WorkspaceScope) async {
+        guard availableScopes.contains(scope), scope != selectedScope else {
+            return
+        }
+        selectedScope = scope
+        await selectCanvasState(id: nil)
+        await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
+    }
+
+    /// Re-derives the scopes from the current Snapshot list. A still-available
+    /// selection survives — a capture in another scope must never yank the
+    /// user's context — otherwise the scope of the most recent Snapshot is
+    /// selected (with exactly one scope, the common case, that is simply it).
+    private func applyDerivedScopes() {
+        availableScopes = WorkspaceScopeDerivation.scopes(from: snapshots)
+        if let current = selectedScope, availableScopes.contains(current) {
+            return
+        }
+        selectedScope = availableScopes.first
+    }
+
     public func selectSnapshot(id: String) async {
         guard snapshots.contains(where: { $0.id == id }) else {
             return
         }
+        await loadInspectorSnapshot(id: id)
+    }
+
+    /// Loads one Snapshot into the single-screen Inspector panes. The two
+    /// selection paths converge here: a Screen State resolving its canonical
+    /// observation Snapshot, and the Evidence library picking a capture.
+    private func loadInspectorSnapshot(id: String) async {
         selectionGeneration += 1
         let generation = selectionGeneration
         selectedSnapshotID = id
@@ -276,6 +321,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             let generation = selectionGeneration
             snapshots.removeAll(where: { $0.id == item.id })
             snapshots.insert(item, at: 0)
+            applyDerivedScopes()
             contentPhase = .content
             selectedSnapshotID = snapshot.snapshotID.rawValue
             apply(presentation: presentation)
@@ -748,8 +794,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return
         }
         canvasStatePhase = .loading
+        let detail: ScreenStateDetail
         do {
-            let detail = try await client.getScreenState(id: id)
+            detail = try await client.getScreenState(id: id)
             guard generation == canvasStateGeneration else {
                 return
             }
@@ -761,6 +808,14 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             }
             canvasStatePhase = .failure(Self.message(for: error))
             return
+        }
+        // The single-screen Inspector follows the STATE: its canonical
+        // observation Snapshot drives the screenshot, the 2D tree, the node
+        // properties, and the 3D layers — not whichever capture the Evidence
+        // library last selected. An already-loaded matching Snapshot is kept
+        // so reselecting the state does not reset the node selection.
+        if selectedSnapshotID != detail.canonicalSnapshotID || detailPhase != .content {
+            await loadInspectorSnapshot(id: detail.canonicalSnapshotID)
         }
         await loadRelatedWikiNodes(stateID: id, generation: generation)
     }

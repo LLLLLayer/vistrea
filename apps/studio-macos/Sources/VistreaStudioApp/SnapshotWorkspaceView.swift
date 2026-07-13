@@ -3,12 +3,32 @@ import SceneKit
 import SwiftUI
 import VistreaStudioCore
 
+/// The primary navigation sections. The Canvas is the landing surface for
+/// the selected Application + Version scope; the flat Snapshot list is the
+/// secondary Evidence library, not the primary sidebar.
+enum WorkspaceSection: String, CaseIterable, Identifiable {
+    case canvas = "Canvas"
+    case evidence = "Evidence"
+    case wiki = "Wiki"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .canvas: "point.3.connected.trianglepath.dotted"
+        case .evidence: "camera.on.rectangle"
+        case .wiki: "book"
+        }
+    }
+}
+
 struct SnapshotWorkspaceView: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var section: WorkspaceSection = .canvas
 
     var body: some View {
         VStack(spacing: 0) {
-            ConnectionBar(model: model)
+            ContextBar(model: model)
             Divider()
             if let operationError = model.operationError {
                 OperationErrorBanner(message: operationError) {
@@ -17,6 +37,8 @@ struct SnapshotWorkspaceView: View {
                 Divider()
             }
             content
+            Divider()
+            EventTimelineStrip(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
@@ -29,7 +51,7 @@ struct SnapshotWorkspaceView: View {
     private var content: some View {
         switch model.contentPhase {
         case .idle, .loading:
-            ProgressView("Loading Runtime Snapshots…")
+            ProgressView("Loading the Workspace…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .empty:
             EmptyWorkspaceView(isCapturing: model.isCapturing) {
@@ -41,38 +63,165 @@ struct SnapshotWorkspaceView: View {
             }
         case .content:
             HSplitView {
-                VSplitView {
-                    SnapshotListPane(model: model)
-                        .frame(minHeight: 200)
-                    EventTimelinePane(model: model)
-                        .frame(minHeight: 140)
+                NavigationColumn(section: $section)
+                    .frame(minWidth: 145, idealWidth: 160, maxWidth: 200)
+                switch section {
+                case .canvas:
+                    CanvasSection(model: model)
+                case .evidence:
+                    EvidenceSection(model: model)
+                case .wiki:
+                    WikiPane(model: model)
                 }
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
-                VSplitView {
-                    TabView {
-                        ScreenshotPane(model: model)
-                            .tabItem { Label("Screenshot", systemImage: "photo") }
-                        CanvasPane(model: model)
-                            .tabItem { Label("Canvas", systemImage: "point.3.connected.trianglepath.dotted") }
-                        DesignReviewPane(model: model)
-                            .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
-                        LayerInspector3DPane(model: model)
-                            .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
-                        WikiPane(model: model)
-                            .tabItem { Label("Wiki", systemImage: "book") }
-                    }
-                    .frame(minHeight: 280)
-                    ViewTreePane(model: model)
-                        .frame(minHeight: 220)
-                }
-                VSplitView {
-                    NodeDetailsPane(model: model)
-                        .frame(minHeight: 260)
-                    ReviewIssuesPane(model: model)
-                        .frame(minHeight: 140)
-                }
-                .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
             }
+        }
+    }
+}
+
+private struct NavigationColumn: View {
+    @Binding var section: WorkspaceSection
+
+    var body: some View {
+        List(WorkspaceSection.allCases, selection: selectionBinding) { section in
+            Label(section.rawValue, systemImage: section.systemImage)
+                .tag(section)
+                .accessibilityLabel("\(section.rawValue) section")
+        }
+        .listStyle(.sidebar)
+    }
+
+    private var selectionBinding: Binding<WorkspaceSection?> {
+        Binding(
+            get: { section },
+            set: { newValue in
+                if let newValue {
+                    section = newValue
+                }
+            }
+        )
+    }
+}
+
+/// The landing surface for the selected scope: the Screen State Canvas, plus
+/// the selected state's single-screen Inspector as the main right-hand
+/// experience once a state is picked.
+private struct CanvasSection: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        // The CanvasPane keeps one structural identity whether or not the
+        // Inspector is open: its appear/disappear pair owns the Canvas
+        // revision watch, and a branch switch would fire the old identity's
+        // onDisappear against the new identity's freshly started watch.
+        HSplitView {
+            CanvasPane(model: model)
+                .frame(minWidth: 300, idealWidth: 420)
+            if model.selectedCanvasStateID != nil {
+                StateInspectorView(model: model)
+                    .frame(minWidth: 560)
+            }
+        }
+    }
+}
+
+/// The single-screen Inspector for the selected Screen State. Every pane in
+/// here — screenshot, 2D tree, node properties, 3D layers, and the design
+/// workbench — is driven by the state's canonical observation Snapshot.
+private struct StateInspectorView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            HSplitView {
+                InspectorPanes(model: model)
+                    .frame(minWidth: 420)
+                VSplitView {
+                    CanvasStateDetailPanel(model: model)
+                        .frame(minHeight: 170)
+                    NodeDetailsPane(model: model)
+                        .frame(minHeight: 200)
+                    ReviewIssuesPane(model: model)
+                        .frame(minHeight: 120)
+                }
+                .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Label("Screen State Inspector", systemImage: "scope")
+                .font(.headline)
+            if let detail = model.canvasStateDetail {
+                Text(detail.title)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+            snapshotCaption
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 9)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var snapshotCaption: some View {
+        if let detail = model.canvasStateDetail {
+            Text("Canonical Snapshot \(detail.canonicalSnapshotID)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 320)
+                .help("The observation Snapshot driving every Inspector pane.")
+        }
+    }
+}
+
+/// The Snapshot-driven inspection panes: screenshot evidence, the 3D layers,
+/// the design workbench, and the 2D view tree.
+private struct InspectorPanes: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        VSplitView {
+            TabView {
+                ScreenshotPane(model: model)
+                    .tabItem { Label("Screenshot", systemImage: "photo") }
+                LayerInspector3DPane(model: model)
+                    .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
+                DesignReviewPane(model: model)
+                    .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
+            }
+            .frame(minHeight: 280)
+            ViewTreePane(model: model)
+                .frame(minHeight: 180)
+        }
+    }
+}
+
+/// The demoted Snapshot library: a secondary evidence view over the raw
+/// captures of the selected scope.
+private struct EvidenceSection: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+
+    var body: some View {
+        HSplitView {
+            SnapshotListPane(model: model)
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 320)
+            InspectorPanes(model: model)
+                .frame(minWidth: 420)
+            VSplitView {
+                NodeDetailsPane(model: model)
+                    .frame(minHeight: 260)
+                ReviewIssuesPane(model: model)
+                    .frame(minHeight: 140)
+            }
+            .frame(minWidth: 250, idealWidth: 300, maxWidth: 380)
         }
     }
 }
@@ -139,16 +288,18 @@ private struct CanvasPane: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .content:
-            HStack(spacing: 0) {
-                ScrollView([.horizontal, .vertical]) {
-                    canvasContent
-                        .padding(24)
-                }
-                if model.selectedCanvasStateID != nil {
-                    Divider()
-                    CanvasStateDetailPanel(model: model)
-                        .frame(width: 280)
-                }
+            ScrollView([.horizontal, .vertical]) {
+                canvasContent
+                    .padding(24)
+            }
+            if model.selectedCanvasStateID == nil {
+                Divider()
+                Text("Click a Screen State to open its Inspector. Cmd-click selects states for merging.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.vertical, 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -1299,38 +1450,95 @@ private struct LayerInspector3DPane: View {
             PaneHeader(title: "3D Layer Inspector", systemImage: "square.3.layers.3d")
             Divider()
             if model.layerBoxes.isEmpty {
-                Text("Select a Runtime Snapshot to explode its layers in 3D.")
+                Text("Select a Screen State or a Snapshot to explode its layers in 3D.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                SceneView(
-                    scene: sceneCache.scene(for: model.layerBoxes),
-                    options: [.allowsCameraControl, .autoenablesDefaultLighting]
-                )
-                .accessibilityLabel("3D layer inspector with \(model.layerBoxes.count) layers")
+                sceneContent
             }
         }
     }
+
+    @ViewBuilder
+    private var sceneContent: some View {
+        // The scene must be resolved before the caption so the caption can
+        // report honestly whether this build textured real pixels.
+        let scene = sceneCache.scene(
+            for: model.layerBoxes,
+            screenshot: model.selectedSnapshot?.screenshot,
+            screenshotData: model.screenshotData,
+            selectedNodeID: model.selectedNodeID
+        )
+        if !sceneCache.lastBuildUsedRealPixels {
+            Text("No screenshot bytes are available for this Snapshot; layers are role-colored placeholders, not real pixels.")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.horizontal)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+        }
+        SceneView(
+            scene: scene,
+            options: [.allowsCameraControl, .autoenablesDefaultLighting]
+        )
+        .accessibilityLabel("3D layer inspector with \(model.layerBoxes.count) layers")
+    }
 }
 
-/// Memoizes the built scene by its layer boxes so unrelated published changes
-/// do not rebuild it and reset the user's orbiting camera. The cache is only
-/// touched from main-actor `body` evaluations.
+/// Memoizes the built scene by its layer boxes and screenshot identity so
+/// unrelated published changes do not rebuild it and reset the user's
+/// orbiting camera. A changed node selection restyles the cached scene in
+/// place instead of rebuilding it. The cache is only touched from main-actor
+/// `body` evaluations.
 private final class LayerSceneCache {
-    private var boxes: [LayerBox3D] = []
+    private struct Key: Equatable {
+        let boxes: [LayerBox3D]
+        let screenshotHash: String?
+        let hasScreenshotBytes: Bool
+    }
+
+    private var key: Key?
     private var cached: SCNScene?
+    private var selectedNodeID: String?
+    /// Whether the most recent build textured the layers with the actual
+    /// screenshot pixels. False means the honest colored-placeholder fallback.
+    private(set) var lastBuildUsedRealPixels = false
 
     @MainActor
-    func scene(for boxes: [LayerBox3D]) -> SCNScene {
-        if let cached, boxes == self.boxes {
-            return cached
+    func scene(
+        for boxes: [LayerBox3D],
+        screenshot: ScreenshotPresentation?,
+        screenshotData: Data?,
+        selectedNodeID: String?
+    ) -> SCNScene {
+        let key = Key(
+            boxes: boxes,
+            screenshotHash: screenshot?.hash,
+            hasScreenshotBytes: screenshotData != nil
+        )
+        if cached == nil || key != self.key {
+            let build = LayerSceneBuilder.scene(
+                for: boxes,
+                screenshot: screenshot,
+                screenshotData: screenshotData
+            )
+            cached = build.scene
+            lastBuildUsedRealPixels = build.usedRealPixels
+            self.key = key
+            self.selectedNodeID = nil
         }
-        let built = LayerSceneBuilder.scene(for: boxes)
-        self.boxes = boxes
-        cached = built
-        return built
+        guard let cached else {
+            // Unreachable: the cache was just filled above.
+            return SCNScene()
+        }
+        if selectedNodeID != self.selectedNodeID {
+            LayerSceneBuilder.applySelection(selectedNodeID, in: cached)
+            self.selectedNodeID = selectedNodeID
+        }
+        return cached
     }
 }
 
@@ -1338,12 +1546,24 @@ enum LayerSceneBuilder {
     private static let scale: CGFloat = 0.01
     private static let layerSpacing: CGFloat = 0.16
 
-    static func scene(for boxes: [LayerBox3D]) -> SCNScene {
+    struct Build {
+        let scene: SCNScene
+        /// True when the layers were textured with the screenshot's pixels.
+        let usedRealPixels: Bool
+    }
+
+    static func scene(
+        for boxes: [LayerBox3D],
+        screenshot: ScreenshotPresentation?,
+        screenshotData: Data?
+    ) -> Build {
         let scene = SCNScene()
         scene.background.contents = NSColor.windowBackgroundColor
+        let raster = decodedRaster(screenshot: screenshot, screenshotData: screenshotData)
         let bounds = boxes.reduce(CGRect.zero) { partial, box in
             partial.union(CGRect(x: box.x, y: box.y, width: box.width, height: box.height))
         }
+        var texturedAnyLayer = false
         for box in boxes {
             let plane = SCNBox(
                 width: CGFloat(box.width) * scale,
@@ -1352,9 +1572,24 @@ enum LayerSceneBuilder {
                 chamferRadius: 0
             )
             let material = SCNMaterial()
-            material.diffuse.contents = box.isInteractive
-                ? NSColor.systemOrange.withAlphaComponent(0.55)
-                : NSColor.systemBlue.withAlphaComponent(0.35)
+            if let texture = texture(for: box, raster: raster, screenshot: screenshot) {
+                // The layer shows the node's actual captured pixels. A
+                // constant lighting model keeps the default scene lights
+                // from tinting the evidence.
+                material.diffuse.contents = texture
+                material.lightingModel = .constant
+                texturedAnyLayer = true
+            } else if raster != nil {
+                // Real pixels exist but this node's frame lies outside the
+                // covered region: a neutral placeholder, never invented pixels.
+                material.diffuse.contents = NSColor.systemGray.withAlphaComponent(0.3)
+            } else {
+                // No screenshot bytes at all (fixture mode ships none): the
+                // honest role-colored placeholder boxes.
+                material.diffuse.contents = box.isInteractive
+                    ? NSColor.systemOrange.withAlphaComponent(0.55)
+                    : NSColor.systemBlue.withAlphaComponent(0.35)
+            }
             material.isDoubleSided = true
             plane.materials = [material]
             let node = SCNNode(geometry: plane)
@@ -1374,7 +1609,59 @@ enum LayerSceneBuilder {
         cameraNode.position = SCNVector3(extent * 0.7, extent * 0.35, extent * 1.4)
         cameraNode.look(at: SCNVector3(0, 0, 0))
         scene.rootNode.addChildNode(cameraNode)
-        return scene
+        return Build(scene: scene, usedRealPixels: texturedAnyLayer)
+    }
+
+    /// Restyles the selection highlight in place so an orbiting camera
+    /// survives a changed node selection. The highlight is a subtle emission
+    /// tint; the layer content itself stays the evidence.
+    static func applySelection(_ nodeID: String?, in scene: SCNScene) {
+        scene.rootNode.enumerateChildNodes { node, _ in
+            guard let material = node.geometry?.firstMaterial, node.name != nil else {
+                return
+            }
+            let isSelected = nodeID != nil && node.name == nodeID
+            material.emission.contents = isSelected
+                ? NSColor.controlAccentColor.withAlphaComponent(0.45)
+                : NSColor.black
+        }
+    }
+
+    /// Decodes the screenshot bytes into a CGImage once per scene build.
+    /// Returns nil when there are no bytes or they are not a supported image.
+    private static func decodedRaster(
+        screenshot: ScreenshotPresentation?,
+        screenshotData: Data?
+    ) -> CGImage? {
+        guard screenshot != nil, let screenshotData, let image = NSImage(data: screenshotData) else {
+            return nil
+        }
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
+    /// Crops the node's region out of the screenshot raster: the logical
+    /// frame maps through the screenshot coverage and pixel scale into a
+    /// top-left-origin pixel rect, clamped to the raster, which is exactly
+    /// the space `CGImage.cropping(to:)` consumes.
+    private static func texture(
+        for box: LayerBox3D,
+        raster: CGImage?,
+        screenshot: ScreenshotPresentation?
+    ) -> CGImage? {
+        guard let raster, let screenshot else {
+            return nil
+        }
+        guard let crop = LayerTextureProjection.pixelCropRect(
+            frame: RectPresentation(x: box.x, y: box.y, width: box.width, height: box.height),
+            coverage: screenshot.coverage,
+            pixelWidth: Double(raster.width),
+            pixelHeight: Double(raster.height)
+        ) else {
+            return nil
+        }
+        return raster.cropping(
+            to: CGRect(x: crop.x, y: crop.y, width: crop.width, height: crop.height)
+        )
     }
 }
 
@@ -1788,17 +2075,53 @@ private struct ReviewIssueDetailPanel: View {
     }
 }
 
-private struct EventTimelinePane: View {
+/// The collapsible bottom timeline strip: persisted Runtime events with the
+/// Host's event-pump state. Events are timeline evidence, not a standalone
+/// sidebar destination.
+private struct EventTimelineStrip: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: "Events", systemImage: "clock.arrow.circlepath") {
-                pumpStatus
+        VStack(spacing: 0) {
+            header
+            if isExpanded {
+                Divider()
+                content
+                    .frame(height: 190)
             }
-            Divider()
-            content
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Label("Timeline", systemImage: isExpanded ? "chevron.down" : "chevron.up")
+                    .font(.headline)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Collapse the timeline" : "Expand the timeline")
+            Text(summaryLine)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            pumpStatus
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var summaryLine: String {
+        EventTimelineStripPresentation.summary(
+            phase: model.eventsPhase,
+            eventCount: model.events.count,
+            gapCount: model.reportedEventGaps.count
+        )
     }
 
     /// The Host's Runtime event-pump status, reported by `GET /v1/status`.
@@ -1889,7 +2212,10 @@ private struct EventTimelinePane: View {
     }
 }
 
-private struct ConnectionBar: View {
+/// The persistent context bar: the Application + Version scope picker that
+/// drives everything below, the independent Host and Runtime status, and the
+/// capture entry.
+private struct ContextBar: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
@@ -1898,9 +2224,12 @@ private struct ConnectionBar: View {
                 .font(.headline)
             Divider()
                 .frame(height: 18)
+            scopePicker
+            Divider()
+                .frame(height: 18)
             connectionLabel
             runtimeLabel
-            Text("\(model.snapshots.count) Snapshot\(model.snapshots.count == 1 ? "" : "s")")
+            Text("\(model.scopedSnapshots.count) Snapshot\(model.scopedSnapshots.count == 1 ? "" : "s")")
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Refresh", systemImage: "arrow.clockwise") {
@@ -1916,6 +2245,41 @@ private struct ConnectionBar: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    @ViewBuilder
+    private var scopePicker: some View {
+        if model.availableScopes.isEmpty {
+            Text("No application scope")
+                .foregroundStyle(.secondary)
+        } else {
+            Picker("Application", selection: scopeBinding) {
+                ForEach(model.availableScopes) { scope in
+                    Text(scope.title).tag(Optional(scope))
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 340)
+            .help(scopeHelp)
+            .accessibilityLabel("Application and version scope")
+        }
+    }
+
+    private var scopeBinding: Binding<WorkspaceScope?> {
+        Binding(
+            get: { model.selectedScope },
+            set: { scope in
+                guard let scope, scope != model.selectedScope else { return }
+                Task { await model.selectScope(scope) }
+            }
+        )
+    }
+
+    private var scopeHelp: String {
+        guard let scope = model.selectedScope else {
+            return "Application and version scope"
+        }
+        return "Project \(scope.projectID) · build \(scope.buildID)"
     }
 
     @ViewBuilder
@@ -1957,14 +2321,17 @@ private struct ConnectionBar: View {
     }
 }
 
+/// The Evidence library: the raw captures of the selected scope. Snapshots
+/// here are subordinate evidence — the primary way into a screenshot or a
+/// view tree is a Screen State on the Canvas.
 private struct SnapshotListPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaneHeader(title: "Snapshots", systemImage: "camera.on.rectangle")
+            PaneHeader(title: "Snapshot Evidence", systemImage: "camera.on.rectangle")
             Divider()
-            List(model.snapshots, selection: selection) { snapshot in
+            List(model.scopedSnapshots, selection: selection) { snapshot in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(snapshot.applicationID)
                         .font(.headline)
