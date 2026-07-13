@@ -142,6 +142,11 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     // Per-pane request generations: a slow older response must never
     // overwrite the state a newer request already applied.
     private var canvasGeneration = 0
+    private var canvasWatchGeneration = 0
+    /// Test hook mirroring `explorationPollSleep`: the watch cadence.
+    public var canvasWatchSleep: @Sendable () async throws -> Void = {
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+    }
     private var wikiGeneration = 0
     private var issuesGeneration = 0
     private var eventsGeneration = 0
@@ -299,14 +304,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             guard generation == canvasGeneration else {
                 return
             }
-            canvasGraph = graph
-            canvasStates = CanvasLayout.positions(for: graph)
-            canvasPhase = graph.states.isEmpty ? .empty : .content
-            // Only states that are still active can stay merge-selected
-            // after a reload.
-            mergeSelectionStateIDs = mergeSelectionStateIDs.filter { stateID in
-                graph.states.contains(where: { $0.id == stateID && $0.isActive })
-            }
+            applyCanvasGraph(graph)
         } catch {
             guard generation == canvasGeneration else {
                 return
@@ -320,6 +318,70 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 canvasPhase = .empty
             } else {
                 canvasPhase = .failure(Self.message(for: error))
+            }
+        }
+    }
+
+    private func applyCanvasGraph(_ graph: CanvasGraph) {
+        canvasGraph = graph
+        canvasStates = CanvasLayout.positions(for: graph)
+        canvasPhase = graph.states.isEmpty ? .empty : .content
+        // Only states that are still active can stay merge-selected
+        // after a reload.
+        mergeSelectionStateIDs = mergeSelectionStateIDs.filter { stateID in
+            graph.states.contains(where: { $0.id == stateID && $0.isActive })
+        }
+    }
+
+    /// The Canvas mirrors a shared Workspace this Studio does not own: an
+    /// agent, the CLI, or another Studio may be growing the graph while the
+    /// pane is on screen, so a visible Canvas quietly follows the graph
+    /// revision instead of waiting for a local action to reload it. Applying
+    /// only on a revision change keeps unchanged ticks from disturbing the
+    /// pane, and the curation revision guard keeps a concurrent change from
+    /// being rubber-stamped into an open merge or split decision.
+    public func startCanvasWatch() {
+        canvasWatchGeneration += 1
+        let generation = canvasWatchGeneration
+        Task { [weak self] in
+            await self?.watchCanvas(generation: generation)
+        }
+    }
+
+    /// Stops the visible-pane watch; the loaded graph stays on screen.
+    public func stopCanvasWatch() {
+        canvasWatchGeneration += 1
+    }
+
+    private func watchCanvas(generation: Int) async {
+        while generation == canvasWatchGeneration {
+            if Task.isCancelled {
+                return
+            }
+            do {
+                try await canvasWatchSleep()
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, generation == canvasWatchGeneration else {
+                return
+            }
+            guard let projectID = lastCanvasProjectID,
+                  let applicationID = lastCanvasApplicationID else {
+                continue
+            }
+            guard let current = try? await client.getScreenGraph(
+                projectID: projectID,
+                applicationID: applicationID
+            ) else {
+                // A transient read failure must not tear the visible pane down.
+                continue
+            }
+            guard generation == canvasWatchGeneration else {
+                return
+            }
+            if current.revision != canvasGraph?.revision {
+                applyCanvasGraph(current)
             }
         }
     }

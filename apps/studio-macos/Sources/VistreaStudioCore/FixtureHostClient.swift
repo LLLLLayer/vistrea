@@ -49,6 +49,12 @@ public actor FixtureHostClient: HostClient {
     /// How many times the Screen Graph was requested; lets tests prove the
     /// Canvas refreshed after exploration succeeded.
     public private(set) var screenGraphLoadCount = 0
+
+    /// Replaces the canvas graph mid-test, simulating an external writer
+    /// (an agent or the CLI) growing the shared Workspace.
+    public func replaceCanvasGraph(_ graph: CanvasGraph) {
+        canvasGraph = graph
+    }
     /// How many identity curation commands reached this Host, accepted or
     /// rejected; lets tests prove a stale decision was never submitted.
     public private(set) var mergeCount = 0

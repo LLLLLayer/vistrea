@@ -203,6 +203,66 @@ final class ExplorationWorkflowModelTests: XCTestCase {
         let record = try await client.getExplorationOperation(id: firstOperationID)
         XCTAssertEqual(record.operation.state, "cancelled")
     }
+
+    /// The Canvas mirrors a shared Workspace: an agent or the CLI can grow
+    /// the graph while the pane is on screen, and the visible pane follows
+    /// the revision without a local action and without a loading flash.
+    func testCanvasFollowsAnExternalWriterWhileVisible() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let client = FixtureHostClient(snapshots: [snapshot], canvasGraph: Self.fixtureGraph())
+        let model = SnapshotWorkspaceModel(client: client)
+        await model.refresh()
+        XCTAssertEqual(model.canvasPhase, .content)
+        XCTAssertEqual(model.canvasGraph?.revision, 1)
+        XCTAssertEqual(model.canvasStates.count, 1)
+
+        // An external writer (the CLI exploration) advanced the graph.
+        let grown = CanvasGraph(
+            screenGraphID: "graph_019f0000-0000-7000-8000-000000000001",
+            revision: 5,
+            entryStateIDs: ["screenstate_019f0000-0000-7000-8000-000000000001"],
+            states: [
+                CanvasStateSummary(
+                    screenStateID: "screenstate_019f0000-0000-7000-8000-000000000001",
+                    title: "Home",
+                    kind: "screen",
+                    status: "active"
+                ),
+                CanvasStateSummary(
+                    screenStateID: "screenstate_019f0000-0000-7000-8000-000000000002",
+                    title: "Detail",
+                    kind: "screen",
+                    status: "active"
+                ),
+            ],
+            transitions: []
+        )
+        await client.replaceCanvasGraph(grown)
+
+        // Three watch ticks: the first two observe the change (the second
+        // proves an unchanged revision applies nothing new), the third stops.
+        let ticks = TickCounter()
+        model.canvasWatchSleep = {
+            let tick = await ticks.next()
+            if tick > 3 {
+                throw CancellationError()
+            }
+        }
+        model.startCanvasWatch()
+        for _ in 0..<200 {
+            if model.canvasGraph?.revision == 5 {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        model.stopCanvasWatch()
+
+        XCTAssertEqual(model.canvasGraph?.revision, 5)
+        XCTAssertEqual(model.canvasStates.count, 2)
+        // The watch applied the grown graph directly; the pane never dropped
+        // back into a loading phase.
+        XCTAssertEqual(model.canvasPhase, .content)
+    }
 }
 
 /// Records what the workspace exposed on each exploration poll.
@@ -219,5 +279,15 @@ private actor PollObservations {
         records.append(
             Record(isExploring: isExploring, operationID: operationID, isAddressable: isAddressable)
         )
+    }
+
+}
+
+private actor TickCounter {
+    private var value = 0
+
+    func next() -> Int {
+        value += 1
+        return value
     }
 }

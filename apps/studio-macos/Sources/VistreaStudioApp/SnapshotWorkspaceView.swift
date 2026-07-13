@@ -111,10 +111,13 @@ private struct CanvasPane: View {
         .sheet(isPresented: $isMergeSheetPresented) {
             MergeStatesSheet(model: model)
         }
-        // The pane deliberately has no `onDisappear` teardown: an exploration
-        // Operation belongs to the run, not to the visible tab. Switching tabs
-        // keeps the poll loop, the progress line, the automatic Canvas refresh
-        // after a succeeded run, and Cancel all alive.
+        // The exploration Operation belongs to the run, not to the visible
+        // tab: switching tabs keeps the poll loop, the progress line, the
+        // automatic Canvas refresh after a succeeded run, and Cancel alive.
+        // The revision watch, by contrast, is a pure view concern — it only
+        // needs to run while the Canvas is actually on screen.
+        .onAppear { model.startCanvasWatch() }
+        .onDisappear { model.stopCanvasWatch() }
     }
 
     @ViewBuilder
