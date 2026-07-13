@@ -1,6 +1,6 @@
 ---
 name: vistrea-explore-ui
-description: Drive bounded deterministic exploration of the connected application through the Vistrea MCP tools, read the resulting Screen Graph, and curate the Screen State identity it inferred. Use when a user asks to explore an app's screens automatically, map reachable states and transitions, grow the Screen Graph with real device actions, or fix a screen the graph wrongly split into two or wrongly collapsed into one.
+description: Drive bounded deterministic exploration of the connected application through the Vistrea CLI, read the resulting Screen Graph, and curate the Screen State identity it inferred. Use when a user asks to explore an app's screens automatically, map reachable states and transitions, grow the Screen Graph with real device actions, or fix a screen the graph wrongly split into two or wrongly collapsed into one.
 ---
 
 # Explore the running application
@@ -16,26 +16,30 @@ Vistrea Runtime SDK (Debug or internal builds only) and have an active Runtime
 connection — exploration is snapshot-driven, and without the SDK the first
 capture fails as `unavailable`.
 
-Available MCP tools:
+Every command below is the strict JSON CLI, run from the repository root as
+`node .build/typescript/integrations/cli/main.js <command>` with
+`VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` in the environment (never argv).
+Each invocation prints one JSON envelope on stdout; a non-zero exit code maps
+the envelope's error code.
 
-| Intent | Tool |
+| Intent | Command |
 |---|---|
-| Check the Runtime is connected | `vistrea_get_workspace_status` |
-| Start a bounded walk | `vistrea_run_exploration` |
-| Poll progress and the report | `vistrea_get_exploration_operation` |
-| Cancel the running walk | `vistrea_cancel_exploration` |
-| Read the materialized graph | `vistrea_get_screen_graph` |
-| Resolve one state | `vistrea_get_screen_state` |
-| Find a path between states | `vistrea_find_screen_path` |
-| Freeze the graph as a named version | `vistrea_tag_graph_version` |
-| Merge states that are one screen | `vistrea_merge_screen_states` |
-| Split one state into two screens | `vistrea_split_screen_state` |
+| Check the Runtime is connected | `workspace status` |
+| Start a bounded walk | `explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2]` |
+| Poll progress and the report | `explore get <operation_id>` |
+| Cancel the running walk | `explore cancel <operation_id>` |
+| Read the materialized graph | `graph show --project <id> --application <id>` |
+| Resolve one state | `graph get-state <screen_state_id>` |
+| Find a path between states | `graph find-path --from <id> --to <id>` |
+| Freeze the graph as a named version | `graph tag --project <id> --application <id> --tag <name>` |
+| Merge states that are one screen | `screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> --actor <id> [--justification <text>]` |
+| Split one state into two screens | `screen split --project <id> --application <id> --state <id> --observations a,b [--title <text>] --revision <n> --actor <id> [--justification <text>]` |
 
 ## Workflow
 
-1. Confirm the Runtime is connected (`vistrea_get_workspace_status` reports
+1. Confirm the Runtime is connected (`workspace status` reports
    `runtime_connected: true`) and capture one Snapshot to anchor the walk.
-2. Start the run with an explicit action budget (`maximum_actions`). Exclude
+2. Start the run with an explicit action budget (`--max-actions`). Exclude
    stable IDs that are not application frontier: Vistrea's in-app Inspector
    launcher and platform navigation chrome such as UIKit's `BackButton`.
 3. Poll the Operation until its state leaves `running`. Progress events report
@@ -52,8 +56,8 @@ Available MCP tools:
    the absorbed structures, so future captures of either deduplicate into it.
    When two genuinely different screens collapsed into one state, split the
    observations that belong to the other screen out of it.
-7. When a walk completes a coverage milestone, freeze it with
-   `vistrea_tag_graph_version` so later comparisons have a fixed reference.
+7. When a walk completes a coverage milestone, freeze it with `graph tag` so
+   later comparisons have a fixed reference.
 
 ## Boundaries
 
@@ -66,8 +70,8 @@ Available MCP tools:
 - Curation moves what a screen *means*, never the evidence. Observations are
   immutable: a merge re-points identity, it does not rewrite what a device was
   seen to do.
-- Both curation tools take `expected_graph_revision`, the graph revision the
-  decision was made against. Pass the revision you actually read; a mismatch is
+- Both curation commands take `--revision`, the graph revision the decision
+  was made against. Pass the revision you actually read; a mismatch is
   a real conflict, so re-read the graph and re-judge instead of retrying with a
   fresh number.
 - Never expose bearer tokens, Workspace paths, or raw storage details.

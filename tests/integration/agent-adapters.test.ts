@@ -1,8 +1,3 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import {
-  StdioClientTransport,
-  getDefaultEnvironment,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -42,11 +37,6 @@ const emittedCliPath = path.join(
   repositoryRoot,
   ".build/typescript/integrations/cli/main.js",
 );
-const emittedMcpPath = path.join(
-  repositoryRoot,
-  ".build/typescript/integrations/mcp/main.js",
-);
-
 interface CaptureFixture {
   readonly snapshot: RuntimeSnapshot;
   readonly object: ObjectRef;
@@ -80,7 +70,7 @@ class QueuedRuntimeCapturePort implements RuntimeCapturePort {
   }
 }
 
-test("CLI and real stdio MCP preserve Host operation results and errors", async (t) => {
+test("the CLI preserves Host operation results, errors, and toolset focus", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryDirectory(t, "vistrea-agent-adapters-");
   const fixtures = await loadCaptureFixtures(validator);
@@ -95,9 +85,10 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   });
   t.after(() => host.close());
   const environment = {
-    ...getDefaultEnvironment(),
+    ...process.env,
     VISTREA_HOST_URL: host.baseUrl,
     VISTREA_HOST_TOKEN: host.bearerToken,
+    VISTREA_CLI_TOOLSETS: "",
   };
 
   const cliStatus = await runCli(["workspace", "status", "--format", "json"], environment);
@@ -106,140 +97,51 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assertTokenAbsent(cliStatus, host.bearerToken);
   const cliStatusEnvelope = parseCliEnvelope(cliStatus.stdout);
 
-  const mcpTransport = new StdioClientTransport({
-    command: process.execPath,
-    args: [emittedMcpPath],
-    cwd: repositoryRoot,
-    env: environment,
-    stderr: "pipe",
-  });
-  const mcpStderr: Buffer[] = [];
-  mcpTransport.stderr?.on("data", (chunk: Buffer) => mcpStderr.push(Buffer.from(chunk)));
-  const mcp = new Client({ name: "vistrea-agent-adapter-test", version: "1.0.0" });
-  t.after(() => mcp.close().catch(() => undefined));
-  await mcp.connect(mcpTransport);
-
-  const tools = await mcp.listTools();
-  assert.deepEqual(
-    tools.tools.map((tool) => tool.name).sort(),
-    [
-      "vistrea_add_design_reference",
-      "vistrea_apply_tuning_patch",
-      "vistrea_cancel_exploration",
-      "vistrea_capture_snapshot",
-      "vistrea_compare_builds",
-      "vistrea_create_review_issue",
-      "vistrea_create_tuning_patch",
-      "vistrea_create_wiki_node",
-      "vistrea_export_pack",
-      "vistrea_find_screen_path",
-      "vistrea_get_build_diff",
-      "vistrea_get_design_comparison",
-      "vistrea_get_design_reference",
-      "vistrea_get_event_timeline",
-      "vistrea_get_exploration_operation",
-      "vistrea_get_object",
-      "vistrea_get_review_issue",
-      "vistrea_get_screen_graph",
-      "vistrea_get_screen_state",
-      "vistrea_get_snapshot",
-      "vistrea_get_tuning_application",
-      "vistrea_get_tuning_patch",
-      "vistrea_get_validation_finding",
-      "vistrea_get_validation_run",
-      "vistrea_get_wiki_backlinks",
-      "vistrea_get_wiki_node",
-      "vistrea_get_workspace_status",
-      "vistrea_import_pack",
-      "vistrea_link_wiki_node",
-      "vistrea_list_active_tuning",
-      "vistrea_list_design_comparisons",
-      "vistrea_list_design_references",
-      "vistrea_list_review_issues",
-      "vistrea_list_snapshots",
-      "vistrea_list_validation_findings",
-      "vistrea_map_design_region",
-      "vistrea_merge_screen_states",
-      "vistrea_observe_screen_state",
-      "vistrea_observe_transition",
-      "vistrea_related_wiki_nodes",
-      "vistrea_revert_tuning_application",
-      "vistrea_run_design_comparison",
-      "vistrea_run_exploration",
-      "vistrea_search_wiki",
-      "vistrea_split_screen_state",
-      "vistrea_suppress_validation_finding",
-      "vistrea_tag_graph_version",
-      "vistrea_transition_review_issue",
-      "vistrea_unlink_wiki_node",
-      "vistrea_update_wiki_node",
-      "vistrea_upload_design_asset",
-      "vistrea_validate_screen_graph",
-      "vistrea_validate_snapshot",
-      "vistrea_verify_review_issue",
-    ],
-  );
-  const inheritedToolName = await mcp.callTool({ name: "__proto__", arguments: {} });
-  assert.equal(inheritedToolName.isError, true);
-  assert.equal(
-    ((inheritedToolName.structuredContent as JsonObject)["error"] as JsonObject)["code"],
-    "unsupported",
-  );
-
-  const mcpStatus = await mcp.callTool({ name: "vistrea_get_workspace_status", arguments: {} });
-  assert.equal(mcpStatus.isError, undefined);
-  assert.deepEqual(mcpStatus.structuredContent, cliStatusEnvelope.data);
+  assert.equal((cliStatusEnvelope.data as JsonObject)["status"], "ready");
 
   // A composition focused on exploration and asset recording masks the
-  // verification surface on both sides: the tools vanish from the list and a
-  // call to one fails closed instead of quietly executing.
-  const focusedTransport = new StdioClientTransport({
-    command: process.execPath,
-    args: [emittedMcpPath],
-    cwd: repositoryRoot,
-    env: { ...environment, VISTREA_MCP_TOOLSETS: "assets,exploration" },
-    stderr: "pipe",
-  });
-  const focused = new Client({ name: "vistrea-focused-adapter-test", version: "1.0.0" });
-  t.after(() => focused.close().catch(() => undefined));
-  await focused.connect(focusedTransport);
-  const focusedTools = await focused.listTools();
-  assert.deepEqual(
-    focusedTools.tools.map((tool) => tool.name).sort(),
-    [
-      "vistrea_cancel_exploration",
-      "vistrea_capture_snapshot",
-      "vistrea_export_pack",
-      "vistrea_find_screen_path",
-      "vistrea_get_event_timeline",
-      "vistrea_get_exploration_operation",
-      "vistrea_get_object",
-      "vistrea_get_screen_graph",
-      "vistrea_get_screen_state",
-      "vistrea_get_snapshot",
-      "vistrea_get_workspace_status",
-      "vistrea_import_pack",
-      "vistrea_list_snapshots",
-      "vistrea_merge_screen_states",
-      "vistrea_observe_screen_state",
-      "vistrea_observe_transition",
-      "vistrea_run_exploration",
-      "vistrea_split_screen_state",
-      "vistrea_tag_graph_version",
-    ],
+  // verification surface on both sides: the commands vanish from help and a
+  // masked invocation fails closed instead of quietly executing.
+  const focusedEnvironment = { ...environment, VISTREA_CLI_TOOLSETS: "assets,exploration" };
+  const maskedValidate = await runCli(
+    ["validate", "snapshot", "--snapshot", "snapshot_019f0000-0000-7000-8000-000000000001"],
+    focusedEnvironment,
   );
-  const maskedCall = await focused.callTool({ name: "vistrea_validate_snapshot", arguments: {} });
-  assert.equal(maskedCall.isError, true);
+  assert.equal(maskedValidate.exitCode, 6);
+  const maskedEnvelope = parseCliEnvelope(maskedValidate.stdout);
+  assert.equal(maskedEnvelope.error?.["code"], "unsupported");
+  assert.match(
+    maskedEnvelope.error?.["message"] as string,
+    /validate commands are not exposed by this toolset configuration/,
+  );
+  const maskedDesign = await runCli(["design", "list-references"], focusedEnvironment);
+  assert.equal(maskedDesign.exitCode, 6);
+  const focusedStatus = await runCli(["workspace", "status"], focusedEnvironment);
+  assert.equal(focusedStatus.exitCode, 0);
+  const focusedHelp = await runCli(["help"], focusedEnvironment);
+  assert.equal(focusedHelp.exitCode, 0);
+  const focusedCommands = (parseCliEnvelope(focusedHelp.stdout).data as JsonObject)[
+    "commands"
+  ] as readonly string[];
   assert.equal(
-    ((maskedCall.structuredContent as JsonObject)["error"] as JsonObject)["code"],
-    "unsupported",
+    focusedCommands.some((line) =>
+      ["design", "issue", "tuning", "validate", "wiki"].includes(line.split(" ")[0] as string),
+    ),
+    false,
   );
-  const focusedStatus = await focused.callTool({
-    name: "vistrea_get_workspace_status",
-    arguments: {},
+  assert.equal(
+    focusedCommands.some((line) => line.startsWith("explore run")),
+    true,
+  );
+  const unknownToolset = await runCli(["workspace", "status"], {
+    ...environment,
+    VISTREA_CLI_TOOLSETS: "bogus,assets",
   });
-  assert.equal(focusedStatus.isError, undefined);
-  await focused.close();
+  assert.equal(unknownToolset.exitCode, 2);
+  assert.match(
+    parseCliEnvelope(unknownToolset.stdout).error?.["message"] as string,
+    /Unknown VISTREA_CLI_TOOLSETS entries: bogus/,
+  );
 
   const cliCapture = await runCli(["snapshot", "capture"], environment);
   assert.equal(cliCapture.exitCode, 0);
@@ -251,33 +153,23 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     fixtures[0]?.snapshot.snapshot_id,
   );
 
-  const mcpCapture = await mcp.callTool({ name: "vistrea_capture_snapshot", arguments: {} });
-  assert.equal(mcpCapture.isError, undefined);
+  const secondCapture = await runCli(["snapshot", "capture"], environment);
+  assert.equal(secondCapture.exitCode, 0);
   assert.equal(
-    (mcpCapture.structuredContent as JsonObject)["snapshot_id"],
+    (parseCliEnvelope(secondCapture.stdout).data as JsonObject)["snapshot_id"],
     fixtures[1]?.snapshot.snapshot_id,
   );
 
   const cliList = await runCli(["snapshot", "list", "--limit", "10"], environment);
   assert.equal(cliList.exitCode, 0);
   const cliListEnvelope = parseCliEnvelope(cliList.stdout);
-  const mcpList = await mcp.callTool({
-    name: "vistrea_list_snapshots",
-    arguments: { limit: 10 },
-  });
-  assert.equal(mcpList.isError, undefined);
-  assert.deepEqual(mcpList.structuredContent, cliListEnvelope.data);
+  assert.notEqual(cliListEnvelope.data, null);
 
   const snapshotId = fixtures[0]?.snapshot.snapshot_id as string;
   const cliGet = await runCli(["snapshot", "get", snapshotId], environment);
   assert.equal(cliGet.exitCode, 0);
   const cliGetEnvelope = parseCliEnvelope(cliGet.stdout);
-  const mcpGet = await mcp.callTool({
-    name: "vistrea_get_snapshot",
-    arguments: { snapshot_id: snapshotId },
-  });
-  assert.equal(mcpGet.isError, undefined);
-  assert.deepEqual(mcpGet.structuredContent, cliGetEnvelope.data);
+  assert.equal((cliGetEnvelope.data as JsonObject)["snapshot_id"], snapshotId);
 
   const eventBatch = JSON.parse(
     await fs.readFile(
@@ -301,14 +193,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     ((cliEventsEnvelope.data as JsonObject)["events"] as readonly JsonObject[]).length,
     eventBatch.events.length,
   );
-  const mcpEvents = await mcp.callTool({
-    name: "vistrea_get_event_timeline",
-    arguments: { event_epoch_id: eventBatch.event_epoch_id },
-  });
-  assert.equal(mcpEvents.isError, undefined);
-  assert.deepEqual(mcpEvents.structuredContent, cliEventsEnvelope.data);
-
-  // Design review round trip: CLI drives the flow; MCP reads identical state.
+  // Design review round trip through the CLI.
   const assetPath = path.join(workspaceRoot, "design-baseline.png");
   await fs.writeFile(assetPath, Buffer.from("vistrea-adapter-design-asset", "utf8"));
   const uploadedAsset = await runCli(
@@ -441,19 +326,13 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   const verifiedEnvelope = parseCliEnvelope(issueVerify.stdout).data as JsonObject;
   assert.equal((verifiedEnvelope["issue"] as JsonObject)["state"], "resolved");
 
-  const mcpIssue = await mcp.callTool({
-    name: "vistrea_get_review_issue",
-    arguments: { issue_id: issueId },
-  });
-  assert.equal(mcpIssue.isError, undefined);
-  assert.deepEqual(mcpIssue.structuredContent, verifiedEnvelope["issue"]);
-  const mcpIssueList = await mcp.callTool({
-    name: "vistrea_list_review_issues",
-    arguments: { states: ["resolved"] },
-  });
-  assert.equal(mcpIssueList.isError, undefined);
+  const issueRead = await runCli(["issue", "get", issueId], environment);
+  assert.equal(issueRead.exitCode, 0, issueRead.stdout);
+  assert.deepEqual(parseCliEnvelope(issueRead.stdout).data, verifiedEnvelope["issue"]);
+  const issueList = await runCli(["issue", "list", "--states", "resolved"], environment);
+  assert.equal(issueList.exitCode, 0, issueList.stdout);
   assert.deepEqual(
-    ((mcpIssueList.structuredContent as JsonObject)["items"] as readonly JsonObject[]).map(
+    ((parseCliEnvelope(issueList.stdout).data as JsonObject)["items"] as readonly JsonObject[]).map(
       (item) => item["issue_id"],
     ),
     [issueId],
@@ -484,12 +363,12 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   );
   assert.equal(patchCreate.exitCode, 0, patchCreate.stdout);
   const patchEnvelope = parseCliEnvelope(patchCreate.stdout).data as JsonObject;
-  const mcpPatch = await mcp.callTool({
-    name: "vistrea_get_tuning_patch",
-    arguments: { patch_id: patchEnvelope["patch_id"] },
-  });
-  assert.equal(mcpPatch.isError, undefined);
-  assert.deepEqual(mcpPatch.structuredContent, patchEnvelope);
+  const patchRead = await runCli(
+    ["tuning", "get-patch", patchEnvelope["patch_id"] as string],
+    environment,
+  );
+  assert.equal(patchRead.exitCode, 0, patchRead.stdout);
+  assert.deepEqual(parseCliEnvelope(patchRead.stdout).data, patchEnvelope);
   const applyWithoutRuntime = await runCli(
     ["tuning", "apply", "--patch", patchEnvelope["patch_id"] as string],
     environment,
@@ -516,30 +395,19 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assert.equal(observedState["created"], true);
   const observedScreenState = observedState["screen_state"] as JsonObject;
 
-  const mcpObserveAgain = await mcp.callTool({
-    name: "vistrea_observe_screen_state",
-    arguments: { snapshot_id: capturedSnapshot["snapshot_id"] },
-  });
-  assert.equal(mcpObserveAgain.isError, undefined);
-  const mcpObserved = mcpObserveAgain.structuredContent as JsonObject;
-  assert.equal(mcpObserved["created"], false);
+  const observeAgain = await runCli(
+    ["graph", "observe-state", "--snapshot", capturedSnapshot["snapshot_id"] as string],
+    environment,
+  );
+  assert.equal(observeAgain.exitCode, 0, observeAgain.stdout);
+  const observedAgain = parseCliEnvelope(observeAgain.stdout).data as JsonObject;
+  assert.equal(observedAgain["created"], false);
   assert.equal(
-    (mcpObserved["screen_state"] as JsonObject)["screen_state_id"],
+    (observedAgain["screen_state"] as JsonObject)["screen_state_id"],
     observedScreenState["screen_state_id"],
   );
 
   const runtimeContext = capturedSnapshot["runtime_context"] as JsonObject;
-  const mcpGraph = await mcp.callTool({
-    name: "vistrea_get_screen_graph",
-    arguments: {
-      project_id: runtimeContext["project_id"],
-      application_id: runtimeContext["application_id"],
-    },
-  });
-  assert.equal(mcpGraph.isError, undefined);
-  const graphDocument = mcpGraph.structuredContent as JsonObject;
-  assert.equal((graphDocument["states"] as readonly JsonObject[]).length, 1);
-
   const cliGraph = await runCli(
     [
       "graph",
@@ -552,7 +420,8 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     environment,
   );
   assert.equal(cliGraph.exitCode, 0, cliGraph.stdout);
-  assert.deepEqual(parseCliEnvelope(cliGraph.stdout).data, graphDocument);
+  const graphDocument = parseCliEnvelope(cliGraph.stdout).data as JsonObject;
+  assert.equal((graphDocument["states"] as readonly JsonObject[]).length, 1);
 
   const cliGraphState = await runCli(
     ["graph", "get-state", observedScreenState["screen_state_id"] as string],
@@ -563,14 +432,6 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     (parseCliEnvelope(cliGraphState.stdout).data as JsonObject)["revision"],
     2,
   );
-
-  // MCP agents can dereference the state IDs the graph tools return.
-  const mcpGraphState = await mcp.callTool({
-    name: "vistrea_get_screen_state",
-    arguments: { screen_state_id: observedScreenState["screen_state_id"] },
-  });
-  assert.equal(mcpGraphState.isError, undefined);
-  assert.deepEqual(mcpGraphState.structuredContent, parseCliEnvelope(cliGraphState.stdout).data);
 
   // Deep Wiki: create, revise, search, link, and backlinks round trip.
   const wikiCreate = await runCli(
@@ -595,17 +456,22 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   const wikiNode = parseCliEnvelope(wikiCreate.stdout).data as JsonObject;
   assert.equal(wikiNode["status"], "draft");
 
-  const wikiPublish = await mcp.callTool({
-    name: "vistrea_update_wiki_node",
-    arguments: {
-      wiki_node_id: wikiNode["wiki_node_id"],
-      expected_revision: 1,
-      to_status: "published",
-      updated_by: JSON.parse(actorJson),
-    },
-  });
-  assert.equal(wikiPublish.isError, undefined);
-  assert.equal((wikiPublish.structuredContent as JsonObject)["status"], "published");
+  const wikiPublish = await runCli(
+    [
+      "wiki",
+      "update",
+      wikiNode["wiki_node_id"] as string,
+      "--json",
+      JSON.stringify({
+        expected_revision: 1,
+        to_status: "published",
+        updated_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(wikiPublish.exitCode, 0, wikiPublish.stdout);
+  assert.equal((parseCliEnvelope(wikiPublish.stdout).data as JsonObject)["status"], "published");
 
   const wikiSearch = await runCli(
     ["wiki", "search", "--text", "entry screen", "--statuses", "published"],
@@ -620,31 +486,41 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     [wikiNode["wiki_node_id"]],
   );
 
-  const noteCreate = await mcp.callTool({
-    name: "vistrea_create_wiki_node",
-    arguments: {
-      kind: "note",
-      title: "Follow-up",
-      markdown: "Check the banner timing.",
-      created_by: JSON.parse(actorJson),
-    },
-  });
-  assert.equal(noteCreate.isError, undefined);
-  const note = noteCreate.structuredContent as JsonObject;
+  const noteCreate = await runCli(
+    [
+      "wiki",
+      "create",
+      "--json",
+      JSON.stringify({
+        kind: "note",
+        title: "Follow-up",
+        markdown: "Check the banner timing.",
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(noteCreate.exitCode, 0, noteCreate.stdout);
+  const note = parseCliEnvelope(noteCreate.stdout).data as JsonObject;
 
   // Long-form documents (well past the 64 KiB adapter envelope) persist.
   const longMarkdown = `# Long document\n\n${"vistrea knowledge line\n".repeat(6000)}`;
-  const longCreate = await mcp.callTool({
-    name: "vistrea_create_wiki_node",
-    arguments: {
-      kind: "concept",
-      title: "Long-form knowledge",
-      markdown: longMarkdown,
-      created_by: JSON.parse(actorJson),
-    },
-  });
-  assert.equal(longCreate.isError, undefined);
-  const longNode = longCreate.structuredContent as JsonObject;
+  const longCreate = await runCli(
+    [
+      "wiki",
+      "create",
+      "--json",
+      JSON.stringify({
+        kind: "concept",
+        title: "Long-form knowledge",
+        markdown: longMarkdown,
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(longCreate.exitCode, 0, longCreate.stdout);
+  const longNode = parseCliEnvelope(longCreate.stdout).data as JsonObject;
   const longRead = await runCli(
     ["wiki", "get", longNode["wiki_node_id"] as string],
     environment,
@@ -669,24 +545,24 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     environment,
   );
   assert.equal(wikiLink.exitCode, 0, wikiLink.stdout);
-  const backlinks = await mcp.callTool({
-    name: "vistrea_get_wiki_backlinks",
-    arguments: { wiki_node_id: wikiNode["wiki_node_id"] },
-  });
-  assert.equal(backlinks.isError, undefined);
+  const backlinks = await runCli(
+    ["wiki", "backlinks", wikiNode["wiki_node_id"] as string],
+    environment,
+  );
+  assert.equal(backlinks.exitCode, 0, backlinks.stdout);
   assert.equal(
-    ((backlinks.structuredContent as JsonObject)["items"] as readonly JsonObject[]).length,
+    ((parseCliEnvelope(backlinks.stdout).data as JsonObject)["items"] as readonly JsonObject[])
+      .length,
     1,
   );
-  const relatedNodes = await mcp.callTool({
-    name: "vistrea_related_wiki_nodes",
-    arguments: { kind: "snapshot", id: capturedSnapshot["snapshot_id"] },
-  });
-  assert.equal(relatedNodes.isError, undefined);
+  const relatedNodes = await runCli(
+    ["wiki", "related", "--kind", "snapshot", "--id", capturedSnapshot["snapshot_id"] as string],
+    environment,
+  );
+  assert.equal(relatedNodes.exitCode, 0, relatedNodes.stdout);
   assert.deepEqual(
-    ((relatedNodes.structuredContent as JsonObject)["items"] as readonly JsonObject[]).map(
-      (item) => item["wiki_node_id"],
-    ),
+    ((parseCliEnvelope(relatedNodes.stdout).data as JsonObject)["items"] as readonly JsonObject[])
+      .map((item) => item["wiki_node_id"]),
     [wikiNode["wiki_node_id"]],
   );
 
@@ -699,19 +575,19 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   const validateEnvelope = parseCliEnvelope(cliValidate.stdout).data as JsonObject;
   const validationRun = validateEnvelope["run"] as JsonObject;
   assert.equal(validationRun["state"], "succeeded");
-  const mcpValidationRun = await mcp.callTool({
-    name: "vistrea_get_validation_run",
-    arguments: { validation_run_id: validationRun["validation_run_id"] },
-  });
-  assert.equal(mcpValidationRun.isError, undefined);
-  assert.deepEqual(mcpValidationRun.structuredContent, validationRun);
-  const mcpFindings = await mcp.callTool({
-    name: "vistrea_list_validation_findings",
-    arguments: { validation_run_id: validationRun["validation_run_id"] },
-  });
-  assert.equal(mcpFindings.isError, undefined);
+  const runRead = await runCli(
+    ["validate", "get-run", validationRun["validation_run_id"] as string],
+    environment,
+  );
+  assert.equal(runRead.exitCode, 0, runRead.stdout);
+  assert.deepEqual(parseCliEnvelope(runRead.stdout).data, validationRun);
+  const findingsRead = await runCli(
+    ["validate", "findings", "--run", validationRun["validation_run_id"] as string],
+    environment,
+  );
+  assert.equal(findingsRead.exitCode, 0, findingsRead.stdout);
   assert.deepEqual(
-    (mcpFindings.structuredContent as JsonObject)["items"],
+    (parseCliEnvelope(findingsRead.stdout).data as JsonObject)["items"],
     validateEnvelope["findings"],
   );
 
@@ -731,39 +607,22 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
     Buffer.from("vistrea-adapter-design-asset", "utf8"),
   );
 
-  const mcpObjectOutput = path.join(workspaceRoot, "downloaded-design-asset-mcp.bin");
-  const mcpObjectGet = await mcp.callTool({
-    name: "vistrea_get_object",
-    arguments: { hash: assetHash, output_path: mcpObjectOutput },
-  });
-  assert.equal(mcpObjectGet.isError, undefined);
-  const mcpObjectSummary = mcpObjectGet.structuredContent as JsonObject;
-  assert.equal(mcpObjectSummary["bytes_base64"], undefined);
-  assert.equal(mcpObjectSummary["output_path"], mcpObjectOutput);
+  // Refusing to overwrite an existing file keeps the download side effect safe.
+  const objectClobber = await runCli(
+    ["object", "get", "--hash", assetHash, "--output", objectOutput],
+    environment,
+  );
+  assert.notEqual(objectClobber.exitCode, 0);
   assert.deepEqual(
-    await fs.readFile(mcpObjectOutput),
+    await fs.readFile(objectOutput),
     Buffer.from("vistrea-adapter-design-asset", "utf8"),
   );
-  // Refusing to overwrite an existing file keeps the download side effect safe.
-  const mcpObjectClobber = await mcp.callTool({
-    name: "vistrea_get_object",
-    arguments: { hash: assetHash, output_path: mcpObjectOutput },
-  });
-  assert.equal(mcpObjectClobber.isError, true);
 
   const missingSnapshotId = "snapshot_019f0000-0000-7000-8000-000000000099";
   const cliMissing = await runCli(["snapshot", "get", missingSnapshotId], environment);
   assert.equal(cliMissing.exitCode, 3);
   const cliMissingEnvelope = parseCliEnvelope(cliMissing.stdout);
-  const mcpMissing = await mcp.callTool({
-    name: "vistrea_get_snapshot",
-    arguments: { snapshot_id: missingSnapshotId },
-  });
-  assert.equal(mcpMissing.isError, true);
-  assert.deepEqual(
-    (mcpMissing.structuredContent as JsonObject)["error"],
-    cliMissingEnvelope.error,
-  );
+  assert.equal(cliMissingEnvelope.error?.["code"], "not_found");
 
   const cliInvalidCapture = await runCli(
     ["snapshot", "capture", "--reason", "not-a-reason"],
@@ -771,15 +630,7 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   );
   assert.equal(cliInvalidCapture.exitCode, 2);
   const cliInvalidCaptureEnvelope = parseCliEnvelope(cliInvalidCapture.stdout);
-  const mcpInvalidCapture = await mcp.callTool({
-    name: "vistrea_capture_snapshot",
-    arguments: { reason: "not-a-reason" },
-  });
-  assert.equal(mcpInvalidCapture.isError, true);
-  assert.deepEqual(
-    (mcpInvalidCapture.structuredContent as JsonObject)["error"],
-    cliInvalidCaptureEnvelope.error,
-  );
+  assert.equal(cliInvalidCaptureEnvelope.error?.["code"], "invalid_argument");
 
   const invalidCli = await runCli(
     ["snapshot", "get", "--token", "token-looking-value"],
@@ -797,10 +648,6 @@ test("CLI and real stdio MCP preserve Host operation results and errors", async 
   assert.equal(unauthenticatedCli.stdout.includes(wrongEnvironmentToken), false);
   assert.equal(unauthenticatedCli.stderr.includes(wrongEnvironmentToken), false);
 
-  await mcp.close();
-  const stderr = Buffer.concat(mcpStderr).toString("utf8");
-  assert.equal(stderr.includes(host.bearerToken), false);
-  assert.equal(stderr, "");
 });
 
 test("shared Host client enforces loopback, response, deadline, and secret boundaries", async (t) => {

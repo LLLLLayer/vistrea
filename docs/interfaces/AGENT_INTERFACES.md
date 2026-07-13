@@ -2,9 +2,9 @@
 
 ## 1. Principles
 
-- CLI is the deterministic scriptable foundation.
-- MCP exposes structured Engine operations as tools.
-- Skills compose user goals into CLI, MCP, or local API workflows.
+- The strict JSON CLI is the single agent adapter (ADR-0008 retired the MCP
+  server): deterministic, scriptable, and the only path Skills teach.
+- Skills compose user goals into CLI or local API workflows.
 - Every adapter uses the same Engine use cases and error codes.
 - Destructive or dangerous actions require explicit confirmation or policy authorization.
 - Machine output is stable and separate from human presentation.
@@ -68,19 +68,21 @@ Exit codes:
 
 Long-running commands print or return an `operation_id`. `--wait` may stream NDJSON progress events.
 
-## 3. MCP tools
+## 3. Toolset focus
 
-Tool names use the `vistrea_` prefix and map one-to-one to implemented Host operations. The stdio server in `integrations/mcp/server.ts` exposes 54 tools covering Workspace status, Snapshot capture and inspection, the Runtime event timeline, design review, reversible tuning, Screen Graph observations, states, and paths, Deep Wiki nodes and links, validation runs and findings, build diffs, portable pack exchange, object downloads, and exploration Operations. The authoritative name-for-name tool table lives in `integrations/mcp/README.md` and matches the server code exactly. Deployments may focus the exposed surface with `VISTREA_MCP_TOOLSETS` (named sets: `workspace`, `assets`, `exploration`, `knowledge`, `verification`); a masked tool disappears from the list and its call fails closed as `unsupported`. The repository's Claude Code plugin (`integrations/claude-plugin/`) is the packaged `assets,exploration` composition.
-
-Future tools for reserved operations (device connection, exploration sessions, generic operations, and sync) keep the same `vistrea_` naming convention and are reserved in `docs/interfaces/OPERATION_CATALOG.md`.
-
-MCP resources may expose read-heavy stable content such as Workspace status, selected Screen State, protocol documentation, or operation logs. Mutations remain tools.
-
-Synchronous tool responses return structured domain objects and common errors rather than CLI text. Asynchronous tools immediately return `OperationRef`; progress and the typed completion result use the generic operation APIs.
+Deployments may focus the CLI's exposed command surface with
+`VISTREA_CLI_TOOLSETS` (named sets keyed by the first command word:
+`workspace`, `assets`, `exploration`, `knowledge`, `verification`; unset means
+all, `workspace` is always on). A masked command group disappears from `help`
+and fails closed as `unsupported` (exit 6) at dispatch; an unknown set name is
+`invalid_argument` (exit 2) naming the valid sets. The repository's Claude
+Code plugin (`integrations/claude-plugin/`) is the packaged
+`assets,exploration` composition: two skills teaching exploration with
+identity curation and canonical asset recording.
 
 ## 4. Skills
 
-Five Skills ship as real packages under `integrations/skills/`, each composing only implemented CLI and MCP operations:
+Five Skills ship as real packages under `integrations/skills/`, each composing only implemented CLI operations:
 
 - `vistrea-inspect-runtime`: check Runtime readiness, capture canonical UI evidence, and inspect or retrieve the same persisted Snapshot;
 - `vistrea-review-design`: register a design baseline, map regions, run comparisons, and manage the Review Issue lifecycle;
@@ -122,7 +124,7 @@ Five Skills ship as real packages under `integrations/skills/`, each composing o
 4. run validation and graph/build diff;
 5. report evidence and update version history.
 
-Do not create additional real `SKILL.md` packages until the referenced CLI/MCP operations exist.
+Do not create additional real `SKILL.md` packages until the referenced CLI operations exist.
 
 ## 5. CI gate
 
@@ -174,4 +176,4 @@ An organization policy may pre-authorize a bounded action, but the resulting aud
 
 ## 8. Parity tests
 
-For each public Engine use case exposed through multiple adapters, contract tests verify equivalent input semantics, errors, operation IDs, and result objects across CLI and MCP.
+For each public Engine use case exposed through multiple adapters, contract tests verify equivalent input semantics, errors, operation IDs, and result objects across the adapters that expose it.

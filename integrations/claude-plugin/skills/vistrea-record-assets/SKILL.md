@@ -1,6 +1,6 @@
 ---
 name: vistrea-record-assets
-description: Capture and read canonical Runtime evidence through the Vistrea MCP tools — Snapshots with UI trees and screenshots, the persisted event timeline, content-addressed Objects, and portable packs. Use when a user asks to capture what an app is showing, inspect a persisted Snapshot, pull a screenshot or artifact, review runtime events, or move recorded evidence between Workspaces.
+description: Capture and read canonical Runtime evidence through the Vistrea CLI — Snapshots with UI trees and screenshots, the persisted event timeline, content-addressed Objects, and portable packs. Use when a user asks to capture what an app is showing, inspect a persisted Snapshot, pull a screenshot or artifact, review runtime events, or move recorded evidence between Workspaces.
 ---
 
 # Record and read Runtime assets
@@ -11,33 +11,37 @@ artifacts, packs) lives in the content-addressed Object Store, and events
 persist as an ordered timeline. Nothing here executes device actions — capture
 observes the connected Runtime and records what it saw.
 
-Available MCP tools:
+Every command below is the strict JSON CLI, run from the repository root as
+`node .build/typescript/integrations/cli/main.js <command>` with
+`VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` in the environment (never argv).
+Each invocation prints one JSON envelope on stdout; a non-zero exit code maps
+the envelope's error code.
 
-| Intent | Tool |
+| Intent | Command |
 |---|---|
-| Check the Workspace and Runtime status | `vistrea_get_workspace_status` |
-| Capture one canonical Snapshot | `vistrea_capture_snapshot` |
-| Page persisted Snapshots | `vistrea_list_snapshots` |
-| Read one Snapshot document | `vistrea_get_snapshot` |
-| Read the persisted event timeline | `vistrea_get_event_timeline` |
-| Download an Object's bytes to a new local file | `vistrea_get_object` |
-| Export refs and commits as a portable pack | `vistrea_export_pack` |
-| Import a pack into this Workspace | `vistrea_import_pack` |
+| Check the Workspace and Runtime status | `workspace status` |
+| Capture one canonical Snapshot | `snapshot capture [--reason <reason>]` |
+| Page persisted Snapshots | `snapshot list [--limit n] [--cursor c]` |
+| Read one Snapshot document | `snapshot get <snapshot_id>` |
+| Read the persisted event timeline | `events list [--epoch <event_epoch_id>]` |
+| Download an Object's bytes to a new local file | `object get --hash <sha256:...> --output <path>` |
+| Export refs and commits as a portable pack | `pack export --json <command>` |
+| Import a pack into this Workspace | `pack import --file <path>` |
 
 ## Workflow
 
-1. Check `vistrea_get_workspace_status` first; capture needs
-   `runtime_connected: true`, while reading already-persisted assets does not.
-2. Capture with an explicit `reason` (`manual`, `before_action`,
-   `after_action`, `review`) so the evidence explains why it exists. Request
-   `screenshot: "reference"` when visual truth matters — structured nodes
-   locate and reason, the screenshot remains the final visual authority.
+1. Check `workspace status` first; capture needs `runtime_connected: true`,
+   while reading already-persisted assets does not.
+2. Capture with an explicit `--reason` (`manual`, `before_action`,
+   `after_action`, `review`) so the evidence explains why it exists.
+   Structured nodes locate and reason; the screenshot remains the final
+   visual authority.
 3. Read Snapshots by id, and honor their `capture_limitations`: a limitation
    is the capture telling you what it could not see. Never treat a limited
    tree as complete.
-4. Screenshot and artifact bytes never travel through tool results. Resolve
-   the Object hash from the Snapshot document, then `vistrea_get_object` with
-   an absolute `output_path` naming a new file; the download is digest-proved.
+4. Screenshot and artifact bytes never travel through JSON envelopes. Resolve
+   the Object hash from the Snapshot document, then `object get` with an
+   `--output` path naming a new file; the download is digest-proved.
 5. Use the event timeline for transient states (toasts, banners) that no
    single Snapshot preserves; events carry epochs and sequence numbers, so
    report them in persisted order.
@@ -51,8 +55,8 @@ Available MCP tools:
   repository.
 - Snapshots are immutable evidence. Correcting a wrong capture means capturing
   again, not editing what was recorded.
-- `vistrea_get_object` refuses to overwrite: `output_path` must name a new
-  writable file, so an existing artifact is never silently replaced.
+- `object get` refuses to overwrite: `--output` must name a new writable
+  file, so an existing artifact is never silently replaced.
 - Report exactly what was persisted — ids, digests, counts — and distinguish
   "captured now" from "already existed" (`created: false` on repeats).
 - Never expose bearer tokens, Workspace paths, or raw storage details.

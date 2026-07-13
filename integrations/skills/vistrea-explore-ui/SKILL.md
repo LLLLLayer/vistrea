@@ -15,16 +15,16 @@ closed as `unsupported`.
 
 Available operations:
 
-| Intent | CLI | MCP |
-|---|---|---|
-| Start a bounded walk | `explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2]` | `vistrea_run_exploration` |
-| Poll progress and the report | `explore get <operation_id>` | `vistrea_get_exploration_operation` |
-| Cancel the running walk | `explore cancel <operation_id>` | `vistrea_cancel_exploration` |
-| Read the materialized graph | `graph show --project <id> --application <id>` | `vistrea_get_screen_graph` |
-| Resolve one state | `graph get-state <screen_state_id>` | `vistrea_get_screen_state` |
-| Find a path between states | `graph find-path --from <id> --to <id>` | `vistrea_find_screen_path` |
-| Merge states that are one screen | `screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> --actor <id> [--justification <text>]` | `vistrea_merge_screen_states` |
-| Split one state into two screens | `screen split --project <id> --application <id> --state <id> --observations a,b [--title <text>] --revision <n> --actor <id> [--justification <text>]` | `vistrea_split_screen_state` |
+| Intent | CLI |
+|---|---|
+| Start a bounded walk | `explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2]` |
+| Poll progress and the report | `explore get <operation_id>` |
+| Cancel the running walk | `explore cancel <operation_id>` |
+| Read the materialized graph | `graph show --project <id> --application <id>` |
+| Resolve one state | `graph get-state <screen_state_id>` |
+| Find a path between states | `graph find-path --from <id> --to <id>` |
+| Merge states that are one screen | `screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> --actor <id> [--justification <text>]` |
+| Split one state into two screens | `screen split --project <id> --application <id> --state <id> --observations a,b [--title <text>] --revision <n> --actor <id> [--justification <text>]` |
 
 ## Workflow
 

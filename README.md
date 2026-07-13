@@ -15,7 +15,7 @@ It combines in-app runtime SDKs, real device automation, a macOS workspace, a ve
 - Reversible Debug-only UI tuning
 - 2D View Tree and Lookin-style 3D Inspector
 - Structural, visual, behavioral, accessibility, design, and build-diff validation
-- CLI, MCP, Skills, and CI integrations for Coding Agents
+- CLI, Skills, Claude Code plugin, and CI integrations for Coding Agents
 - Optional Vistrea Hub for cross-team sharing
 
 ## One-line definition
@@ -25,7 +25,7 @@ It combines in-app runtime SDKs, real device automation, a macOS workspace, a ve
 ## Architecture at a glance
 
 ```text
-Studio / CLI / MCP / Skills / CI
+Studio / CLI / Skills / CI
                  |
                  v
         Reusable Host Engine
@@ -48,7 +48,7 @@ Vistrea is designed for parallel implementation behind stable interfaces:
 ```text
 Runtime SDK <-> Host Connection
 Automation Provider <-> Automation Engine
-Studio / CLI / MCP / Skills <-> Engine Use Cases
+Studio / CLI / Skills <-----> Engine Use Cases
 Engine <-> Data API <-> Local Workspace / Hub Sync
 ```
 
@@ -88,7 +88,7 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 
 Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming and protected reversible tuning are also verified on both platforms. Device automation, deterministic exploration, the Screen Graph, design review, the Deep Wiki, core validation and build diff, and an optional loopback Hub pack relay are implemented behind the same production Host, with the Android real-input automation acceptance verified and the iOS WebDriverAgent lane awaiting its first device run. Agents consume this surface through 45 Host operations exposed by the strict CLI, 44 stdio MCP tools, four Skills, and a headless CI gate. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming and protected reversible tuning are also verified on both platforms. Device automation, deterministic exploration, the Screen Graph, design review, the Deep Wiki, core validation and build diff, and an optional loopback Hub pack relay are implemented behind the same production Host, with the Android real-input automation acceptance verified and the iOS WebDriverAgent lane awaiting its first device run. Agents consume this surface through 54 Host operations exposed by the strict CLI (with named toolset focus), the Skills, an installable Claude Code plugin, and a headless CI gate. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
 
 Run the current executable checks with:
 

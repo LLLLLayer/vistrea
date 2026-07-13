@@ -145,10 +145,9 @@ vistrea/
 │   │   ├── README.md
 │   │   ├── cli.ts
 │   │   └── main.ts
-│   ├── mcp/
+│   ├── claude-plugin/
 │   │   ├── README.md
-│   │   ├── main.ts
-│   │   └── server.ts
+│   │   └── skills/
 │   ├── skills/
 │   │   ├── README.md
 │   │   ├── vistrea-inspect-runtime/
@@ -271,7 +270,7 @@ vistrea/
 | `apps/host/` | Production Host composition, Runtime session routing, and authenticated loopback Local API | Product UI, private protocol models, direct UI behavior |
 | `apps/studio-macos/` | Presentation, interaction, navigation, and composition root | SQL, artifact paths, duplicated Engine behavior |
 | `services/hub/` | Shared commits, objects, namespaces, RBAC, audit, discovery | Required local product behavior |
-| `integrations/` | CLI, MCP, Skills, and CI adapters | Reimplemented Engine or Data logic |
+| `integrations/` | CLI, Skills, Claude Code plugin, and CI adapters | Reimplemented Engine or Data logic |
 | `examples/scenarios/` | Required cross-platform Scenario IDs, expected states, events, and findings | Platform-specific implementation details |
 | `examples/ios/` | Native iOS Demo App executable fixture | Android-only scenarios or production business logic |
 | `examples/android/` | Native Android Demo App executable fixture | iOS-only scenarios or production business logic |
@@ -316,12 +315,10 @@ Rules:
 ```text
 Coding Agent
 ├── CLI --------------------------┐
-├── MCP --------------------------┼──> public Engine use cases
-└── Skill -> CLI / MCP / local API┘
+└── Skill -> CLI / local API -----┴──> public Engine use cases
 ```
 
 - CLI is the stable scriptable foundation.
-- MCP exposes structured tools.
 - Skills compose concrete task workflows.
 - CI drives repeatable build validation.
 - No integration is the sole access path to core capabilities.
@@ -348,7 +345,7 @@ The entire `.vistrea/` directory is ignored. SQLite metadata, content-addressed 
 The first implementation keeps the language-neutral contracts while using toolchains suited to each boundary:
 
 - JSON Schema Draft 2020-12 plus canonical fixtures for protocol v1;
-- Node.js and strict TypeScript for the Host, Engine slice, Data implementations, CLI, and MCP;
+- Node.js and strict TypeScript for the Host, Engine slice, Data implementations, and CLI;
 - `better-sqlite3` with exact-byte forward-only migrations for metadata;
 - file-backed SHA-256 content-addressed objects;
 - Swift Package Manager for iOS Runtime modules and native SwiftUI Studio;

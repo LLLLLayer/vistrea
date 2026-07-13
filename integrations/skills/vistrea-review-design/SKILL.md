@@ -5,28 +5,27 @@ description: Compare a persisted Runtime Snapshot against a registered design ba
 
 # Review a design against Runtime evidence
 
-Use the existing CLI or MCP operations as thin adapters. Never read SQLite,
+Use the existing CLI operations as thin adapters. Never read SQLite,
 construct Object Store paths, or perform pixel edits yourself.
 
 ## Choose the adapter
 
-- Prefer the configured Vistrea MCP tools when available; otherwise run the
-  built CLI (`.build/typescript/integrations/cli/main.js`, build once with
-  `pnpm build:host`) and consume its JSON envelope.
+- Run the built CLI (`.build/typescript/integrations/cli/main.js`, build once
+  with `pnpm build:host`) and consume its JSON envelope.
 - Pass `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` through a controlled process
   environment only.
 
 Available operations:
 
-| Intent | CLI | MCP |
-|---|---|---|
-| Store the baseline image | `design upload-asset --file <path> --media-type image/png` | `vistrea_upload_design_asset` |
-| Register the baseline | `design add-reference --json <command>` | `vistrea_add_design_reference` |
-| Map a region to a node | `design map --json <command>` | `vistrea_map_design_region` |
-| Run the comparison | `design compare --reference <id> --snapshot <id>` (add `--pixel true` for mean-color region comparison against the design asset) | `vistrea_run_design_comparison` |
-| Create an issue | `issue create --json <command>` | `vistrea_create_review_issue` |
-| Triage issues | `issue list` / `issue transition` | `vistrea_list_review_issues` / `vistrea_transition_review_issue` |
-| Verify a fix | `issue verify <id> --revision <n> --basis real_build --result passed --snapshot <id> --build <id>` | `vistrea_verify_review_issue` |
+| Intent | CLI |
+|---|---|
+| Store the baseline image | `design upload-asset --file <path> --media-type image/png` |
+| Register the baseline | `design add-reference --json <command>` |
+| Map a region to a node | `design map --json <command>` |
+| Run the comparison | `design compare --reference <id> --snapshot <id>` (add `--pixel true` for mean-color region comparison against the design asset) |
+| Create an issue | `issue create --json <command>` |
+| Triage issues | `issue list` / `issue transition` |
+| Verify a fix | `issue verify <id> --revision <n> --basis real_build --result passed --snapshot <id> --build <id>` |
 
 ## Workflow
 

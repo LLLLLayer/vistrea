@@ -13,6 +13,57 @@ import {
 const MAXIMUM_DEADLINE_MILLISECONDS = 300_000;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
 
+/**
+ * Named command surfaces a composition may expose, keyed by the first command
+ * word. `workspace` is always on because status is how an agent checks
+ * connectivity before anything else. The default exposes every surface; a
+ * deployment focused on exploration and asset recording sets
+ * `VISTREA_CLI_TOOLSETS=assets,exploration` and the verification surface
+ * (design review, review issues, tuning, validators, build diffs) disappears
+ * from help and fails closed at dispatch — masked by configuration, not
+ * removed from the Host.
+ */
+export const VISTREA_CLI_TOOLSETS = {
+  workspace: ["workspace"],
+  assets: ["snapshot", "events", "object", "pack"],
+  exploration: ["explore", "graph", "screen"],
+  knowledge: ["wiki"],
+  verification: ["design", "issue", "tuning", "validate"],
+} as const;
+
+export type VistreaCliToolset = keyof typeof VISTREA_CLI_TOOLSETS;
+
+const ALL_COMMAND_GROUPS: ReadonlySet<string> = new Set(
+  Object.values(VISTREA_CLI_TOOLSETS).flat(),
+);
+
+/**
+ * Parses the `VISTREA_CLI_TOOLSETS` environment value into the set of enabled
+ * first command words. Undefined or empty means every surface; anything it
+ * cannot understand fails closed rather than exposing more than the operator
+ * intended. Toolset names are configuration, not secrets.
+ */
+export function enabledCommandGroups(value: string | undefined): ReadonlySet<string> | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const known = Object.keys(VISTREA_CLI_TOOLSETS);
+  const requested = value.split(",").map((entry) => entry.trim());
+  const invalid = requested.filter((entry) => !known.includes(entry));
+  if (invalid.length > 0) {
+    throw new HostClientError(
+      "invalid_argument",
+      `Unknown VISTREA_CLI_TOOLSETS entries: ${invalid.join(", ")}. ` +
+        `Valid toolsets: ${known.join(", ")}.`,
+    );
+  }
+  return new Set(
+    [...new Set([...(requested as VistreaCliToolset[]), "workspace" as const])].flatMap(
+      (toolset) => VISTREA_CLI_TOOLSETS[toolset],
+    ),
+  );
+}
+
 export interface CliRuntime {
   readonly environment: NodeJS.ProcessEnv;
   readonly stdout: { write(value: string): unknown };
@@ -55,7 +106,8 @@ export async function runVistreaCli(
     traceId: createCorrelationId("trace"),
   };
   try {
-    const invocation = parseArguments(arguments_, context);
+    const enabledGroups = enabledCommandGroups(runtime.environment["VISTREA_CLI_TOOLSETS"]);
+    const invocation = parseArguments(arguments_, context, enabledGroups);
     if (invocation.help === true) {
       writeEnvelope(runtime, context, {
         commands: [
@@ -113,7 +165,9 @@ export async function runVistreaCli(
           "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
-        ],
+        ].filter(
+          (line) => enabledGroups === undefined || enabledGroups.has(line.split(" ")[0] as string),
+        ),
         format: "json",
       });
       return 0;
@@ -144,7 +198,11 @@ export async function runVistreaCli(
   }
 }
 
-function parseArguments(arguments_: readonly string[], context: CliContext): ParsedInvocation {
+function parseArguments(
+  arguments_: readonly string[],
+  context: CliContext,
+  enabledGroups?: ReadonlySet<string>,
+): ParsedInvocation {
   const command: string[] = [];
   let timeoutMilliseconds: number | undefined;
   const seenGlobals = new Set<string>();
@@ -197,6 +255,17 @@ function parseArguments(arguments_: readonly string[], context: CliContext): Par
       ...(timeoutMilliseconds === undefined ? {} : { timeoutMilliseconds }),
       help: true,
     };
+  }
+  if (
+    enabledGroups !== undefined &&
+    command.length > 0 &&
+    ALL_COMMAND_GROUPS.has(command[0] as string) &&
+    !enabledGroups.has(command[0] as string)
+  ) {
+    throw new HostClientError(
+      "unsupported",
+      `The ${command[0]} commands are not exposed by this toolset configuration.`,
+    );
   }
   if (command[0] === "workspace" && command[1] === "status" && command.length === 2) {
     return invocation("GetWorkspaceStatus", {}, timeoutMilliseconds);

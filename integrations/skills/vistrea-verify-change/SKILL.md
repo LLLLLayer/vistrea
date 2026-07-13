@@ -5,27 +5,27 @@ description: Validate persisted Runtime evidence with the core rule set, freeze 
 
 # Verify a change with validators and build diffs
 
-Use the existing CLI, MCP, or CI gate as thin adapters over the Host.
+Use the existing CLI or CI gate as thin adapters over the Host.
 
 ## Choose the adapter
 
 - For pipelines, prefer the single-command CI gate:
   `node .build/typescript/integrations/ci/main.js [--fail-on error]` — one
   JSON report, exit code `1` when open findings reach the threshold.
-- For interactive work, use the CLI or MCP operations below with
+- For interactive work, use the CLI operations below with
   `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` in a controlled environment.
 
 Available operations:
 
-| Intent | CLI | MCP |
-|---|---|---|
-| Validate one Snapshot | `validate snapshot --snapshot <id>` (optionally `--disable-rules a,b` and `--min-touch-target <points>`; overrides persist into the run for audit) | `vistrea_validate_snapshot` |
-| Validate the Screen Graph | `validate graph --project <id> --application <id>` | `vistrea_validate_screen_graph` |
-| Read a run | `validate get-run <id>` | `vistrea_get_validation_run` |
-| Page findings | `validate findings [--statuses open]` | `vistrea_list_validation_findings` |
-| Suppress with a reason | `validate suppress <finding_id> --json <command>` | `vistrea_suppress_validation_finding` |
-| Freeze a baseline | `graph tag --project <id> --application <id> --tag <name>` | `vistrea_tag_graph_version` |
-| Diff two builds | `validate build-diff --project <id> --application <id> --left <build> --right <build>` (add `--baseline <tag>` to classify removals) | `vistrea_compare_builds` |
+| Intent | CLI |
+|---|---|
+| Validate one Snapshot | `validate snapshot --snapshot <id>` (optionally `--disable-rules a,b` and `--min-touch-target <points>`; overrides persist into the run for audit) |
+| Validate the Screen Graph | `validate graph --project <id> --application <id>` |
+| Read a run | `validate get-run <id>` |
+| Page findings | `validate findings [--statuses open]` |
+| Suppress with a reason | `validate suppress <finding_id> --json <command>` |
+| Freeze a baseline | `graph tag --project <id> --application <id> --tag <name>` |
+| Diff two builds | `validate build-diff --project <id> --application <id> --left <build> --right <build>` (add `--baseline <tag>` to classify removals) |
 
 ## Workflow
 

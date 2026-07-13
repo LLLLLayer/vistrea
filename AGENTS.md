@@ -72,7 +72,7 @@ xcodebuild -project VistreaDemoApp.xcodeproj -scheme VistreaDemoApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' test
 ```
 
-Local product loop: `node .build/typescript/apps/host/serve.js --workspace <abs-path> --connection-file <abs-path>` starts the authenticated loopback Host and writes rotating credentials to a mode-0600 descriptor. The CLI (`node .build/typescript/integrations/cli/main.js`) and MCP server (`node .build/typescript/integrations/mcp/main.js`) consume it through `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` environment variables only — tokens never go in argv, logs, or commits. Exact flows live in `apps/host/README.md`, `integrations/cli/README.md`, and `integrations/mcp/README.md`.
+Local product loop: `node .build/typescript/apps/host/serve.js --workspace <abs-path> --connection-file <abs-path>` starts the authenticated loopback Host and writes rotating credentials to a mode-0600 descriptor. The CLI (`node .build/typescript/integrations/cli/main.js`) consumes it through `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` environment variables only — tokens never go in argv, logs, or commits. `VISTREA_CLI_TOOLSETS` optionally focuses the exposed command surface. Exact flows live in `apps/host/README.md` and `integrations/cli/README.md`.
 
 ## Language
 
@@ -101,7 +101,7 @@ Local product loop: `node .build/typescript/apps/host/serve.js --workspace <abs-
 - `data/` implements local Workspace, metadata, object storage, versioning, search, exchange, and Hub sync.
 - `apps/studio-macos/` composes product UI and Engine use cases. Views and ViewModels must not issue SQL or construct artifact paths.
 - `services/hub/` contains optional cross-team server capabilities and must not be required for local workflows.
-- `integrations/cli/`, `mcp/`, `skills/`, and `ci/` expose the same Engine capabilities. They must not duplicate product logic.
+- `integrations/cli/`, `skills/`, `claude-plugin/`, and `ci/` expose the same Engine capabilities. They must not duplicate product logic. The strict JSON CLI is the single agent adapter (ADR-0008 retired the MCP server).
 - `tests/` owns cross-module contract, integration, and end-to-end coverage. Unit tests stay beside their owning module.
 - `examples/scenarios/` defines cross-platform Demo App behavior. Both Demo Apps must implement required Scenario IDs before adding unpaired platform behavior.
 - Runtime output belongs in `.vistrea/` and must never be committed.
@@ -132,7 +132,7 @@ No lower layer may import a product UI layer. Concrete Data implementations are 
 5. Design baseline comparison, Review Issues, Tuning Patches, and re-verification.
 6. Device automation, exploration, Screen State deduplication, and path versioning.
 7. Canvas and Deep Wiki persistence.
-8. Validation, build diff, 3D Inspector, CLI, MCP, Skills, CI, and Vistrea Hub.
+8. Validation, build diff, 3D Inspector, CLI, Skills, CI, and Vistrea Hub.
 
 Explicit user priorities override this default order.
 

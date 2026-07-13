@@ -16,7 +16,7 @@ Vistrea is a multi-platform monorepo with high-contention shared contracts. Para
 | Android SDK | `sdks/android/`, `examples/android/` | Protocol fixtures and Runtime Connection contract | Capture, Inspector, tuning, tests |
 | Host Engine | `engine/` | Protocol and Data API | Connection, automation, exploration, design, knowledge, validation |
 | Studio | `apps/studio-macos/` | Public Engine use cases | Product UI and composition root |
-| Agent integrations | `integrations/` | Public Engine use cases | CLI, MCP, Skills, and CI adapters |
+| Agent integrations | `integrations/` | Public Engine use cases | CLI, Skills, Claude Code plugin, and CI adapters |
 | Hub | `services/hub/` | Protocol and sync contract | Remote commits, objects, permissions, search |
 | Cross-module verification | `tests/` | All public contracts | Contract, integration, and end-to-end coverage |
 
@@ -99,7 +99,7 @@ Protocol and fixtures
 Host Engine use cases
         |
         +--> Studio
-        +--> CLI / MCP / Skills / CI
+        +--> CLI / Skills / CI
         |
         v
 Cross-module tests and Hub sync

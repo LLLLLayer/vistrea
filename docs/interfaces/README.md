@@ -9,12 +9,12 @@ These documents define the initial cross-module contracts for parallel implement
 | Contract | Producers | Consumers | Specification |
 |---|---|---|---|
 | Common envelopes, IDs, errors, versions | All modules | All modules | `COMMON_CONTRACTS.md` |
-| Operation ownership and adapter parity | Host Engine | Studio, CLI, MCP, Skills, CI | `OPERATION_CATALOG.md` |
+| Operation ownership and adapter parity | Host Engine | Studio, CLI, Skills, CI | `OPERATION_CATALOG.md` |
 | Runtime SDK connection | iOS/Android SDKs | Connection Engine | `RUNTIME_CONNECTION.md` |
 | Real device actions | WDA/UIAutomator adapters | Automation and Exploration Engines | `AUTOMATION_API.md` |
-| Product use cases | Host Engine | Studio, CLI, MCP, Skills, CI | `ENGINE_API.md` |
+| Product use cases | Host Engine | Studio, CLI, Skills, CI | `ENGINE_API.md` |
 | Persistence ports | Data implementations | Host Engine | `DATA_API.md` |
-| Agent-facing surfaces | CLI, MCP, Skills | Coding Agents and CI | `AGENT_INTERFACES.md` |
+| Agent-facing surfaces | CLI, Skills | Coding Agents and CI | `AGENT_INTERFACES.md` |
 | Cross-team synchronization | Vistrea Hub | Local Sync Client | `HUB_API.md` |
 
 Product interaction mapping is defined separately in `../product/STUDIO_INTERACTIONS.md`.

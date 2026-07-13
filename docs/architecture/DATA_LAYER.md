@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-The Data Layer isolates Vistrea Studio, CLI, MCP, Skills, CI, and domain engines from concrete storage and synchronization details.
+The Data Layer isolates Vistrea Studio, CLI, Skills, CI, and domain engines from concrete storage and synchronization details.
 
 It must support:
 
@@ -20,7 +20,7 @@ The Obsidian comparison describes local-first linked knowledge, backlinks, graph
 
 ```text
 Presentation and Agent adapters
-apps/studio-macos + integrations/cli|mcp|skills|ci
+apps/studio-macos + integrations/cli|skills|ci
                          |
                          v
 Application and domain behavior
@@ -50,7 +50,7 @@ protocol
 ## 3. Access rules
 
 - Studio Views and ViewModels never issue SQL or construct artifact paths.
-- CLI, MCP, Skills, and CI never implement persistence, versioning, or sync rules.
+- CLI, Skills, and CI never implement persistence, versioning, or sync rules.
 - Engine use cases read and write through `data/api`.
 - Data implementations provide persistence, queries, transactions, version metadata, exchange, and synchronization. They do not decide exploration or design-review outcomes.
 - Composition roots select local, in-memory test, or synchronized implementations.
@@ -352,7 +352,7 @@ Designer creates a Review Issue in Studio
 -> SQLite metadata + screenshot ObjectRef
 
 Coding Agent invokes vistrea-review-design
--> Skill -> CLI or MCP
+-> Skill -> CLI
 -> same Design Review use case
 -> same Data API and version history
 ```

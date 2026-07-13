@@ -27,7 +27,7 @@ It connects those capabilities into a persistent Runtime UI Knowledge System.
 - Real user interaction through device automation
 - Local-first, optionally shared through Vistrea Hub
 - One cross-platform protocol with explicit platform adapters
-- One runtime fact base for Studio, CLI, MCP, Skills, and CI
+- One runtime fact base for Studio, CLI, Skills, and CI
 - Immutable observations and versioned knowledge
 - Reversible, protected design tuning
 - Clear separation between planned and implemented capabilities
@@ -55,7 +55,7 @@ It connects those capabilities into a persistent Runtime UI Knowledge System.
 
 iOS / Android Runtime SDK ── Runtime Snapshot Protocol
 WDA / UIAutomator ────────── Real device interaction
-CLI / MCP / Skills / CI ──── Engine adapters
+CLI / Skills / CI ────────── Engine adapters
 ```
 
 ### 2.1 Runtime Snapshot protocol
@@ -388,14 +388,13 @@ Teams publish versioned knowledge collections rather than sharing a mutable SQLi
 Vistrea exposes the same Engine use cases through:
 
 - CLI for deterministic local, script, CI, and Agent operations;
-- MCP for structured tools;
-- Skills for task-oriented workflows composed from CLI, MCP, or local APIs;
+- Skills for task-oriented workflows composed from the CLI or local APIs;
 - CI for repeatable build validation;
 - deep links for exact projects, states, commits, issues, and artifacts.
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-The implemented Agent slice exposes 45 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — through one authenticated Host Local API client. The strict JSON CLI, 44 stdio MCP tools, four Skills (`vistrea-inspect-runtime`, `vistrea-review-design`, `vistrea-tune-ui`, `vistrea-verify-change`), and the headless CI gate consume that same client without accessing SQLite or artifact paths. Exploration sessions, versioning, and sync operations remain future adapter work; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
+The implemented Agent slice exposes 54 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, exploration Operations, the Deep Wiki, validation, build diffs, portable packs, and object downloads — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite or artifact paths. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
 
 Additional Skill concepts:
 
@@ -443,7 +442,7 @@ vistrea/
 ├── data/              # Data API and local-first storage/sync implementations
 ├── apps/              # Vistrea Studio and future user-facing applications
 ├── services/          # optional Vistrea Hub and organization services
-├── integrations/      # CLI, MCP, Skills, CI
+├── integrations/      # CLI, Skills, Claude Code plugin, CI
 ├── examples/          # cross-platform scenarios and native Demo Apps
 ├── tests/             # cross-module contract, integration, and E2E tests
 ├── tools/             # generation, validation, and repository tooling
@@ -500,7 +499,7 @@ The real-input automation acceptance has passed on Android; the iOS WebDriverAge
 
 ### Phase 5: expanded Agents and Vistrea Hub — implemented for the local surface
 
-- extend the initial Snapshot CLI, MCP, and Skill adapters to all stable Engine use cases;
+- extend the initial Snapshot CLI and Skill adapters to all stable Engine use cases;
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
 
@@ -533,7 +532,7 @@ A meaningful first complete demonstration should:
 - View-only versus View-and-Layer first 3D scope;
 - portable `.vistrea-pack` thin-pack and redaction policy;
 - packaging and distribution for the macOS Studio and native SDK artifacts;
-- expanded CLI/MCP/Skill operation rollout after Snapshot inspection;
+- expanded CLI/Skill operation rollout after Snapshot inspection;
 - Hub deployment, identity, permissions, and storage providers.
 
 These choices may evolve without changing the central definition: Vistrea connects runtime structure, design review and tuning, real exploration, versioned knowledge, validation, and Agent workflows around one shared application UI fact base.

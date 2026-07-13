@@ -5,15 +5,13 @@ description: Capture and inspect canonical Vistrea Runtime UI evidence through t
 
 # Inspect Vistrea Runtime UI
 
-Use the existing CLI or MCP operations as thin adapters. Never read SQLite,
+Use the existing CLI operations as thin adapters. Never read SQLite,
 construct Object Store paths, define a private Snapshot model, or invoke app
 business methods.
 
 ## Choose the adapter
 
-- Prefer the configured Vistrea MCP tools when available.
-- Otherwise run the built CLI from the repository root and consume its JSON
-  envelope.
+- Run the built CLI from the repository root and consume its JSON envelope.
 - If `.build/typescript/integrations/cli/main.js` is absent, run
   `pnpm build:host` once.
 - Pass `VISTREA_HOST_URL` and `VISTREA_HOST_TOKEN` through a controlled process
@@ -21,12 +19,12 @@ business methods.
 
 Available operations:
 
-| Intent | CLI | MCP |
-|---|---|---|
-| Check readiness | `workspace status --format json` | `vistrea_get_workspace_status` |
-| Capture evidence | `snapshot capture --format json` | `vistrea_capture_snapshot` |
-| List captures | `snapshot list --format json` | `vistrea_list_snapshots` |
-| Load one capture | `snapshot get <snapshot_id> --format json` | `vistrea_get_snapshot` |
+| Intent | CLI |
+|---|---|
+| Check readiness | `workspace status --format json` |
+| Capture evidence | `snapshot capture --format json` |
+| List captures | `snapshot list --format json` |
+| Load one capture | `snapshot get <snapshot_id> --format json` |
 
 ## Workflow
 
@@ -37,8 +35,7 @@ Available operations:
 3. Capture with screenshot `reference` unless the user explicitly requests
    structure-only evidence. Keep the default reason `manual` unless the user
    provides a supported reason.
-4. Treat the returned `data` or MCP `structuredContent` as the canonical
-   Runtime Snapshot. Preserve its `snapshot_id` for every follow-up.
+4. Treat the returned envelope `data` as the canonical Runtime Snapshot. Preserve its `snapshot_id` for every follow-up.
 5. Inspect, as relevant:
    - `extensions.vistrea.scenario_id` and Runtime Context;
    - View/Semantic Tree nodes, `stable_id`, role, state, accessibility, actions,

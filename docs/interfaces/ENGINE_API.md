@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-The Host Engine is the single application-use-case layer shared by Studio, CLI, MCP, Skills, CI, and tests. Product behavior must not be reimplemented in an adapter.
+The Host Engine is the single application-use-case layer shared by Studio, CLI, Skills, CI, and tests. Product behavior must not be reimplemented in an adapter.
 
 The examples below define semantic operation names, not a programming-language API.
 
@@ -224,4 +224,4 @@ Events identify the operation and affected resources. UI refreshes from queries 
 
 ## 13. Adapter parity
 
-CLI, MCP, Skills, CI, and Studio may expose different interaction shapes, but they must map to the same operation semantics and errors. An adapter must not create a hidden product capability unavailable through public Engine use cases.
+CLI, Skills, CI, and Studio may expose different interaction shapes, but they must map to the same operation semantics and errors. An adapter must not create a hidden product capability unavailable through public Engine use cases.

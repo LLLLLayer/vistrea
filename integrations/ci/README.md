@@ -1,6 +1,6 @@
 # CI Integration
 
-The headless CI gate over the same authenticated Host Local API client as the CLI and MCP. It never imports Data, SQLite, Object Store, or Workspace path implementations.
+The headless CI gate over the same authenticated Host Local API client as the CLI. It never imports Data, SQLite, Object Store, or Workspace path implementations.
 
 ## Run
 

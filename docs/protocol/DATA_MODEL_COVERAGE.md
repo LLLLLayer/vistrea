@@ -4,7 +4,7 @@ Status: **Verified for protocol version 1.0 pre-release 2**
 
 ## 1. Purpose
 
-Phase 0A2 freezes the executable shared model surface required by one complete `DataUnitOfWork`. Swift, Kotlin, Host, Data, Studio, Hub, CLI, MCP, and Skills must consume these models from `protocol/`; they must not create private canonical equivalents.
+Phase 0A2 freezes the executable shared model surface required by one complete `DataUnitOfWork`. Swift, Kotlin, Host, Data, Studio, Hub, CLI, and Skills must consume these models from `protocol/`; they must not create private canonical equivalents.
 
 The machine-readable coverage manifest is `protocol/model-coverage/v1.json`. Validation fails when a declared model fragment is absent or cannot compile under strict Ajv 2020 mode.
 

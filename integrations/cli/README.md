@@ -85,9 +85,26 @@ Build once, then pass the Host endpoint and token only through environment varia
 pnpm build:host
 export VISTREA_HOST_URL=http://127.0.0.1:43123
 # Provision VISTREA_HOST_TOKEN through the protected launcher or process environment.
+# Optional: focus the exposed command surface (unset means every command).
+# export VISTREA_CLI_TOOLSETS=assets,exploration
 node .build/typescript/integrations/cli/main.js workspace status --format json
 ```
 
 There is intentionally no token command-line option. Do not place the token in argv, command output, shell tracing, or logs. See `../shared/README.md` for timeout and response-limit configuration.
 
 Phase 0B capture waits for the current Host endpoint and returns its canonical `RuntimeSnapshot` directly. When the durable asynchronous `CaptureSnapshot` operation lifecycle in the Operation Catalog is implemented, this adapter must advance to immediate `OperationRef` plus `GetOperationResult` without changing capture behavior privately.
+
+## Toolset focus
+
+`VISTREA_CLI_TOOLSETS` selects which named command surfaces the CLI exposes,
+keyed by the first command word: `workspace` (always on), `assets`
+(`snapshot`, `events`, `object`, `pack`), `exploration` (`explore`, `graph`,
+`screen`), `knowledge` (`wiki`), and `verification` (`design`, `issue`,
+`tuning`, `validate`). Unset means every surface. A masked command group
+disappears from `help` and fails closed as `unsupported` (exit 6) at dispatch;
+an unknown set name is `invalid_argument` (exit 2) naming the valid sets.
+Toolset names are configuration, not secrets. The masking is a composition
+choice, not a security boundary — the Host's authentication remains the real
+boundary. The repository's Claude Code plugin
+(`integrations/claude-plugin/`) is the packaged `assets,exploration`
+composition.

@@ -2,9 +2,9 @@
 
 Status: **Implemented surface plus reserved draft for protocol version 1.0**
 
-This catalog closes the parity gap between Studio, CLI, MCP, Skills, CI, Engine modules, and Data ports. Section 1 lists the operations that exist today; section 2 reserves draft names for future phases. Named request and result types become machine-readable schemas as each phase begins.
+This catalog closes the parity gap between Studio, CLI, Skills, CI, Engine modules, and Data ports. Section 1 lists the operations that exist today; section 2 reserves draft names for future phases. Named request and result types become machine-readable schemas as each phase begins.
 
-The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OPERATIONS` in `integrations/shared/host-local-client.ts`. CLI commands follow `integrations/cli/README.md`, MCP tools follow `integrations/mcp/README.md`, and the Host routes follow `apps/host/README.md`.
+The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OPERATIONS` in `integrations/shared/host-local-client.ts`. CLI commands follow `integrations/cli/README.md`, and the Host routes follow `apps/host/README.md`.
 
 ## Legend
 
@@ -12,101 +12,101 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 - Implemented most operations execute synchronously (exploration is the exception: `RunExploration` returns an `OperationRef` that `GetExplorationOperation` polls and `CancelExploration` stops) over the authenticated loopback Host Local API and return their canonical result directly. The asynchronous `OperationRef` lifecycle (`GetOperationResult`, progress, cancellation) remains reserved; adapters must migrate long-running operations to it when it exists without changing behavior privately.
 - In the reserved tables, the `Request -> Result` column names the final typed result; `sync` returns that result immediately while `async` immediately returns `OperationRef`.
 - Data ports: `W` Workspace, `Sn` Snapshot, `Ob` Observation, `Ev` Runtime Event, `G` Screen Graph, `K` Wiki, `D` Design Review, `Va` Validation, `Op` Operation, `Vr` Version, `Obj` Object Store, `X` Exchange, `Sy` Sync.
-- A dash means no durable Data port, CLI command, or MCP tool exists for that cell.
+- A dash means no durable Data port or CLI command exists for that cell.
 - Reserved adapter names are contracts; implementation follows the listed phase.
 
 ## 1. Implemented operations
 
-All 54 operations below are implemented end to end through the Host Local API, the strict JSON CLI, and the stdio MCP server. The headless CI gate composes the validation and build-diff operations.
+All 54 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `GetWorkspaceStatus` | Q | `GET /v1/status` | `workspace status` | `vistrea_get_workspace_status` |
-| `CaptureSnapshot` | C | `POST /v1/captures` | `snapshot capture` | `vistrea_capture_snapshot` |
-| `ListSnapshots` | Q | `GET /v1/snapshots` | `snapshot list` | `vistrea_list_snapshots` |
-| `GetSnapshot` | Q | `GET /v1/snapshots/<id>` | `snapshot get` | `vistrea_get_snapshot` |
-| `GetEventTimeline` | Q | `GET /v1/events` | `events list` | `vistrea_get_event_timeline` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `GetWorkspaceStatus` | Q | `GET /v1/status` | `workspace status` |
+| `CaptureSnapshot` | C | `POST /v1/captures` | `snapshot capture` |
+| `ListSnapshots` | Q | `GET /v1/snapshots` | `snapshot list` |
+| `GetSnapshot` | Q | `GET /v1/snapshots/<id>` | `snapshot get` |
+| `GetEventTimeline` | Q | `GET /v1/events` | `events list` |
 
 ### Design review
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `AddDesignAsset` | C | `POST /v1/design-assets` | `design upload-asset` | `vistrea_upload_design_asset` |
-| `AddDesignReference` | C | `POST /v1/design-references` | `design add-reference` | `vistrea_add_design_reference` |
-| `GetDesignReference` | Q | `GET /v1/design-references/<id>` | `design get-reference` | `vistrea_get_design_reference` |
-| `ListDesignReferences` | Q | `GET /v1/design-references` | `design list-references` | `vistrea_list_design_references` |
-| `MapDesignRegion` | C | `POST /v1/design-mappings` | `design map` | `vistrea_map_design_region` |
-| `RunDesignComparison` | C | `POST /v1/design-comparisons` | `design compare` | `vistrea_run_design_comparison` |
-| `GetDesignComparison` | Q | `GET /v1/design-comparisons/<id>` | `design get-comparison` | `vistrea_get_design_comparison` |
-| `ListDesignComparisons` | Q | `GET /v1/design-comparisons` | `design list-comparisons` | `vistrea_list_design_comparisons` |
-| `CreateReviewIssue` | C | `POST /v1/review-issues` | `issue create` | `vistrea_create_review_issue` |
-| `ListReviewIssues` | Q | `GET /v1/review-issues` | `issue list` | `vistrea_list_review_issues` |
-| `GetReviewIssue` | Q | `GET /v1/review-issues/<id>` | `issue get` | `vistrea_get_review_issue` |
-| `TransitionReviewIssue` | C | `POST /v1/review-issues/<id>/transitions` | `issue transition` | `vistrea_transition_review_issue` |
-| `VerifyReviewIssue` | C | `POST /v1/review-issues/<id>/verifications` | `issue verify` | `vistrea_verify_review_issue` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `AddDesignAsset` | C | `POST /v1/design-assets` | `design upload-asset` |
+| `AddDesignReference` | C | `POST /v1/design-references` | `design add-reference` |
+| `GetDesignReference` | Q | `GET /v1/design-references/<id>` | `design get-reference` |
+| `ListDesignReferences` | Q | `GET /v1/design-references` | `design list-references` |
+| `MapDesignRegion` | C | `POST /v1/design-mappings` | `design map` |
+| `RunDesignComparison` | C | `POST /v1/design-comparisons` | `design compare` |
+| `GetDesignComparison` | Q | `GET /v1/design-comparisons/<id>` | `design get-comparison` |
+| `ListDesignComparisons` | Q | `GET /v1/design-comparisons` | `design list-comparisons` |
+| `CreateReviewIssue` | C | `POST /v1/review-issues` | `issue create` |
+| `ListReviewIssues` | Q | `GET /v1/review-issues` | `issue list` |
+| `GetReviewIssue` | Q | `GET /v1/review-issues/<id>` | `issue get` |
+| `TransitionReviewIssue` | C | `POST /v1/review-issues/<id>/transitions` | `issue transition` |
+| `VerifyReviewIssue` | C | `POST /v1/review-issues/<id>/verifications` | `issue verify` |
 
 ### Protected tuning
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `CreateTuningPatch` | C | `POST /v1/tuning-patches` | `tuning create-patch` | `vistrea_create_tuning_patch` |
-| `GetTuningPatch` | Q | `GET /v1/tuning-patches/<id>` | `tuning get-patch` | `vistrea_get_tuning_patch` |
-| `ApplyTuningPatch` | C | `POST /v1/tuning-applications` | `tuning apply` | `vistrea_apply_tuning_patch` |
-| `RevertTuningApplication` | C | `POST /v1/tuning-applications/<id>/revert` | `tuning revert` | `vistrea_revert_tuning_application` |
-| `GetTuningApplication` | Q | `GET /v1/tuning-applications/<id>` | `tuning get-application` | `vistrea_get_tuning_application` |
-| `ListActiveTuning` | Q | `GET /v1/tuning-applications/active` | `tuning list-active` | `vistrea_list_active_tuning` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `CreateTuningPatch` | C | `POST /v1/tuning-patches` | `tuning create-patch` |
+| `GetTuningPatch` | Q | `GET /v1/tuning-patches/<id>` | `tuning get-patch` |
+| `ApplyTuningPatch` | C | `POST /v1/tuning-applications` | `tuning apply` |
+| `RevertTuningApplication` | C | `POST /v1/tuning-applications/<id>/revert` | `tuning revert` |
+| `GetTuningApplication` | Q | `GET /v1/tuning-applications/<id>` | `tuning get-application` |
+| `ListActiveTuning` | Q | `GET /v1/tuning-applications/active` | `tuning list-active` |
 
 ### Screen graph
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `RecordStateObservation` | C | `POST /v1/screen-graph/state-observations` | `graph observe-state` | `vistrea_observe_screen_state` |
-| `RecordTransitionObservation` | C | `POST /v1/screen-graph/transition-observations` | `graph observe-transition` | `vistrea_observe_transition` |
-| `GetScreenGraph` | Q | `GET /v1/screen-graph` | `graph show` | `vistrea_get_screen_graph` |
-| `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` | `vistrea_get_screen_state` |
-| `MergeScreenStates` | C | `POST /v1/screen-graph/state-merges` | `screen merge` | `vistrea_merge_screen_states` |
-| `SplitScreenState` | C | `POST /v1/screen-graph/state-splits` | `screen split` | `vistrea_split_screen_state` |
-| `TagGraphVersion` | C | `POST /v1/screen-graph/version-tags` | `graph tag` | `vistrea_tag_graph_version` |
-| `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` | `vistrea_find_screen_path` |
-| `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` | `vistrea_run_exploration` |
-| `GetExplorationOperation` | Q | `GET /v1/exploration/operations/<id>` | `explore get` | `vistrea_get_exploration_operation` |
-| `CancelExploration` | C | `POST /v1/exploration/operations/<id>/cancel` | `explore cancel` | `vistrea_cancel_exploration` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `RecordStateObservation` | C | `POST /v1/screen-graph/state-observations` | `graph observe-state` |
+| `RecordTransitionObservation` | C | `POST /v1/screen-graph/transition-observations` | `graph observe-transition` |
+| `GetScreenGraph` | Q | `GET /v1/screen-graph` | `graph show` |
+| `GetScreenState` | Q | `GET /v1/screen-states/<id>` | `graph get-state` |
+| `MergeScreenStates` | C | `POST /v1/screen-graph/state-merges` | `screen merge` |
+| `SplitScreenState` | C | `POST /v1/screen-graph/state-splits` | `screen split` |
+| `TagGraphVersion` | C | `POST /v1/screen-graph/version-tags` | `graph tag` |
+| `FindScreenPath` | Q | `GET /v1/screen-graph/paths` | `graph find-path` |
+| `RunExploration` | C | `POST /v1/exploration/operations` | `explore run` |
+| `GetExplorationOperation` | Q | `GET /v1/exploration/operations/<id>` | `explore get` |
+| `CancelExploration` | C | `POST /v1/exploration/operations/<id>/cancel` | `explore cancel` |
 
 ### Deep Wiki
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `CreateWikiNode` | C | `POST /v1/wiki/nodes` | `wiki create` | `vistrea_create_wiki_node` |
-| `UpdateWikiNode` | C | `POST /v1/wiki/nodes/<id>/revisions` | `wiki update` | `vistrea_update_wiki_node` |
-| `GetWikiNode` | Q | `GET /v1/wiki/nodes/<id>` | `wiki get` | `vistrea_get_wiki_node` |
-| `ListWikiNodes` | Q | `GET /v1/wiki/nodes` | `wiki search` | `vistrea_search_wiki` |
-| `LinkWikiNode` | C | `POST /v1/wiki/links` | `wiki link` | `vistrea_link_wiki_node` |
-| `UnlinkWikiNode` | C | `POST /v1/wiki/links/<id>/unlink` | `wiki unlink` | `vistrea_unlink_wiki_node` |
-| `GetWikiBacklinks` | Q | `GET /v1/wiki/nodes/<id>/backlinks` | `wiki backlinks` | `vistrea_get_wiki_backlinks` |
-| `GetRelatedWikiNodes` | Q | `GET /v1/wiki/related` | `wiki related` | `vistrea_related_wiki_nodes` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `CreateWikiNode` | C | `POST /v1/wiki/nodes` | `wiki create` |
+| `UpdateWikiNode` | C | `POST /v1/wiki/nodes/<id>/revisions` | `wiki update` |
+| `GetWikiNode` | Q | `GET /v1/wiki/nodes/<id>` | `wiki get` |
+| `ListWikiNodes` | Q | `GET /v1/wiki/nodes` | `wiki search` |
+| `LinkWikiNode` | C | `POST /v1/wiki/links` | `wiki link` |
+| `UnlinkWikiNode` | C | `POST /v1/wiki/links/<id>/unlink` | `wiki unlink` |
+| `GetWikiBacklinks` | Q | `GET /v1/wiki/nodes/<id>/backlinks` | `wiki backlinks` |
+| `GetRelatedWikiNodes` | Q | `GET /v1/wiki/related` | `wiki related` |
 
 ### Validation and build diff
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `ValidateSnapshot` | C | `POST /v1/validation/snapshot-runs` | `validate snapshot` | `vistrea_validate_snapshot` |
-| `ValidateScreenGraph` | C | `POST /v1/validation/graph-runs` | `validate graph` | `vistrea_validate_screen_graph` |
-| `GetValidationRun` | Q | `GET /v1/validation/runs/<id>` | `validate get-run` | `vistrea_get_validation_run` |
-| `ListValidationFindings` | Q | `GET /v1/validation/findings` | `validate findings` | `vistrea_list_validation_findings` |
-| `GetValidationFinding` | Q | `GET /v1/validation/findings/<id>` | `validate get-finding` | `vistrea_get_validation_finding` |
-| `SuppressValidationFinding` | C | `POST /v1/validation/findings/<id>/suppress` | `validate suppress` | `vistrea_suppress_validation_finding` |
-| `CompareBuilds` | C | `POST /v1/validation/build-diffs` | `validate build-diff` | `vistrea_compare_builds` |
-| `GetBuildDiff` | Q | `GET /v1/validation/build-diffs/<id>` | `validate get-build-diff` | `vistrea_get_build_diff` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `ValidateSnapshot` | C | `POST /v1/validation/snapshot-runs` | `validate snapshot` |
+| `ValidateScreenGraph` | C | `POST /v1/validation/graph-runs` | `validate graph` |
+| `GetValidationRun` | Q | `GET /v1/validation/runs/<id>` | `validate get-run` |
+| `ListValidationFindings` | Q | `GET /v1/validation/findings` | `validate findings` |
+| `GetValidationFinding` | Q | `GET /v1/validation/findings/<id>` | `validate get-finding` |
+| `SuppressValidationFinding` | C | `POST /v1/validation/findings/<id>/suppress` | `validate suppress` |
+| `CompareBuilds` | C | `POST /v1/validation/build-diffs` | `validate build-diff` |
+| `GetBuildDiff` | Q | `GET /v1/validation/build-diffs/<id>` | `validate get-build-diff` |
 
 ### Portable exchange
 
-| Operation | Kind | Host route | CLI | MCP |
-|---|---|---|---|---|
-| `ExportPack` | C | `POST /v1/exchange/exports` | `pack export` | `vistrea_export_pack` |
-| `ImportPack` | C | `POST /v1/exchange/imports` | `pack import` | `vistrea_import_pack` |
-| `GetObject` | Q | `GET /v1/objects/<hash>` | `object get` | `vistrea_get_object` |
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `ExportPack` | C | `POST /v1/exchange/exports` | `pack export` |
+| `ImportPack` | C | `POST /v1/exchange/imports` | `pack import` |
+| `GetObject` | Q | `GET /v1/objects/<hash>` | `object get` |
 
 ### Renamed or superseded draft names
 
@@ -118,7 +118,7 @@ Earlier drafts of this catalog used different names for some implemented operati
 | `LinkWikiNodes` / `UnlinkWikiNodes` | `LinkWikiNode` / `UnlinkWikiNode` |
 | `GetBacklinks` | `GetWikiBacklinks` |
 | `GetRelatedRuntimeContext` | `GetRelatedWikiNodes` |
-| `SearchWiki` | `ListWikiNodes` (the MCP tool name remains `vistrea_search_wiki`) |
+| `SearchWiki` | `ListWikiNodes` (the CLI command remains `wiki search`) |
 | `RunValidation` | `ValidateSnapshot` and `ValidateScreenGraph` |
 | `GetValidationOperation` | `GetValidationRun` |
 | `RunBuildComparison` | `CompareBuilds` |
@@ -131,10 +131,10 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ### Workspace
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
-| `CreateWorkspace` | C | `CreateWorkspaceCommand -> WorkspaceDescriptor` | sync | Workspace / W,Vr | atomic genesis Commit/default-ref bootstrap | `workspace create` / `vistrea_create_workspace` | 0B |
-| `OpenWorkspace` | C | `OpenWorkspaceCommand -> WorkspaceDescriptor` | sync | Workspace / W | compatible version | `workspace open` / `vistrea_open_workspace` | 0B |
+| `CreateWorkspace` | C | `CreateWorkspaceCommand -> WorkspaceDescriptor` | sync | Workspace / W,Vr | atomic genesis Commit/default-ref bootstrap | `workspace create` | 0B |
+| `OpenWorkspace` | C | `OpenWorkspaceCommand -> WorkspaceDescriptor` | sync | Workspace / W | compatible version | `workspace open` | 0B |
 | `CloseWorkspace` | C | `CloseWorkspaceCommand -> Empty` | sync | Workspace / W | no active write UoW | `workspace close` / — | 0B |
 | `UpgradeWorkspace` | C | `UpgradeWorkspaceCommand -> MigrationResult` | async | Workspace / W,Op | backup policy | `workspace upgrade` / — | 0B |
 | `CollectWorkspaceGarbage` | C | `CollectGarbageCommand -> GarbageCollectionResult` | async | Workspace / W,Vr,Obj,Op | retention policy | `workspace gc` / — | 0B |
@@ -144,32 +144,32 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ### Runtime connection and device
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
-| `ConnectRuntime` | C | `ConnectRuntimeCommand -> RuntimeConnection` | async | Connection / Op | authorized internal build | `device connect` / `vistrea_connect_runtime` | 1 |
+| `ConnectRuntime` | C | `ConnectRuntimeCommand -> RuntimeConnection` | async | Connection / Op | authorized internal build | `device connect` | 1 |
 | `DisconnectRuntime` | C | `DisconnectRuntimeCommand -> Empty` | sync | Connection / — | active connection | `device disconnect` / — | 1 |
 | `OpenAutomationSession` | C | `OpenAutomationSessionCommand -> AutomationSession` | async | Automation / Op | provider and safety policy | `device automation-open` / — | 3 |
 | `CloseAutomationSession` | C | `CloseAutomationSessionCommand -> Empty` | sync | Automation / — | active session | `device automation-close` / — | 3 |
 | `LaunchApplication` | C | `LaunchApplicationCommand -> ActionResult` | async | Automation / Op | action policy | `device launch` / — | 3 |
 | `TerminateApplication` | C | `TerminateApplicationCommand -> ActionResult` | async | Automation / Op | action policy | `device terminate` / — | 3 |
-| `ListDevices` | Q | `DeviceQuery -> Page<DeviceDescriptor>` | sync | Automation / — | provider available | `device list` / `vistrea_list_devices` | 1 |
+| `ListDevices` | Q | `DeviceQuery -> Page<DeviceDescriptor>` | sync | Automation / — | provider available | `device list` | 1 |
 | `ListDiscoveredRuntimes` | Q | `RuntimeDiscoveryQuery -> Page<RuntimeDescriptor>` | sync | Connection / — | discovery available | `device runtime-list` / — | 1 |
 | `GetConnectionStatus` | Q | `ConnectionStatusQuery -> ConnectionStatus` | sync | Connection / — | — | `device status` / — | 1 |
 | `GetRuntimeCapabilities` | Q | `RuntimeCapabilitiesQuery -> CapabilitySet` | sync | Connection / — | active connection | `device capabilities` / — | 1 |
 
 ### Snapshot and inspection
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `PinSnapshot` | C | `PinSnapshotCommand -> SnapshotSummary` | sync | Workspace / Sn,Vr | retention policy | `snapshot pin` / — | 1 |
 | `AttachArtifact` | C | `AttachArtifactCommand -> ArtifactLink` | sync | Knowledge / Sn,K,Obj | artifact policy | `snapshot attach` / — | 1 |
 | `GetUiNode` | Q | `GetUiNodeQuery -> UiNode` | sync | Knowledge / Sn,Obj | snapshot available | `node get` / — | 1 |
-| `QueryUiNodes` | Q | `UiNodeQuery -> Page<UiNodeSummary>` | sync | Knowledge / Sn | snapshot available | `node query` / `vistrea_query_ui_nodes` | 1 |
+| `QueryUiNodes` | Q | `UiNodeQuery -> Page<UiNodeSummary>` | sync | Knowledge / Sn | snapshot available | `node query` | 1 |
 | `CompareSnapshots` | Q | `CompareSnapshotsQuery -> SnapshotDiff` | sync | Validation / Sn,Obj | both snapshots visible | `snapshot compare` / — | 4 |
 
 ### Screen graph and exploration
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `PauseExploration` | C | `PauseExplorationCommand -> OperationRef` | sync | Exploration / Op | running operation | `explore pause` / — | 3 |
 | `ResumeExploration` | C | `ResumeExplorationCommand -> OperationRef` | sync | Exploration / Op | paused operation | `explore resume` / — | 3 |
@@ -179,7 +179,7 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ### Design review and tuning
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `UpdateReviewIssue` | C | `UpdateReviewIssueCommand -> ReviewIssue` | sync | Design / D,Vr | expected revision | `design issue-update` / — | 2 |
 | `ExportTuningPatch` | C | `ExportTuningPatchCommand -> ObjectRef` | sync | Design / D,Obj,X | export policy | `design tune-export` / — | 2 |
@@ -187,14 +187,14 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ### Validation
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `CancelValidation` | C | `CancelOperationCommand -> OperationRef` | sync | Operations / Op | cancellable operation | `verify cancel` / — | 4 |
 | `AcceptValidationBaseline` | C | `AcceptValidationBaselineCommand -> CommitAndRefResult` | sync | Validation/Versioning / Va,Vr | reviewer and ref CAS | `verify baseline-accept` / — | 4 |
 
 ### Deep Wiki
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `AttachRuntimeEvidence` | C | `AttachRuntimeEvidenceCommand -> WikiLink` | sync | Knowledge / K,Sn,Obj,Vr | evidence access | `wiki attach` / — | 3 |
 | `ExportWiki` | C | `ExportWikiCommand -> ObjectRef` | async | Knowledge / K,Obj,X,Op | export/redaction policy | `wiki export` / — | 3 |
@@ -203,31 +203,31 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ### Versioning and synchronization
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `CommitWorkingSetAndUpdateRef` | C | `CommitWorkingSetCommand -> CommitAndRefResult` | sync | Versioning / Vr,Obj | object integrity and ref CAS | `version commit` / — | 0B |
 | `CreateTag` | C | `CreateTagCommand -> Tag` | sync | Versioning / Vr | tag policy | `version tag` / — | 0B |
 | `FetchWorkspace` | C | `FetchWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote read policy | `sync fetch` / — | 5 |
 | `PushWorkspace` | C | `PushWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote write policy | `sync push` / — | 5 |
 | `PullWorkspace` | C | `PullWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | conflict policy | `sync pull` / — | 5 |
-| `PublishRef` | C | `PublishRefCommand -> PublishResult` | async | Sync / Vr,Sy,Op | publication policy | `sync publish` / `vistrea_publish_ref` | 5 |
+| `PublishRef` | C | `PublishRefCommand -> PublishResult` | async | Sync / Vr,Sy,Op | publication policy | `sync publish` | 5 |
 | `SubscribeRef` | C | `SubscribeRefCommand -> Subscription` | sync | Sync / Sy | read permission | `sync subscribe` / — | 5 |
 | `ResolveSyncConflict` | C | `ResolveSyncConflictCommand -> SyncConflictResolution` | sync | Sync / Vr,Sy | actor and expected revision | `sync resolve` / — | 5 |
 | `GetCommit` | Q | `GetCommitQuery -> Commit` | sync | Versioning / Vr | commit visible | `version get` / — | 0B |
 | `GetRef` | Q | `GetRefQuery -> Ref` | sync | Versioning / Vr | ref visible | `version ref-get` / — | 0B |
 | `ListCommits` | Q | `CommitQuery -> Page<Commit>` | sync | Versioning / Vr | history scope | `version log` / — | 0B |
 | `CompareCommits` | Q | `CompareCommitsQuery -> CommitDiff` | sync | Versioning / Vr | both commits visible | `version diff` / — | 0B |
-| `GetSyncStatus` | Q | `SyncStatusQuery -> SyncStatus` | sync | Sync / Vr,Sy | remote configured | `sync status` / `vistrea_get_sync_status` | 5 |
+| `GetSyncStatus` | Q | `SyncStatusQuery -> SyncStatus` | sync | Sync / Vr,Sy | remote configured | `sync status` | 5 |
 | `ListSyncConflicts` | Q | `SyncConflictQuery -> Page<SyncConflict>` | sync | Sync / Sy | remote configured | `sync conflicts` / — | 5 |
 
 ### Generic operations
 
-| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI / MCP | Phase |
+| Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
-| `GetOperation` | Q | `GetOperationQuery -> OperationRef` | sync | Operations / Op | operation visible | `<domain> status` / `vistrea_get_operation` | 0B |
+| `GetOperation` | Q | `GetOperationQuery -> OperationRef` | sync | Operations / Op | operation visible | `<domain> status` | 0B |
 | `GetOperationResult` | Q | `GetOperationResultQuery -> OperationResult<JsonValue>` | sync | Operations / Op | operation succeeded | `<domain> result` / — | 0B |
 | `CancelOperation` | C | `CancelOperationCommand -> OperationRef` | sync | Operations / Op | cancellable operation | `<domain> cancel` / — | 0B |
-| `SubscribeOperationEvents` | S | `OperationEventsQuery -> OperationEvent stream` | stream | Operations / Op | operation visible | `--wait --format ndjson` / MCP progress | 0B |
+| `SubscribeOperationEvents` | S | `OperationEventsQuery -> OperationEvent stream` | stream | Operations / Op | operation visible | `--wait --format ndjson` | 0B |
 
 ## Parity rule
 

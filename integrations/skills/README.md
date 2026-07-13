@@ -1,12 +1,12 @@
 # Agent Skills
 
-Task-oriented workflows for Codex and compatible Coding Agents. A Skill tells an Agent when and how to compose Vistrea CLI, MCP, or local APIs. It never implements Design, Exploration, Knowledge, or Validation Engine logic.
+Task-oriented workflows for Codex and compatible Coding Agents. A Skill tells an Agent when and how to compose the Vistrea CLI or local APIs. It never implements Design, Exploration, Knowledge, or Validation Engine logic.
 
 Implemented Skills:
 
 - `vistrea-inspect-runtime`: check Runtime readiness, capture canonical UI
-  evidence, and inspect or retrieve the same persisted Snapshot through CLI or
-  MCP
+  evidence, and inspect or retrieve the same persisted Snapshot through the
+  CLI
 - `vistrea-review-design`: register a design baseline, map regions to live
   nodes, run comparisons, and manage the Review Issue lifecycle to verified
   fixes

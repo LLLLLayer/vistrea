@@ -316,7 +316,7 @@ Wiki editing must not duplicate runtime truth into manually maintained fields wh
 Studio shows Agent operations as reviewable activities:
 
 - requested goal and scope;
-- selected Skill or MCP/CLI path;
+- selected Skill or CLI path;
 - tool calls and evidence;
 - pending dangerous-action confirmation;
 - created Snapshots, issues, patches, findings, commits, and refs;
