@@ -143,6 +143,8 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | `5965761` | Named unnamed Screen States after their prominent text instead of the alphabetically first stable id. |
 | `e9df359` | Refused injected input while the device display is locked or asleep, ending plausible fake transitions from lockscreen taps. |
 | `cb745cf` | Restructured Studio to the interaction design's IA: scope-first context bar, Canvas landing, single-screen Inspector, evidence library, timeline strip, and real-pixel 3D layers. |
+| `2baf74c` | Annotated Screen States with labels and a one-sentence summary through the 55th operation, `AnnotateScreenState`. |
+| `2c3a1e6` | Edited state annotations in Studio with the curation revision guard, merged the duplicated inspector panels, and made small windows degrade honestly. |
 | `acde11d` | Moved the iOS driver bootstrap into the product CLI as `driver ios`, masked with the exploration toolset. |
 
 ## Native vertical-loop evidence
@@ -267,6 +269,7 @@ Platform `implementation_status` remains `in-progress` in `examples/scenarios/ma
 | 2026-07-13 | iOS storefront automation acceptance | `VISTREA_WDA_PROJECT=<pinned cache> pnpm test:e2e:ios-real-automation` | Blocked by the host machine: a concurrent real-device xcodebuild session drove the load average above 375, and three attempts died in successive environment stages (simulator boot, app launch) before any product assertion; the lane's boot window is widened and the run is pending a calm machine |
 | 2026-07-13 | Real-device AI exploration with a live Canvas | Real Android device (AIN065) via adb: `explore run` from the CLI while Studio watched | Two AI-driven walks (storefront 4 states / 7 actions, cart 2 states / 3 actions, both frontier_exhausted) executed real input on the physical phone; the Canvas grew per action through the new revision watch; every step persisted a snapshot with a content-addressed screenshot (35 observations, 11 transitions, revision 26); a locked phone mid-walk exposed and motivated the display-interactivity guard |
 | 2026-07-13 | Studio IA restructure and real-pixel 3D | `swift test --package-path apps/studio-macos`; `swift build -c release`; fixture launch smoke | 89 of 89 tests (was 78) and the Release build passed: scope derivation, state-driven inspector resolution, missing-canonical degrade, timeline strip summary, and clamped crop math each have direct tests |
+| 2026-07-14 | State annotations across the stack | `pnpm check`; `swift test --package-path apps/studio-macos`; CLI against the real-device Workspace | 87 Host integrations (9 graph tests incl. annotation CAS/clearing), 103 Studio tests (annotation guard, clearing bodies, layout metrics), and the agent round trip; the AI then annotated all six real-device states through `screen annotate` with chained revisions (26 → 32), and Studio renders the chips and summaries live |
 
 ## Known follow-up gaps
 
