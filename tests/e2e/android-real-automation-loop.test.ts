@@ -18,6 +18,7 @@ import { ExplorationEngine, ScreenGraphEngine } from "../../engine/exploration/i
 const repositoryRoot = process.cwd();
 const optInEnvironment = "VISTREA_RUN_ANDROID_REAL_AUTOMATION";
 const scenarioId = "demo.navigation.basic";
+const storefrontScenarioId = "demo.store.navigation";
 const scenarioProfile = "baseline";
 const homeStableId = "demo.home.open_catalog";
 const catalogStableId = "demo.catalog.item_primary";
@@ -564,6 +565,72 @@ test(
     });
     assert.equal(version.state_count, 3);
 
+    // Second walk: the storefront scenario proves exploration scales past a
+    // toy graph. The same installed Demo relaunches into the deep scenario
+    // (the Runtime token survives in app storage), the walk exhausts a
+    // four-screen frontier, and the one materialized graph absorbs both
+    // scenarios because they share the application identity.
+    await runAdb(serial, ["shell", "am", "force-stop", debugPackage], {
+      label: "Android Demo storefront stop",
+    });
+    const storefrontLaunch = await runAdb(
+      serial,
+      [
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        debugComponent,
+        "--es",
+        "VISTREA_RUNTIME_HOST",
+        "127.0.0.1",
+        "--es",
+        "VISTREA_RUNTIME_PORT",
+        String(resources.host.runtime.port),
+        "--es",
+        "vistrea.scenario_id",
+        storefrontScenarioId,
+        "--es",
+        "vistrea.profile_id",
+        scenarioProfile,
+      ],
+      {
+        secrets: knownSecrets,
+        forbiddenEnvironmentSecrets: [resources.host.runtime.authorizationToken],
+        timeoutMilliseconds: 60_000,
+        label: "Android Demo storefront launch",
+      },
+    );
+    assert.match(storefrontLaunch.stdout, /Status:\s+ok/);
+    await resources.host.waitForRuntime(30_000);
+    assert.equal(resources.host.runtimeConnected, true);
+    await delay(settleMilliseconds);
+    const storefrontSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.store.catalog_item_primary"),
+    );
+    validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, storefrontSnapshot);
+    const storefrontReport = await exploration.explore({
+      automation_session_id: session.automation_session_id,
+      maximum_actions: 16,
+      settle_milliseconds: settleMilliseconds,
+      excluded_stable_ids: ["android.debug.inspector.open"],
+    });
+    if (
+      storefrontReport.discovered_state_ids.length !== 4 ||
+      storefrontReport.stopped_reason !== "frontier_exhausted"
+    ) {
+      console.error(`Storefront exploration evidence: ${JSON.stringify(storefrontReport)}`);
+    }
+    assert.equal(storefrontReport.stopped_reason, "frontier_exhausted");
+    assert.equal(storefrontReport.discovered_state_ids.length, 4);
+    const storefrontVersion = exploration.tagGraphVersion({
+      project_id: runtimeContext["project_id"] as string,
+      application_id: runtimeContext["application_id"] as string,
+      tag_name: "acceptance/explored-store",
+    });
+    assert.equal(storefrontVersion.state_count, 7);
+
     automation.closeSession(session.automation_session_id);
     await resources.host.close();
     resources.host = undefined;
@@ -583,6 +650,9 @@ test(
         graph_transitions: 2,
         path_found: "passed",
         exploration_states: report.discovered_state_ids.length,
+        storefront_states: storefrontReport.discovered_state_ids.length,
+        storefront_actions: storefrontReport.action_count,
+        storefront_version_tag: storefrontVersion.tag_name,
         exploration_actions: report.action_count,
         exploration_stopped: report.stopped_reason,
         exploration_version_tag: version.tag_name,

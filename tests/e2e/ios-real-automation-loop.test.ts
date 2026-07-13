@@ -23,6 +23,7 @@ const optInEnvironment = "VISTREA_RUN_IOS_REAL_AUTOMATION";
  */
 const wdaProjectEnvironment = "VISTREA_WDA_PROJECT";
 const scenarioId = "demo.navigation.basic";
+const storefrontScenarioId = "demo.store.navigation";
 const homeStableId = "demo.home.open_catalog";
 const catalogStableId = "demo.catalog.item_primary";
 const demoBundleId = "dev.vistrea.demo";
@@ -406,6 +407,55 @@ test(
     });
     assert.equal(version.state_count, 3);
 
+    // Second walk: the storefront scenario proves exploration scales past a
+    // toy graph. The same process relaunches into the deep scenario, the walk
+    // exhausts a four-screen frontier, and the one materialized graph absorbs
+    // both scenarios because they share the application identity.
+    const storefrontEnvironment = cleanEnvironment({
+      SIMCTL_CHILD_VISTREA_SCENARIO_ID: storefrontScenarioId,
+      SIMCTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
+      SIMCTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
+      SIMCTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
+      SIMCTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
+    });
+    const storefrontLaunch = await runCommand(
+      "xcrun",
+      ["simctl", "launch", "--terminate-running-process", resources.simulatorId, demoBundleId],
+      {
+        environment: storefrontEnvironment,
+        secrets: knownSecrets,
+        label: "iOS Demo storefront launch",
+      },
+    );
+    assert.match(storefrontLaunch.stdout.trim(), /^dev\.vistrea\.demo: [1-9][0-9]*$/);
+    await resources.host.waitForRuntime(60_000);
+    assert.equal(resources.host.runtimeConnected, true);
+    await delay(settleMilliseconds);
+    const storefrontSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.store.catalog_item_primary"),
+    );
+    validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, storefrontSnapshot);
+    const storefrontReport = await exploration.explore({
+      automation_session_id: session.automation_session_id,
+      maximum_actions: 16,
+      settle_milliseconds: settleMilliseconds,
+      excluded_stable_ids: ["vistrea.inspector.capture", "BackButton"],
+    });
+    if (
+      storefrontReport.discovered_state_ids.length !== 4 ||
+      storefrontReport.stopped_reason !== "frontier_exhausted"
+    ) {
+      console.error(`Storefront exploration evidence: ${JSON.stringify(storefrontReport)}`);
+    }
+    assert.equal(storefrontReport.stopped_reason, "frontier_exhausted");
+    assert.equal(storefrontReport.discovered_state_ids.length, 4);
+    const storefrontVersion = exploration.tagGraphVersion({
+      project_id: runtimeContext["project_id"] as string,
+      application_id: runtimeContext["application_id"] as string,
+      tag_name: "acceptance/explored-store",
+    });
+    assert.equal(storefrontVersion.state_count, 7);
+
     automation.closeSession(session.automation_session_id);
     await resources.host.close();
     resources.host = undefined;
@@ -420,6 +470,9 @@ test(
         real_tap: "uncertain-then-verified",
         real_back: "edge-pop-deduplicated",
         exploration_states: report.discovered_state_ids.length,
+        storefront_states: storefrontReport.discovered_state_ids.length,
+        storefront_actions: storefrontReport.action_count,
+        storefront_version_tag: storefrontVersion.tag_name,
         exploration_actions: report.action_count,
         exploration_version_tag: version.tag_name,
       }),
