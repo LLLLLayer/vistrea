@@ -42,6 +42,11 @@ examples/scenarios/
 | `demo.safety.dangerous` | Destructive-looking action | Snapshot and policy block without a Transition |
 | `demo.version.new-feature` | New screen and path | Graph and build diff |
 | `demo.version.regression` | Visual and behavioral regression | Review re-verification, validation, and build diff |
+| `demo.store.navigation` | Tabbed storefront with a snap-scrolling catalog, detail, reviews, and profile | Deep exploration graph and scroll-stable structural identity |
+| `demo.store.search` | Typed and cleared catalog queries | Snapshot, graph, and text-input automation targets |
+| `demo.store.sheet` | Sort options bottom sheet | Overlay Snapshot, graph, and the canonical dismiss target |
+| `demo.store.cart-states` | Empty versus populated cart structures | Different-state identity expectation and curation material |
+| `demo.mixed.declarative` | SwiftUI- and Compose-rendered screen with shared stable nodes | Declarative capture parity with honest per-platform limitations |
 
 All required fixtures declare iOS and Android support as required. Platform-specific scenarios may use namespaced IDs such as `ios.uikit.layer_mismatch` or `android.compose.semantics_merge`, but they cannot replace this shared set.
 
