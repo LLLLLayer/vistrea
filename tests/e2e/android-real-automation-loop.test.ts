@@ -62,6 +62,7 @@ interface AcceptanceResources {
   emulatorSerial: string | undefined;
   reversePort: number | undefined;
   host: LocalHostHandle | undefined;
+  awakeHeartbeat: NodeJS.Timeout | undefined;
 }
 
 const selectedAvd = discoverApi36Avd();
@@ -82,6 +83,7 @@ test(
       emulatorSerial: undefined,
       reversePort: undefined,
       host: undefined,
+      awakeHeartbeat: undefined,
     };
     const knownSecrets: string[] = [];
     t.after(async () => {
@@ -139,6 +141,13 @@ test(
       allowFailure: true,
       label: "Android display stay-awake",
     });
+    // stayon alone does not hold on every emulator image, and a slept display
+    // silently swallows injected input while in-process capture keeps working.
+    await runAdb(
+      serial,
+      ["shell", "settings", "put", "system", "screen_off_timeout", "2147483647"],
+      { allowFailure: true, label: "Android screen timeout" },
+    );
     // A cold boot reports boot_completed while the launcher is still
     // starting; launching the Demo into that churn races its capture surface
     // and connection, so wait for a focused launcher first.
@@ -270,14 +279,25 @@ test(
     const homeState = asRecord(homeObserved["screen_state"], "Home Screen State");
 
     // The display must be interactive before any injected input.
-    await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_WAKEUP"], {
-      allowFailure: true,
-      label: "Android display wake",
-    });
-    await runAdb(serial, ["shell", "wm", "dismiss-keyguard"], {
-      allowFailure: true,
-      label: "Android keyguard re-dismissal",
-    });
+    await ensureDisplayAwake(serial);
+    // The emulator image ignores stayon often enough that a long automation
+    // walk still finds a slept display, which silently swallows injected input
+    // while in-process capture keeps working. A heartbeat keeps it interactive
+    // for the whole run and is cleared with the other resources.
+    resources.awakeHeartbeat = setInterval(() => {
+      void ensureDisplayAwake(serial);
+    }, 15_000);
+    resources.awakeHeartbeat.unref();
+
+    // Cold-boot SystemUI can raise an ANR dialog that swallows the first tap.
+    const systemDeadline = Date.now() + 30_000;
+    for (;;) {
+      const dismissed = await dismissSystemDialogs(serial);
+      if (!dismissed || Date.now() >= systemDeadline) {
+        break;
+      }
+      await delay(2_000);
+    }
 
     // A real user-level tap through adb, resolved from the persisted Snapshot.
     // A real wall clock keeps authorization expiry meaningful for the
@@ -318,9 +338,29 @@ test(
     await delay(settleMilliseconds);
 
     // The catalog Snapshot proves the tap actually navigated.
-    const catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+    let catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
       hasStableId(snapshot, catalogStableId),
     );
+    if (!hasStableId(catalogSnapshot, catalogStableId)) {
+      // A system dialog can swallow one injected tap; dismiss it and repeat
+      // the same authorized action once before declaring a failure.
+      const dismissed = await dismissSystemDialogs(serial);
+      await ensureDisplayAwake(serial);
+      {
+        await automation.execute({
+          automation_session_id: session.automation_session_id,
+          kind: "tap",
+          target: { stable_id: homeStableId },
+          expected_snapshot_id: homeSnapshot["snapshot_id"] as string,
+          intent: { requested_effect: "Open the catalog screen after a system dialog" },
+        });
+        await delay(settleMilliseconds);
+        catalogSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+          hasStableId(snapshot, catalogStableId),
+        );
+      }
+      void dismissed;
+    }
     if (!hasStableId(catalogSnapshot, catalogStableId)) {
       await dumpDeviceEvidence(serial, "tap-did-not-navigate");
     }
@@ -430,6 +470,52 @@ test(
     );
     assert.equal(asArray(paths["paths"], "graph paths").length, 1);
 
+
+    // automation.safety on the real device: a dangerous-classified action is
+    // denied without a confirmation token, and the token bound to exactly
+    // this session, action, and target authorizes it once for real.
+    const dangerousCommand = {
+      automation_session_id: session.automation_session_id,
+      kind: "tap" as const,
+      target: { stable_id: homeStableId },
+      expected_snapshot_id: homeSnapshot["snapshot_id"] as string,
+      intent: {
+        requested_effect: "Open the catalog under a dangerous classification",
+        caller_classification: "dangerous" as const,
+      },
+    };
+    await ensureDisplayAwake(serial);
+    const denied = await automation.execute(dangerousCommand);
+    assert.equal(denied.authorization.decision, "deny");
+    assert.equal(denied.outcome, "blocked");
+    const stillHome = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
+    assert.equal(hasStableId(stillHome, catalogStableId), false);
+
+    const confirmationToken = automation.confirmationTokenFor(dangerousCommand);
+    const confirmed = await automation.execute({
+      ...dangerousCommand,
+      intent: { ...dangerousCommand.intent, confirmation_token: confirmationToken },
+    });
+    assert.equal(confirmed.authorization.decision, "allow_once");
+    assert.equal(confirmed.outcome, "uncertain");
+    await delay(settleMilliseconds);
+    const confirmedCatalog = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, catalogStableId),
+    );
+    assert.equal(hasStableId(confirmedCatalog, catalogStableId), true);
+
+    // Physically return so exploration starts from Home as before.
+    await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "back",
+      intent: { requested_effect: "Return to Home after the confirmed action" },
+    });
+    await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
+
     // Deterministic exploration drives the same real device autonomously:
     // from Home it must rediscover both known states, add the Detail screen,
     // and physically return along system back.
@@ -504,6 +590,52 @@ test(
     );
   },
 );
+
+/** Guarantees an interactive display before injected input. */
+async function ensureDisplayAwake(serial: string): Promise<void> {
+  const state = await runAdb(serial, ["shell", "dumpsys", "power"], {
+    allowFailure: true,
+    label: "Android display state",
+  });
+  if (/mWakefulness=Awake/.test(state.stdout)) {
+    return;
+  }
+  await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_WAKEUP"], {
+    allowFailure: true,
+    label: "Android display wake",
+  });
+  await runAdb(serial, ["shell", "wm", "dismiss-keyguard"], {
+    allowFailure: true,
+    label: "Android keyguard dismissal",
+  });
+  await delay(1_000);
+}
+
+/**
+ * A cold-booted emulator can raise a system ANR dialog ("System UI isn't
+ * responding") that swallows the next injected tap. The acceptance dismisses
+ * it — the dialog is emulator churn, not application behavior, and letting it
+ * eat an action would report a false navigation failure.
+ */
+async function dismissSystemDialogs(serial: string): Promise<boolean> {
+  const focus = await runAdb(serial, ["shell", "dumpsys", "window", "windows"], {
+    allowFailure: true,
+    label: "Android system dialog probe",
+  });
+  if (!/Application Not Responding|mCurrentFocus=Window\{[^}]*(?:AnrDialog|Application Error)/i.test(focus.stdout)) {
+    return false;
+  }
+  await runAdb(serial, ["shell", "am", "broadcast", "-a", "android.intent.action.CLOSE_SYSTEM_DIALOGS"], {
+    allowFailure: true,
+    label: "Android system dialog dismissal",
+  });
+  await runAdb(serial, ["shell", "input", "keyevent", "KEYCODE_BACK"], {
+    allowFailure: true,
+    label: "Android system dialog back",
+  });
+  await delay(1_000);
+  return true;
+}
 
 /**
  * Polls real captures until the screen settles into the expected structure.
@@ -776,6 +908,10 @@ async function cleanupResources(
   resources: AcceptanceResources,
   secrets: readonly string[],
 ): Promise<void> {
+  if (resources.awakeHeartbeat !== undefined) {
+    clearInterval(resources.awakeHeartbeat);
+    resources.awakeHeartbeat = undefined;
+  }
   try {
     await resources.host?.close();
   } catch {

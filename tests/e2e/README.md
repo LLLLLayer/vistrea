@@ -16,3 +16,23 @@ The Android automation test walks the same scenario with real user-level input: 
 The iOS automation test mirrors the Android one through WebDriverAgent: it boots the XCUITest-hosted driver from an operator-provided checkout against a dedicated Simulator, taps and edge-swipes in logical points over the W3C actions protocol, and finishes with the same autonomous exploration and version tag. Prepare it once with `git clone https://github.com/appium/WebDriverAgent` and export `VISTREA_WDA_PROJECT=<checkout>/WebDriverAgent.xcodeproj`; without the variable the test skips with instructions.
 
 The iOS lanes require macOS, Xcode, and an available iOS Simulator runtime. The Android lanes additionally require an API 36 or newer AVD, the Android SDK, and `adb`; they transfer the one-shot Runtime token through standard input to the app-private token installer and use `adb reverse` for loopback transport. The iOS automation lane is implemented but has not yet passed on a device; validation, Canvas, and Deep Wiki workflows have no end-to-end lane yet.
+
+## Device regression cadence
+
+Both automation lanes are opt-in because they create dedicated devices and
+take minutes, not seconds. Run them before releasing a change that touches
+capture, the Runtime transport, automation providers, identity, or
+exploration:
+
+```bash
+pnpm test:e2e:android-real-automation
+VISTREA_WDA_PROJECT=<checkout>/WebDriverAgent.xcodeproj pnpm test:e2e:ios-real-automation
+```
+
+Each lane now proves `automation.safety` on the real device as well: a
+dangerous-classified action is denied without a confirmation token and the
+bound token authorizes exactly one real execution. Emulator hazards the lanes
+defend against — a slept display swallowing injected input, cold-boot SystemUI
+ANR dialogs, and launcher churn — are handled inside the tests, so a failure
+means a real product problem; failed navigation preserves window focus, the UI
+tree, and a screenshot for triage.

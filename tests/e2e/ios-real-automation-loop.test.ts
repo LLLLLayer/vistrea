@@ -323,6 +323,51 @@ test(
     assert.equal(asArray(graph["states"], "graph states").length, 2);
     assert.equal(asArray(graph["transitions"], "graph transitions").length, 2);
 
+
+    // automation.safety on the real Simulator: a dangerous-classified action
+    // is denied without a confirmation token, and the bound token authorizes
+    // it exactly once for real.
+    const dangerousCommand = {
+      automation_session_id: session.automation_session_id,
+      kind: "tap" as const,
+      target: { stable_id: homeStableId },
+      expected_snapshot_id: homeSnapshot["snapshot_id"] as string,
+      intent: {
+        requested_effect: "Open the catalog under a dangerous classification",
+        caller_classification: "dangerous" as const,
+      },
+    };
+    const denied = await automation.execute(dangerousCommand);
+    assert.equal(denied.authorization.decision, "deny");
+    assert.equal(denied.outcome, "blocked");
+    const stillHome = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
+    assert.equal(hasStableId(stillHome, catalogStableId), false);
+
+    const confirmationToken = automation.confirmationTokenFor(dangerousCommand);
+    const confirmed = await automation.execute({
+      ...dangerousCommand,
+      intent: { ...dangerousCommand.intent, confirmation_token: confirmationToken },
+    });
+    assert.equal(confirmed.authorization.decision, "allow_once");
+    assert.equal(confirmed.outcome, "uncertain");
+    await delay(settleMilliseconds);
+    const confirmedCatalog = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, catalogStableId),
+    );
+    assert.equal(hasStableId(confirmedCatalog, catalogStableId), true);
+
+    // Physically return so exploration starts from Home as before.
+    await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "back",
+      intent: { requested_effect: "Return to Home after the confirmed action" },
+    });
+    await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, homeStableId),
+    );
+
     // Deterministic exploration drives the same real Simulator autonomously.
     const hostHandle = resources.host;
     const graphEngine = new ScreenGraphEngine({ workspace: automationWorkspace, validator });
