@@ -100,6 +100,8 @@ The right panel follows selection:
 - incoming and outgoing paths;
 - related Wiki nodes and code context.
 
+The Review Issues section is scoped to the selected Screen State through the Host query. No selection means no issue list; Studio must not silently substitute an application-wide list. The Canvas and state detail use the exact Application Version + Build context selected in the persistent context bar.
+
 ### Timeline panel
 
 The bottom panel correlates:
@@ -224,9 +226,9 @@ Open Screen State
 -> choose design reference or approved build baseline
 -> map whole screen or selected regions
 -> compare side by side, overlay, or pixel diff
--> select a runtime node
+-> select a concrete Difference and runtime node
 -> inspect expected versus actual properties
--> create Review Issue with evidence
+-> promote the Difference to a Review Issue without recopying evidence
 -> assign owner and severity
 -> save local review Commit
 -> optionally publish review ref
@@ -263,6 +265,8 @@ Open an unresolved Review Issue or selected node
 -> add changes to Tuning Patch
 -> revert preview or intentionally keep it for the session
 -> export patch for developer or Coding Agent
+-> apply the source change outside the Runtime preview
+-> recapture the later build and re-verify the Issue
 ```
 
 The UI always displays three values when available:
@@ -390,9 +394,9 @@ Every primary screen defines:
 
 ### M2: design review and tuning
 
-1. one design-reference overlay;
-2. Review Issue creation;
-3. one allowlisted tuning property with apply/revert;
-4. Tuning Patch persistence and re-verification evidence.
+1. design-reference and approved-build baseline comparison;
+2. Difference-to-Review-Issue promotion;
+3. reversible allowlisted alpha, color, font, spacing/insets, and corner-radius tuning;
+4. Tuning Patch persistence, source-oriented Agent handoff, and fresh-build re-verification evidence.
 
 Canvas exploration, full Deep Wiki, build diff, 3D inspection, and Hub collaboration follow after these interaction loops are stable.

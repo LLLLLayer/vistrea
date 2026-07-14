@@ -16,7 +16,7 @@ The selected stack must preserve these existing boundaries:
 - protocol JSON Schemas remain the canonical cross-platform value definitions;
 - Engine code depends on `data/api`, never on SQLite or object paths;
 - SQLite owns transactional metadata while large immutable payloads belong in the Object Store;
-- Studio, CLI, MCP, Skills, and CI invoke the same Engine use cases;
+- Studio, CLI, Skills, and CI invoke the same Engine use cases; ADR-0008 retired the former MCP adapter;
 - a local Workspace remains usable without Vistrea Hub;
 - migration failure must not expose a partially upgraded schema.
 
@@ -24,7 +24,7 @@ The selected stack must preserve these existing boundaries:
 
 ### Host and Data language
 
-The Host Engine, Data API, local Data implementations, CLI, and MCP server use strict TypeScript compiled to native ESM and executed by Node.js.
+The Host Engine, Data API, local Data implementations, CLI, and the MCP server that existed when this ADR was accepted use strict TypeScript compiled to native ESM and executed by Node.js. ADR-0008 later retired that MCP server without changing the TypeScript boundary.
 
 - Phase 0B's release and CI baseline is Node `22.14.0`, matching `.node-version`.
 - Source is TypeScript. Hand-maintained JavaScript plus parallel `.d.ts` files is not an accepted substitute for public Data contracts.

@@ -56,7 +56,7 @@ The interface specifications define shared IDs, errors, operation behavior, SDK 
 
 ## Native Demo Apps
 
-The native iOS UIKit and Android View Demo Apps implement the same 12 required cross-platform Scenario IDs. Both provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage, plus verified Runtime events and reversible tuning; real-input automation is verified on Android. Design comparison and validation scenario coverage remain staged, with `examples/scenarios/manifest.json` as the authoritative per-platform status.
+The native iOS UIKit and Android View Demo Apps implement the same 17 required cross-platform Scenario IDs. Both provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage, plus verified Runtime events, reversible tuning, real-input automation, dangerous-action confirmation, and the deeper Storefront exploration acceptance. The iOS lane additionally proves real `clear_text` and targeted `dismiss` with post-action structural captures. Compose contributes its full semantics tree, while SwiftUI element capture remains accessibility-runtime dependent. Design comparison and validation scenario coverage remain staged, with `examples/scenarios/manifest.json` as the authoritative per-platform status.
 
 - `examples/ios/VistreaDemoApp/`
 - `examples/android/VistreaDemoApp/`
@@ -76,19 +76,18 @@ The native iOS UIKit and Android View Demo Apps implement the same 12 required c
 
 ## Recommended implementation sequence
 
-1. Run the implemented iOS WebDriverAgent automation lane on a real Simulator and re-run the Android lane's exploration segment to verify those capabilities.
-2. Extend the SwiftUI and Compose annotation bridges into full semantic-tree capture.
-3. Cover the design comparison and validation scenario contracts in both Demo Apps.
-4. Add Canvas curation and Deep Wiki editing to Studio.
-5. Grow Vistrea Hub beyond the loopback pack relay: namespaces, permissions, discovery, and collaboration.
+1. Add dedicated Studio controls for Difference promotion, source suggestions, fresh-build recapture verification, and Knowledge Collection management.
+2. Exercise the broader native tuning matrix on physical devices, form the physical-iPhone Runtime-to-Host vertical, and strengthen the iOS Release artifact boundary.
+3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
+4. Grow Vistrea Hub beyond the secure pack relay: user-facing sync, auditing, discovery, permissions, and collaboration.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
 ## Current status
 
-Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
+Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 89 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, portable full/thin `.vistrea-pack` exchange, and immutable Knowledge Collection publication with readable Markdown/HTML exports over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming and protected reversible tuning are also verified on both platforms. Device automation, deterministic exploration, the Screen Graph, design review, the Deep Wiki, core validation and build diff, and an optional loopback Hub pack relay are implemented behind the same production Host, with the Android real-input automation acceptance verified and the iOS WebDriverAgent lane awaiting its first device run. Agents consume this surface through 55 Host operations exposed by the strict CLI (with named toolset focus), the Skills, an installable Claude Code plugin, and a headless CI gate. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 65 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
 
 Run the current executable checks with:
 

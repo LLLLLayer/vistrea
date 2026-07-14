@@ -141,6 +141,7 @@ vistrea/
 ├── integrations/
 │   ├── README.md
 │   ├── shared/                  # strict authenticated Host client
+│   │   └── host-operation-manifest.ts # executable Host/CLI operation parity
 │   ├── cli/
 │   │   ├── README.md
 │   │   ├── cli.ts
@@ -180,6 +181,7 @@ vistrea/
 │   │   ├── README.md
 │   │   ├── protocol-fixtures.test.mjs
 │   │   ├── strict-json.test.mjs
+│   │   ├── operation-parity.test.ts
 │   │   └── …                    # Data, SQLite, Object Store, and pack contracts
 │   ├── integration/
 │   │   ├── README.md
@@ -355,7 +357,7 @@ The first implementation keeps the language-neutral contracts while using toolch
 - `adb` and WebDriverAgent device automation providers behind one Engine port;
 - a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
-Future full SwiftUI/Compose semantic-tree capture, physical-device tunneling, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future SwiftUI-native capture, Compose rendering-side visual adapters, physical-device tunneling, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
 
 ## 8. Parallel development
 
