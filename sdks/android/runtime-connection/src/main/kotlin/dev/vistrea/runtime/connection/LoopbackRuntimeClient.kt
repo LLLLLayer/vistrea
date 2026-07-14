@@ -924,7 +924,11 @@ class LoopbackRuntimeClient(
         withContext(NonCancellable) {
             for (entry in entries.reversed()) {
                 val restored = try {
-                    controller.setAlpha(entry.stableId, entry.originalAlpha)
+                    controller.setTuningValue(
+                        entry.stableId,
+                        entry.property,
+                        entry.originalValue,
+                    )
                 } catch (_: Exception) {
                     false
                 }

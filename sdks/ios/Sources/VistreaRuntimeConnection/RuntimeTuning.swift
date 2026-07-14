@@ -6,9 +6,41 @@ import VistreaRuntimeModels
 /// The transport never mutates views itself; platform adapters resolve stable
 /// identifiers to live views and stay observation-honest about failures.
 public protocol RuntimeTuningApplying: Sendable {
+    /// Properties this concrete platform adapter can read, mutate, and restore.
+    var supportedTuningProperties: Set<String> { get }
+
     /// The current alpha for the stable identifier, or nil when unresolvable.
     func currentAlpha(stableID: String) async -> Double?
     func setAlpha(stableID: String, value: Double) async
+
+    /// Canonical PropertyValue access used by the multi-property processor.
+    func currentTuningValue(stableID: String, property: String) async -> JSONValue?
+    @discardableResult
+    func setTuningValue(stableID: String, property: String, value: JSONValue) async -> Bool
+}
+
+public extension RuntimeTuningApplying {
+    var supportedTuningProperties: Set<String> { ["alpha"] }
+
+    func currentTuningValue(stableID: String, property: String) async -> JSONValue? {
+        guard property == "alpha", let alpha = await currentAlpha(stableID: stableID) else {
+            return nil
+        }
+        return .object([
+            "kind": .string("number"),
+            "value": .number(alpha),
+            "unit": .string("ratio"),
+            "extensions": .object([:]),
+        ])
+    }
+
+    func setTuningValue(stableID: String, property: String, value: JSONValue) async -> Bool {
+        guard property == "alpha", let alpha = RuntimeTuningProcessor.numberValue(value) else {
+            return false
+        }
+        await setAlpha(stableID: stableID, value: alpha)
+        return true
+    }
 }
 
 struct RuntimeTuningRejection: Sendable {
@@ -20,7 +52,29 @@ struct RuntimeTuningRejection: Sendable {
 
 struct RuntimeTuningRestoreEntry: Sendable {
     let stableID: String
-    let originalAlpha: Double
+    let property: String
+    let originalValue: JSONValue
+
+    init(stableID: String, property: String, originalValue: JSONValue) {
+        self.stableID = stableID
+        self.property = property
+        self.originalValue = originalValue
+    }
+
+    init(stableID: String, originalAlpha: Double) {
+        self.init(
+            stableID: stableID,
+            property: "alpha",
+            originalValue: .object([
+                "kind": .string("number"),
+                "value": .number(originalAlpha),
+                "unit": .string("ratio"),
+                "extensions": .object([:]),
+            ])
+        )
+    }
+
+    var originalAlpha: Double? { RuntimeTuningProcessor.numberValue(originalValue) }
 }
 
 /// One processed apply command: the canonical application plus local restore state.
@@ -32,12 +86,19 @@ struct RuntimeTuningOutcome: Sendable {
 
 /// Builds canonical TuningApplication values for the loopback transport.
 ///
-/// Only the `alpha` property is currently applied; every other allowlisted
-/// property is rejected explicitly instead of being silently ignored, and a
-/// partial failure restores already-applied changes before reporting.
+/// Every property is read back from the live view before mutation. Unsupported
+/// platform/property combinations reject explicitly, and a partial failure
+/// restores every already-applied captured original before reporting.
 enum RuntimeTuningProcessor {
-    static let supportedProperty = "alpha"
-    static let alphaTolerance = 0.001
+    static let projectAllowlist: Set<String> = [
+        "content_insets",
+        "spacing",
+        "font",
+        "foreground_color",
+        "background_color",
+        "alpha",
+        "corner_radius",
+    ]
 
     // swiftlint:disable:next function_body_length
     static func apply(
@@ -84,12 +145,14 @@ enum RuntimeTuningProcessor {
                 ))
                 continue
             }
-            guard property == supportedProperty else {
+            guard projectAllowlist.contains(property),
+                  controller.supportedTuningProperties.contains(property)
+            else {
                 rejected.append(RuntimeTuningRejection(
                     changeID: changeID,
                     runtimeTarget: runtimeTarget,
                     reasonCode: "property_not_allowed",
-                    message: "This Runtime applies only the alpha property in the current slice."
+                    message: "The Runtime adapter cannot safely read, apply, and restore this property."
                 ))
                 continue
             }
@@ -115,19 +178,20 @@ enum RuntimeTuningProcessor {
                 ))
                 continue
             }
-            guard let expectedOriginal = numberValue(originalValue),
-                  let previewAlpha = numberValue(previewValue),
-                  (0.0...1.0).contains(previewAlpha)
-            else {
+            guard validValue(originalValue, for: property),
+                  validValue(previewValue, for: property) else {
                 rejected.append(RuntimeTuningRejection(
                     changeID: changeID,
                     runtimeTarget: runtimeTarget,
                     reasonCode: "unsupported_value",
-                    message: "Alpha values must be ratio numbers between zero and one."
+                    message: "The PropertyValue does not match the selected tuning property."
                 ))
                 continue
             }
-            guard let currentAlpha = await controller.currentAlpha(stableID: stableID) else {
+            guard let currentValue = await controller.currentTuningValue(
+                stableID: stableID,
+                property: property
+            ) else {
                 rejected.append(RuntimeTuningRejection(
                     changeID: changeID,
                     runtimeTarget: runtimeTarget,
@@ -136,7 +200,7 @@ enum RuntimeTuningProcessor {
                 ))
                 continue
             }
-            guard abs(currentAlpha - expectedOriginal) <= alphaTolerance else {
+            guard valuesMatch(currentValue, originalValue, property: property) else {
                 rejected.append(RuntimeTuningRejection(
                     changeID: changeID,
                     runtimeTarget: runtimeTarget,
@@ -145,10 +209,23 @@ enum RuntimeTuningProcessor {
                 ))
                 continue
             }
-            await controller.setAlpha(stableID: stableID, value: previewAlpha)
+            guard await controller.setTuningValue(
+                stableID: stableID,
+                property: property,
+                value: previewValue
+            ) else {
+                rejected.append(RuntimeTuningRejection(
+                    changeID: changeID,
+                    runtimeTarget: runtimeTarget,
+                    reasonCode: "target_not_found",
+                    message: "The live view vanished or stopped supporting the property before it applied."
+                ))
+                continue
+            }
             restoreEntries.append(RuntimeTuningRestoreEntry(
                 stableID: stableID,
-                originalAlpha: currentAlpha
+                property: property,
+                originalValue: currentValue
             ))
             applied.append(.object([
                 "tuning_change_id": .string(changeID),
@@ -163,7 +240,11 @@ enum RuntimeTuningProcessor {
         // change fails; a partially applied preview never survives silently.
         if !rejected.isEmpty && !restoreEntries.isEmpty {
             for entry in restoreEntries.reversed() {
-                await controller.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+                _ = await controller.setTuningValue(
+                    stableID: entry.stableID,
+                    property: entry.property,
+                    value: entry.originalValue
+                )
             }
             for change in applied {
                 guard case let .object(appliedObject) = change,
@@ -238,7 +319,7 @@ enum RuntimeTuningProcessor {
         return terminal
     }
 
-    private static func numberValue(_ value: JSONValue) -> Double? {
+    static func numberValue(_ value: JSONValue) -> Double? {
         guard case let .object(propertyValue) = value,
               case let .string(kind)? = propertyValue["kind"],
               kind == "number"
@@ -252,6 +333,85 @@ enum RuntimeTuningProcessor {
             return Double(integer)
         default:
             return nil
+        }
+    }
+
+    private static func validValue(_ value: JSONValue, for property: String) -> Bool {
+        guard case let .object(object) = value, case let .string(kind)? = object["kind"] else {
+            return false
+        }
+        switch property {
+        case "alpha":
+            guard kind == "number", object["unit"] == .string("ratio"),
+                  let number = numberValue(value) else { return false }
+            return (0...1).contains(number)
+        case "spacing", "corner_radius":
+            guard kind == "number", object["unit"] == .string("logical_point"),
+                  let number = numberValue(value) else { return false }
+            return number >= 0
+        case "foreground_color", "background_color":
+            return kind == "color_rgba" && colorComponents(value) != nil
+        case "font":
+            guard kind == "font", case let .object(font)? = object["value"],
+                  case let .string(family)? = font["family"], !family.isEmpty,
+                  let size = rawNumber(font["size"]), size > 0,
+                  let weight = rawNumber(font["weight"]), (1...1000).contains(weight),
+                  case let .string(style)? = font["style"]
+            else { return false }
+            return style == "normal" || style == "italic"
+        case "content_insets":
+            guard kind == "insets", case let .object(insets)? = object["value"] else {
+                return false
+            }
+            return ["top", "leading", "bottom", "trailing"].allSatisfy {
+                rawNumber(insets[$0]) != nil
+            }
+        default:
+            return false
+        }
+    }
+
+    private static func valuesMatch(
+        _ current: JSONValue,
+        _ expected: JSONValue,
+        property: String
+    ) -> Bool {
+        if current == expected { return true }
+        switch property {
+        case "alpha", "spacing", "corner_radius":
+            guard let left = numberValue(current), let right = numberValue(expected) else {
+                return false
+            }
+            return abs(left - right) <= 0.001
+        case "foreground_color", "background_color":
+            guard let left = colorComponents(current), let right = colorComponents(expected) else {
+                return false
+            }
+            return zip(left, right).allSatisfy { pair in
+                abs(pair.0 - pair.1) <= 0.002
+            }
+        default:
+            return false
+        }
+    }
+
+    private static func colorComponents(_ value: JSONValue) -> [Double]? {
+        guard case let .object(propertyValue) = value,
+              case let .object(color)? = propertyValue["value"] else { return nil }
+        let components = ["red", "green", "blue", "alpha"].compactMap {
+            rawNumber(color[$0])
+        }
+        guard components.count == 4, components.allSatisfy({ (0...1).contains($0) }) else {
+            return nil
+        }
+        return components
+    }
+
+    private static func rawNumber(_ value: JSONValue?) -> Double? {
+        switch value {
+        case let .number(number): number
+        case let .integer(integer): Double(integer)
+        default: nil
         }
     }
 

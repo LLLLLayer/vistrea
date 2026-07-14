@@ -49,6 +49,7 @@ let package = Package(
             name: "VistreaRuntimeUIKitConnection",
             dependencies: [
                 "VistreaRuntimeConnection",
+                "VistreaRuntimeModels",
                 "VistreaRuntimeUIKit",
             ]
         ),

@@ -795,7 +795,11 @@ public actor LoopbackRuntimeClient {
             return
         }
         for entry in entries.reversed() {
-            await tuningController.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+            _ = await tuningController.setTuningValue(
+                stableID: entry.stableID,
+                property: entry.property,
+                value: entry.originalValue
+            )
         }
     }
 
@@ -1062,9 +1066,10 @@ public actor LoopbackRuntimeClient {
             // captured originals are written last and win.
             Task {
                 for entry in restorePlan {
-                    await tuningController.setAlpha(
+                    _ = await tuningController.setTuningValue(
                         stableID: entry.stableID,
-                        value: entry.originalAlpha
+                        property: entry.property,
+                        value: entry.originalValue
                     )
                 }
             }

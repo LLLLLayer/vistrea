@@ -613,7 +613,7 @@ extension RuntimeConnectionTests {
             "demo.home.title": 0.4,
         ])
         for entry in plan {
-            await controller.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+            await controller.setAlpha(stableID: entry.stableID, value: entry.originalAlpha ?? 0)
         }
         let catalogAlpha = await controller.alpha("demo.home.open_catalog")
         let titleAlpha = await controller.alpha("demo.home.title")
