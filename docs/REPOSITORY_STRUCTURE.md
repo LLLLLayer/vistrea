@@ -21,7 +21,8 @@ The repository structure must ensure:
 vistrea/
 ├── .github/
 │   └── workflows/
-│       └── protocol-contracts.yml
+│       ├── protocol-contracts.yml
+│       └── studio-macos-release.yml # tag packaging, notarization, Release, and update feed
 ├── .gitignore
 ├── .node-version
 ├── AGENTS.md
@@ -38,8 +39,10 @@ vistrea/
 │   │   ├── local-host.ts
 │   │   └── serve.ts
 │   └── studio-macos/            # native SwiftUI Studio workspace
+│       ├── Package.resolved      # pinned remote release dependency identity
 │       ├── Package.swift
-│       ├── Sources/             # feature views and model workflows split by domain
+│       ├── Resources/            # generated app-bundle metadata template
+│       ├── Sources/             # feature views, Host lifecycle, and model workflows split by domain
 │       ├── Tests/
 │       └── README.md
 ├── protocol/
@@ -199,11 +202,12 @@ vistrea/
 │       └── android-real-automation-loop.test.ts
 ├── tools/
 │   ├── README.md
-│   └── protocol/
-│       ├── phase0a2-semantic-checks.mjs
-│       ├── semantic-checks.mjs
-│       ├── strict-json.mjs
-│       └── validate-fixtures.mjs
+│   ├── protocol/
+│   │   ├── phase0a2-semantic-checks.mjs
+│   │   ├── semantic-checks.mjs
+│   │   ├── strict-json.mjs
+│   │   └── validate-fixtures.mjs
+│   └── release/                  # Studio Host runtime, bundle, appcast, and release-site tooling
 └── docs/
     ├── README.md
     ├── PROJECT_OVERVIEW.md
@@ -239,7 +243,11 @@ vistrea/
     │   ├── 0004-host-data-and-sqlite-migrations.md
     │   ├── 0005-ios-first-vertical-loop.md
     │   ├── 0006-vistrea-pack-container.md
-    │   └── 0007-screen-state-identity-and-device-automation.md
+    │   ├── 0007-screen-state-identity-and-device-automation.md
+    │   ├── 0008-cli-only-agent-adapter.md
+    │   └── 0009-direct-macos-distribution.md
+    ├── release/
+    │   └── STUDIO_MACOS_RELEASE.md
     └── roadmap/
         └── README.md
 ```
@@ -359,7 +367,7 @@ The first implementation keeps the language-neutral contracts while using toolch
 - `adb` and WebDriverAgent device automation providers behind one Engine port;
 - a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
-Future SwiftUI-native capture, Compose rendering-side visual adapters, physical-device tunneling, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future SwiftUI-native capture, Compose rendering-side visual adapters, physical-device tunneling, credentialed release acceptance, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

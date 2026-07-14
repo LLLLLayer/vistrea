@@ -26,6 +26,7 @@
     "data/**/*.ts",
     "engine/**/*.ts",
     "integrations/**/*.ts",
+    "services/**/*.ts",
     "tests/**/*.ts",
     "tools/**/*.ts"
   ],

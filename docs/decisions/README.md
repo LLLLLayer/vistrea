@@ -11,3 +11,4 @@ Record schema format, transport, storage, implementation language, state dedupli
 - `0006-vistrea-pack-container.md`: accepted `.vistrea-pack` version 1 container framing and import verification order
 - `0007-screen-state-identity-and-device-automation.md`: accepted the `structural-v1` Screen State identity, single coherent materialized graph with frozen version tags, and the adb/WebDriverAgent provider pair
 - `0008-cli-only-agent-adapter.md`: retired the stdio MCP server; the strict JSON CLI with `VISTREA_CLI_TOOLSETS` focus is the single agent adapter
+- `0009-direct-macos-distribution.md`: accepted Developer ID, notarized GitHub Releases, and signed Sparkle updates for direct Studio distribution

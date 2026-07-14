@@ -13,6 +13,7 @@
 - `architecture/`: additional cross-module architecture, security, performance, and deployment documents.
 - `interfaces/`: common contracts, Runtime SDK connection, automation, Engine, Data, Agent, and Hub interfaces.
 - `product/STUDIO_INTERACTIONS.md`: Studio information architecture and primary user workflows.
+- `release/STUDIO_MACOS_RELEASE.md`: Universal Studio packaging, signing, notarization, Sparkle, and GitHub publication.
 - `protocol/`: Runtime Snapshot semantics, compatibility rules, and executable Data model coverage.
 - `decisions/`: Architecture Decision Records for replaceable engineering choices.
 - `roadmap/`: milestones and acceptance criteria.

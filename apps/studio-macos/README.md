@@ -10,6 +10,7 @@ The Inspector layout is responsive. Every structural width lives in `StudioLayou
 
 It currently provides:
 
+- packaged-app ownership of an embedded loopback Host and a local Workspace under `~/Library/Application Support/Vistrea Studio/Workspaces/Default.vistrea`, with **File > Open Workspace…** and **Reveal Workspace in Finder**; source-built `swift run` keeps the canonical fixture mode unless explicit external Host credentials are supplied;
 - independent Host and Runtime connection status in the context bar;
 - an Application Version + Build scope picker deriving its choices from the listed Snapshot runtime contexts; selecting a scope sends all four scope fields to the Host, filters the Canvas through its build projection and the Evidence library locally, and a refresh never yanks a still-available scope selection;
 - a demoted Snapshot Evidence library (per scope) as a secondary navigation section;
@@ -38,7 +39,36 @@ It currently provides:
 
 Writes that the Host contract stamps with the Studio actor `{"kind": "human", "id": "studio"}` are: Review Issue transitions (`changed_by`), Wiki node creation (`created_by`), Wiki node revisions (`updated_by`), Wiki links (`created_by`), Tuning Patch creation (`created_by`), Screen State merges (`merged_by`), splits (`split_by`), and annotations (`annotated_by`), and design comparisons (`completed_by`). Capture, tuning apply and revert, and exploration run and cancel carry no actor field in the current Host contract.
 
-The presentation layer depends on the `HostClient` abstraction. It does not access SQLite, Workspace paths, Object Store paths, or Runtime transports directly. Reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
+The presentation layer depends on the `HostClient` abstraction. It does not access SQLite, Object Store paths, or Runtime transports directly. The application composition root alone selects the user-visible Workspace folder and owns the embedded Host process; reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
+
+## Package and update
+
+The SwiftPM executable is the development source of truth. The release helper
+builds both supported architectures, assembles `Vistrea Studio.app`, embeds
+architecture-matched pinned Node.js 22.14.0 runtimes, the emitted production
+Host, exact protocol and migration resources, and the exact Sparkle dependency,
+then signs nested code in dependency order and produces ZIP and DMG archives:
+
+```bash
+pnpm build:host
+tools/release/package-studio-macos.sh \
+  --version 0.1.0 \
+  --build-number 0.1.0 \
+  --output-dir /tmp/vistrea-studio-release
+```
+
+Packaging starts the embedded Host against a temporary Workspace, performs an
+authenticated status request, and repeats that probe after signing to verify
+clean descriptor and lock removal. That local path is ad-hoc signed, uses a
+local-only library-validation exemption for its Team-ID-less components, and
+intentionally has no update feed. A
+`studio-vX.Y.Z` tag drives the public GitHub workflow, which fails closed unless
+Developer ID, notarization, and Sparkle signing credentials are configured. A
+packaged public app exposes **Vistrea Studio > Check for Updates…**; `swift run`
+does not create an updater because it has no release Info.plist metadata.
+
+See [the macOS release runbook](../../docs/release/STUDIO_MACOS_RELEASE.md) and
+[ADR-0009](../../docs/decisions/0009-direct-macos-distribution.md).
 
 ## Run with the canonical fixture
 
