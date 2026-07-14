@@ -23,6 +23,7 @@ const wrongAuthorizationToken = "vistrea-loopback-integration-token-9999";
 const androidHome =
   process.env["ANDROID_HOME"] ?? path.join(process.env["HOME"] ?? "", "Library/Android/sdk");
 const kotlinRuntimeAvailable =
+  process.env["VISTREA_SKIP_ANDROID_RUNTIME_INTEROP"] !== "1" &&
   existsSync(gradleWrapper) &&
   existsSync(androidHome) &&
   spawnSync("java", ["-version"], { stdio: "ignore" }).status === 0;

@@ -54,6 +54,7 @@ test("the pull request CI matrix covers every supported implementation surface",
   }
 
   assert.match(workflow, /java-version: "17"/u);
+  assert.match(workflow, /VISTREA_SKIP_ANDROID_RUNTIME_INTEROP: "1"/u);
   assert.match(workflow, /git status --short --untracked-files=all/u);
   assert.doesNotMatch(workflow, /connectedDebugAndroidTest/u);
   assert.doesNotMatch(workflow, /test:e2e:/u);

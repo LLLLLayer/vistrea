@@ -30,6 +30,11 @@ Global options:
 
 The implemented command surface — Workspace status, Snapshot capture and inspection, Runtime events, design review, tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — is maintained command-for-command in `integrations/cli/README.md`. Reserved future command families follow the same `<resource> <verb>` shape:
 
+Commands with structured `--json <command>` input also accept
+`--json-file <path>` for payloads that exceed operating-system argument
+limits. File input is strict UTF-8, capped at 2 MiB, and never deleted or
+modified by the CLI. Output remains exactly one strict JSON envelope.
+
 ```text
 vistrea workspace create|open|health|gc
 vistrea device list|connect|disconnect|launch|terminate

@@ -608,20 +608,22 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   assert.equal(noteCreate.exitCode, 0, noteCreate.stdout);
   const note = parseCliEnvelope(noteCreate.stdout).data as JsonObject;
 
-  // Long-form documents (well past the 64 KiB adapter envelope) persist.
+  // Long-form documents (well past Linux's per-argument limit) use file-backed
+  // JSON input and persist without weakening the strict one-envelope output.
   const longMarkdown = `# Long document\n\n${"vistrea knowledge line\n".repeat(6000)}`;
+  const longCommandPath = path.join(workspaceRoot, "long-wiki-command.json");
+  await fs.writeFile(
+    longCommandPath,
+    JSON.stringify({
+      kind: "concept",
+      title: "Long-form knowledge",
+      markdown: longMarkdown,
+      created_by: JSON.parse(actorJson),
+    }),
+    "utf8",
+  );
   const longCreate = await runCli(
-    [
-      "wiki",
-      "create",
-      "--json",
-      JSON.stringify({
-        kind: "concept",
-        title: "Long-form knowledge",
-        markdown: longMarkdown,
-        created_by: JSON.parse(actorJson),
-      }),
-    ],
+    ["wiki", "create", "--json-file", longCommandPath],
     environment,
   );
   assert.equal(longCreate.exitCode, 0, longCreate.stdout);
@@ -635,6 +637,15 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     "content"
   ] as JsonObject;
   assert.equal((longContent["text"] as string).length, longMarkdown.length);
+  const missingJsonFile = await runCli(
+    ["wiki", "create", "--json-file", path.join(workspaceRoot, "missing.json")],
+    environment,
+  );
+  assert.equal(missingJsonFile.exitCode, 2);
+  assert.equal(
+    parseCliEnvelope(missingJsonFile.stdout).error?.["message"],
+    "The JSON input file could not be read.",
+  );
   const wikiLink = await runCli(
     [
       "wiki",

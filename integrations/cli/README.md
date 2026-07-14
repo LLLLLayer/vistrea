@@ -74,6 +74,11 @@ vistrea explore cancel <operation_id>
 
 Implemented global options are `--format json`, `--request-id`, `--trace-id`, `--deadline <Nms|Ns|Nm>`, and `--non-interactive`. Other documented command families remain unavailable until their Engine operations exist.
 
+Every implemented command that accepts `--json <command>` also accepts
+`--json-file <path>`. File-backed input is strict UTF-8, is capped at 2 MiB,
+and avoids platform command-line argument limits for long Wiki content. The
+caller owns the input file; Vistrea neither modifies nor removes it.
+
 The success envelope is stable:
 
 ```json

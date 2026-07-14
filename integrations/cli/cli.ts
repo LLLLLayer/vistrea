@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { TextDecoder } from "node:util";
 
 import { runIosDriverCommand } from "./ios-driver.js";
 import {
@@ -12,6 +13,7 @@ import {
 } from "../shared/index.js";
 
 const MAXIMUM_DEADLINE_MILLISECONDS = 300_000;
+const MAXIMUM_JSON_FILE_BYTES = 2 * 1024 * 1024;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
 
 /**
@@ -106,7 +108,11 @@ export async function runVistreaCli(
   };
   try {
     const enabledGroups = enabledCommandGroups(runtime.environment["VISTREA_CLI_TOOLSETS"]);
-    const invocation = parseArguments(arguments_, context, enabledGroups);
+    const invocation = parseArguments(
+      await resolveJsonFileArguments(arguments_),
+      context,
+      enabledGroups,
+    );
     if (invocation.help === true) {
       writeEnvelope(runtime, context, {
         commands: [
@@ -1147,6 +1153,51 @@ function parseJsonOption(arguments_: readonly string[]): JsonObject {
     throw invalidArguments();
   }
   return parsed as JsonObject;
+}
+
+async function resolveJsonFileArguments(
+  arguments_: readonly string[],
+): Promise<readonly string[]> {
+  const resolved: string[] = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index] as string;
+    const previous = arguments_[index - 1];
+    if (argument !== "--json-file" || previous?.startsWith("--") === true) {
+      resolved.push(argument);
+      continue;
+    }
+    const file = arguments_[index + 1];
+    if (file === undefined || file.startsWith("--")) {
+      throw invalidArguments();
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await fs.readFile(file);
+    } catch {
+      throw new HostClientError(
+        "invalid_argument",
+        "The JSON input file could not be read.",
+      );
+    }
+    if (bytes.byteLength > MAXIMUM_JSON_FILE_BYTES) {
+      throw new HostClientError(
+        "invalid_argument",
+        `The JSON input file exceeds the ${String(MAXIMUM_JSON_FILE_BYTES)}-byte limit.`,
+      );
+    }
+    let source: string;
+    try {
+      source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new HostClientError(
+        "invalid_argument",
+        "The JSON input file must contain valid UTF-8.",
+      );
+    }
+    resolved.push("--json", source);
+    index += 1;
+  }
+  return resolved;
 }
 
 function uploadAssetInvocation(
