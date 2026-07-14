@@ -435,6 +435,20 @@ test("Host Local API drives the design review flow from asset to verified issue"
   const node = tree.payload.inline_nodes.find((candidate) => candidate.stable_id !== undefined);
   assert.ok(node !== undefined);
 
+  const baselineResponse = await authorizedFetch(api, "/v1/design-baselines", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      snapshot_id: snapshot.snapshot_id,
+      name: "Approved captured build",
+      created_by: actor,
+    }),
+  });
+  assert.equal(baselineResponse.status, 201);
+  const baseline = (await baselineResponse.json()) as { kind: string; source: { id: string } };
+  assert.equal(baseline.kind, "approved_build");
+  assert.equal(baseline.source.id, snapshot.snapshot_id);
+
   const assetUpload = await authorizedFetch(api, "/v1/design-assets", {
     method: "POST",
     headers: { "content-type": "image/png", "x-vistrea-logical-name": "home-baseline.png" },
@@ -488,7 +502,7 @@ test("Host Local API drives the design review flow from asset to verified issue"
   assert.equal(comparisonResponse.status, 201);
   const comparison = (await comparisonResponse.json()) as {
     comparison_id: string;
-    differences: readonly { category: string; delta?: number }[];
+    differences: readonly { difference_id: string; category: string; delta?: number }[];
   };
   assert.equal(comparison.differences.length, 1);
   assert.equal(comparison.differences[0]?.category, "frame");
@@ -498,25 +512,18 @@ test("Host Local API drives the design review flow from asset to verified issue"
   );
   assert.equal(comparisonReload.status, 200);
 
-  const issueResponse = await authorizedFetch(api, "/v1/review-issues", {
+  const issueResponse = await authorizedFetch(
+    api,
+    `/v1/design-comparisons/${encodeURIComponent(comparison.comparison_id)}/issues`,
+    {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      design_reference_id: reference.design_reference_id,
-      comparison_id: comparison.comparison_id,
-      runtime_target: {
-        snapshot_id: snapshot.snapshot_id,
-        tree_id: tree.tree_id,
-        node_id: node.node_id,
-      },
-      title: "Root container offset from baseline",
-      category: "frame",
-      severity: "minor",
-      expected: { kind: "number", value: 10, unit: "logical_point", extensions: {} },
-      actual: { kind: "number", value: 0, unit: "logical_point", extensions: {} },
+      difference_id: comparison.differences[0]?.difference_id,
       created_by: actor,
     }),
-  });
+  },
+  );
   assert.equal(issueResponse.status, 201);
   const issue = (await issueResponse.json()) as { issue_id: string; revision: number };
 
@@ -568,6 +575,31 @@ test("Host Local API drives the design review flow from asset to verified issue"
     page.items.map((item) => item.issue_id),
     [issue.issue_id],
   );
+  const stateObservation = await authorizedFetch(api, "/v1/screen-graph/state-observations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ snapshot_id: snapshot.snapshot_id }),
+  });
+  assert.equal(stateObservation.status, 201);
+  const stateObservationBody = (await stateObservation.json()) as {
+    screen_state: { screen_state_id: string };
+  };
+  const stateScopedIssues = await authorizedFetch(
+    api,
+    `/v1/review-issues?screen_state_id=${encodeURIComponent(
+      stateObservationBody.screen_state.screen_state_id,
+    )}`,
+  );
+  assert.equal(stateScopedIssues.status, 200);
+  const stateScopedPage = (await stateScopedIssues.json()) as {
+    items: readonly { issue_id: string }[];
+  };
+  assert.deepEqual(stateScopedPage.items.map((item) => item.issue_id), [issue.issue_id]);
+  const invalidStateScope = await authorizedFetch(
+    api,
+    "/v1/review-issues?screen_state_id=not-a-state",
+  );
+  assert.equal(invalidStateScope.status, 400);
   const reloaded = await authorizedFetch(
     api,
     `/v1/review-issues/${encodeURIComponent(issue.issue_id)}`,
@@ -624,7 +656,12 @@ test("Host Local API records deduplicated Screen States, Transitions, and paths"
   assert.equal(capture.status, 201);
   const homeSnapshot = (await capture.json()) as Record<string, unknown> & {
     snapshot_id: string;
-    runtime_context: { project_id: string; application_id: string };
+    runtime_context: {
+      project_id: string;
+      application_id: string;
+      build_id: string;
+      application_version: string;
+    };
   };
   const detailSnapshot = structuredClone(homeSnapshot) as unknown as Record<string, unknown> & {
     snapshot_id: string;
@@ -745,9 +782,43 @@ test("Host Local API records deduplicated Screen States, Transitions, and paths"
   // endpoint states (two more state observations) and its own evidence.
   assert.equal(graph.observations.length, 5);
 
+  const scopedGraphResponse = await authorizedFetch(
+    api,
+    `/v1/screen-graph?project_id=${encodeURIComponent(homeSnapshot.runtime_context.project_id)}` +
+      `&application_id=${encodeURIComponent(homeSnapshot.runtime_context.application_id)}` +
+      `&build_id=${encodeURIComponent(homeSnapshot.runtime_context.build_id)}` +
+      `&application_version=${encodeURIComponent(homeSnapshot.runtime_context.application_version)}`,
+  );
+  assert.equal(scopedGraphResponse.status, 200);
+  const scopedGraph = (await scopedGraphResponse.json()) as {
+    extensions: {
+      "vistrea.build_scope": {
+        screen_state_ids: readonly string[];
+        transition_ids: readonly string[];
+      };
+    };
+  };
+  assert.deepEqual(scopedGraph.extensions["vistrea.build_scope"].screen_state_ids, [
+    transitionBody.source_state_id,
+    transitionBody.target_state_id,
+  ]);
+  assert.deepEqual(scopedGraph.extensions["vistrea.build_scope"].transition_ids, [
+    transitionBody.transition.transition_id,
+  ]);
+
+  const incompleteScope = await authorizedFetch(
+    api,
+    `/v1/screen-graph?project_id=${encodeURIComponent(homeSnapshot.runtime_context.project_id)}` +
+      `&application_id=${encodeURIComponent(homeSnapshot.runtime_context.application_id)}` +
+      `&build_id=${encodeURIComponent(homeSnapshot.runtime_context.build_id)}`,
+  );
+  assert.equal(incompleteScope.status, 400);
+
   const stateResponse = await authorizedFetch(
     api,
-    `/v1/screen-states/${encodeURIComponent(transitionBody.target_state_id)}`,
+    `/v1/screen-states/${encodeURIComponent(transitionBody.target_state_id)}` +
+      `?build_id=${encodeURIComponent(homeSnapshot.runtime_context.build_id)}` +
+      `&application_version=${encodeURIComponent(homeSnapshot.runtime_context.application_version)}`,
   );
   assert.equal(stateResponse.status, 200);
 
@@ -810,6 +881,177 @@ test("Host Local API records deduplicated Screen States, Transitions, and paths"
     ((await mistypedRevision.json()) as { error: { message: string } }).error.message,
     /expected_graph_revision command field must be an integer/,
   );
+});
+
+test("Host Local API publishes and exports a Knowledge Collection", async (t) => {
+  const validator = await validatorPromise;
+  const fixture = await captureFixture(validator);
+  const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-collection-");
+  const workspace = new MemoryDataStore({ validator });
+  const objects = await FileObjectStore.open({ workspaceRoot });
+  const api = await startHostLocalApi({
+    host: "127.0.0.1",
+    runtime: new FixtureRuntimeCapturePort({
+      snapshot: fixture.snapshot,
+      objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+    }),
+    workspace,
+    objects,
+    validator,
+  });
+  t.after(() => api.close());
+  const actor = { kind: "human", id: "design-owner", extensions: {} };
+  const refName = "teams/design/runtime-knowledge";
+  const seed = workspace.beginUnitOfWork("write");
+  const base = seed.versions.createCommit({
+    protocol_version: { major: 1, minor: 0 },
+    parents: [],
+    created_at: "2026-07-14T08:00:00.000Z",
+    author: actor,
+    message: "Create the Knowledge Collection line.",
+    roots: {},
+    object_hashes: [],
+    extensions: {},
+  } as never);
+  seed.versions.updateRef(refName, base.commit_id, { mode: "must_not_exist" } as never);
+  seed.commit();
+
+  const createNode = await authorizedFetch(api, "/v1/wiki/nodes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "screen",
+      title: "Checkout confirmation",
+      markdown: "# Confirmation\n\nThe success banner auto-dismisses.",
+      created_by: actor,
+    }),
+  });
+  assert.equal(createNode.status, 201);
+  const draftNode = (await createNode.json()) as { wiki_node_id: string; revision: number };
+  const publishNode = await authorizedFetch(
+    api,
+    `/v1/wiki/nodes/${encodeURIComponent(draftNode.wiki_node_id)}/revisions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: draftNode.revision,
+        to_status: "published",
+        updated_by: actor,
+      }),
+    },
+  );
+  assert.equal(publishNode.status, 200);
+
+  const createCollection = await authorizedFetch(api, "/v1/knowledge-collections", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "Checkout runtime knowledge",
+      node_ids: [draftNode.wiki_node_id],
+      entry_node_ids: [draftNode.wiki_node_id],
+      created_by: actor,
+    }),
+  });
+  assert.equal(createCollection.status, 201);
+  const draftCollection = (await createCollection.json()) as {
+    collection_id: string;
+    revision: number;
+  };
+
+  const list = await authorizedFetch(
+    api,
+    "/v1/knowledge-collections?publication_states=draft&limit=1",
+  );
+  assert.equal(list.status, 200);
+  const listBody = (await list.json()) as { items: readonly { collection_id: string }[] };
+  assert.equal(listBody.items[0]?.collection_id, draftCollection.collection_id);
+  const get = await authorizedFetch(
+    api,
+    `/v1/knowledge-collections/${encodeURIComponent(draftCollection.collection_id)}`,
+  );
+  assert.equal(get.status, 200);
+
+  const revise = await authorizedFetch(
+    api,
+    `/v1/knowledge-collections/${encodeURIComponent(draftCollection.collection_id)}/revisions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: draftCollection.revision,
+        summary: "Approved runtime behavior.",
+        updated_by: actor,
+      }),
+    },
+  );
+  assert.equal(revise.status, 200);
+  const revised = (await revise.json()) as { revision: number };
+
+  const publish = await authorizedFetch(
+    api,
+    `/v1/knowledge-collections/${encodeURIComponent(draftCollection.collection_id)}/publication`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: revised.revision,
+        base_commit_id: base.commit_id,
+        target_ref_name: refName,
+        ref_precondition: { mode: "must_match", expected_commit_id: base.commit_id },
+        published_by: actor,
+      }),
+    },
+  );
+  assert.equal(publish.status, 201);
+  const publication = (await publish.json()) as {
+    collection: { publication: { state: string; commit_id: string } };
+    commit: { commit_id: string };
+  };
+  assert.equal(publication.collection.publication.state, "published");
+  assert.equal(publication.collection.publication.commit_id, publication.commit.commit_id);
+
+  const exportResponse = await authorizedFetch(
+    api,
+    `/v1/knowledge-collections/${encodeURIComponent(draftCollection.collection_id)}/exports`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ formats: ["markdown", "html"] }),
+    },
+  );
+  assert.equal(exportResponse.status, 201);
+  const exported = (await exportResponse.json()) as {
+    collection_id: string;
+    objects: readonly { hash: string; media_type: string }[];
+  };
+  assert.equal(exported.collection_id, draftCollection.collection_id);
+  assert.deepEqual(exported.objects.map((object) => object.media_type), [
+    "text/markdown",
+    "text/html",
+  ]);
+  const markdown = await authorizedFetch(
+    api,
+    `/v1/objects/${encodeURIComponent(exported.objects[0]?.hash as string)}`,
+  );
+  assert.match(await markdown.text(), /Checkout runtime knowledge/);
+
+  const repeat = await authorizedFetch(
+    api,
+    `/v1/knowledge-collections/${encodeURIComponent(draftCollection.collection_id)}/publication`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: revised.revision,
+        base_commit_id: base.commit_id,
+        target_ref_name: refName,
+        ref_precondition: { mode: "must_match", expected_commit_id: base.commit_id },
+        published_by: actor,
+      }),
+    },
+  );
+  assert.equal(repeat.status, 409);
 });
 
 test("Host Local API moves a portable pack between two Workspaces", async (t) => {

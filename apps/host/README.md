@@ -30,13 +30,14 @@ The remaining implemented route families return canonical domain resources
 
 | Family | Routes |
 |---|---|
-| Design assets and references | `POST /v1/design-assets`, `POST /v1/design-references`, `GET /v1/design-references/<id>`, `POST /v1/design-mappings`, `POST /v1/design-comparisons`, `GET /v1/design-comparisons/<id>` |
-| Review issues | `POST /v1/review-issues`, `GET /v1/review-issues`, `GET /v1/review-issues/<id>`, `POST /v1/review-issues/<id>/transitions`, `POST /v1/review-issues/<id>/verifications` |
-| Protected tuning | `POST /v1/tuning-patches`, `GET /v1/tuning-patches/<id>`, `POST /v1/tuning-applications`, `GET /v1/tuning-applications/active`, `GET /v1/tuning-applications/<id>`, `POST /v1/tuning-applications/<id>/revert` |
+| Design assets and references | `POST /v1/design-assets`, `POST /v1/design-references`, `POST /v1/design-baselines`, `GET /v1/design-references/<id>`, `POST /v1/design-mappings`, `POST /v1/design-comparisons`, `GET /v1/design-comparisons/<id>` |
+| Review issues | `POST /v1/review-issues`, `POST /v1/design-comparisons/<id>/issues`, `GET /v1/review-issues` (`screen_state_id` optionally scopes runtime targets), `GET /v1/review-issues/<id>`, `POST /v1/review-issues/<id>/transitions`, `POST /v1/review-issues/<id>/verifications`, `POST /v1/review-issues/<id>/recapture-verifications` |
+| Protected tuning | `POST /v1/tuning-patches`, `GET /v1/tuning-patches/<id>`, `GET /v1/tuning-patches/<id>/source-suggestions`, `POST /v1/tuning-applications`, `GET /v1/tuning-applications/active`, `GET /v1/tuning-applications/<id>`, `POST /v1/tuning-applications/<id>/revert` |
 | Identity curation | `POST /v1/screen-graph/state-merges`, `POST /v1/screen-graph/state-splits` — manual merge/split with expected graph revision, recorded as StateIdentityDecisions |
 | Exploration Operations | `POST /v1/exploration/operations`, `GET /v1/exploration/operations/<id>`, `POST /v1/exploration/operations/<id>/cancel` — require a Host started with a configured automation provider, otherwise they fail closed as `unsupported` |
-| Screen graph | `POST /v1/screen-graph/state-observations`, `POST /v1/screen-graph/transition-observations`, `GET /v1/screen-graph`, `GET /v1/screen-graph/paths`, `GET /v1/screen-states/<id>` |
+| Screen graph | `POST /v1/screen-graph/state-observations`, `POST /v1/screen-graph/transition-observations`, `GET /v1/screen-graph` (optional paired `build_id` + `application_version` view), `GET /v1/screen-graph/paths`, `GET /v1/screen-states/<id>` (the same optional build scope selects its canonical Snapshot) |
 | Deep Wiki | `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes`, `GET /v1/wiki/nodes/<id>`, `POST /v1/wiki/nodes/<id>/revisions`, `GET /v1/wiki/nodes/<id>/backlinks`, `POST /v1/wiki/links`, `POST /v1/wiki/links/<id>/unlink`, `GET /v1/wiki/related` |
+| Knowledge Collections | `POST /v1/knowledge-collections`, `GET /v1/knowledge-collections`, `GET /v1/knowledge-collections/<id>`, `POST /v1/knowledge-collections/<id>/revisions`, `POST /v1/knowledge-collections/<id>/publication`, `POST /v1/knowledge-collections/<id>/exports` |
 | Validation and build diff | `POST /v1/validation/snapshot-runs`, `POST /v1/validation/graph-runs`, `GET /v1/validation/runs/<id>`, `GET /v1/validation/findings`, `GET /v1/validation/findings/<id>`, `POST /v1/validation/findings/<id>/suppress`, `POST /v1/validation/build-diffs`, `GET /v1/validation/build-diffs/<id>` |
 | Portable exchange | `POST /v1/exchange/exports`, `POST /v1/exchange/imports` |
 
@@ -143,3 +144,5 @@ node .build/typescript/apps/host/serve.js --workspace <abs-path> \
 node .build/typescript/apps/host/serve.js --workspace <abs-path> \
   --automation wda --wda-url http://127.0.0.1:8100
 ```
+
+An exploration run recovers a lost Runtime capture with at most two relaunch-and-restore attempts by default. The caller may set `maximum_recovery_attempts` from zero through five and may provide `application_id` when the Snapshot's Runtime identity is not the platform launch identity. Relaunch and stable-ID path replay consume the same `maximum_actions` budget and are returned as explicit recovery evidence.

@@ -6,6 +6,13 @@ import {
   type JsonObject,
   type JsonValue,
 } from "./strict-json.js";
+import {
+  IMPLEMENTED_HOST_OPERATIONS,
+  type ImplementedHostOperation,
+} from "./host-operation-manifest.js";
+
+export { IMPLEMENTED_HOST_OPERATIONS } from "./host-operation-manifest.js";
+export type { ImplementedHostOperation } from "./host-operation-manifest.js";
 
 const DEFAULT_TIMEOUT_MILLISECONDS = 30_000;
 const MAXIMUM_TIMEOUT_MILLISECONDS = 300_000;
@@ -32,6 +39,8 @@ const MAPPING_ID_PATTERN =
   /^mapping_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const COMPARISON_ID_PATTERN =
   /^comparison_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DIFFERENCE_ID_PATTERN =
+  /^difference_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ISSUE_ID_PATTERN =
   /^issue_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const VERIFICATION_ID_PATTERN =
@@ -59,6 +68,8 @@ const WIKI_NODE_ID_PATTERN =
   /^wiki_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const WIKI_LINK_ID_PATTERN =
   /^wikilink_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const KNOWLEDGE_COLLECTION_ID_PATTERN =
+  /^collection_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const RESOURCE_KIND_PATTERN = /^[a-z][a-z0-9._-]*$/;
 const VALIDATION_RUN_ID_PATTERN =
   /^validationrun_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -82,66 +93,6 @@ export const HOST_LOCAL_API_ENVIRONMENT = {
   timeoutMilliseconds: "VISTREA_HOST_TIMEOUT_MS",
   maximumResponseBytes: "VISTREA_HOST_MAX_RESPONSE_BYTES",
 } as const;
-
-export const IMPLEMENTED_HOST_OPERATIONS = [
-  "GetWorkspaceStatus",
-  "CaptureSnapshot",
-  "ListSnapshots",
-  "GetSnapshot",
-  "GetEventTimeline",
-  "AddDesignAsset",
-  "AddDesignReference",
-  "GetDesignReference",
-  "ListDesignReferences",
-  "MapDesignRegion",
-  "RunDesignComparison",
-  "GetDesignComparison",
-  "ListDesignComparisons",
-  "CreateReviewIssue",
-  "ListReviewIssues",
-  "GetReviewIssue",
-  "TransitionReviewIssue",
-  "VerifyReviewIssue",
-  "CreateTuningPatch",
-  "GetTuningPatch",
-  "ApplyTuningPatch",
-  "RevertTuningApplication",
-  "GetTuningApplication",
-  "ListActiveTuning",
-  "RecordStateObservation",
-  "RecordTransitionObservation",
-  "GetScreenGraph",
-  "GetScreenState",
-  "MergeScreenStates",
-  "SplitScreenState",
-  "AnnotateScreenState",
-  "TagGraphVersion",
-  "FindScreenPath",
-  "CreateWikiNode",
-  "UpdateWikiNode",
-  "GetWikiNode",
-  "ListWikiNodes",
-  "LinkWikiNode",
-  "UnlinkWikiNode",
-  "GetWikiBacklinks",
-  "GetRelatedWikiNodes",
-  "ValidateSnapshot",
-  "ValidateScreenGraph",
-  "GetValidationRun",
-  "ListValidationFindings",
-  "GetValidationFinding",
-  "SuppressValidationFinding",
-  "CompareBuilds",
-  "GetBuildDiff",
-  "ExportPack",
-  "ImportPack",
-  "GetObject",
-  "RunExploration",
-  "GetExplorationOperation",
-  "CancelExploration",
-] as const;
-
-export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
 
 export type HostClientErrorCode =
   | "invalid_argument"
@@ -377,10 +328,38 @@ export class HostLocalApiClient {
       case "AddDesignReference": {
         const command = assertExactObject(
           input,
-          ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "created_by"],
+          ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "source", "created_by"],
           "Design reference input",
+          true,
         );
+        if (
+          command["name"] === undefined ||
+          command["kind"] === undefined ||
+          command["canvas_size"] === undefined ||
+          command["pixel_size"] === undefined ||
+          command["asset_hash"] === undefined ||
+          command["created_by"] === undefined
+        ) {
+          throw invalidInput();
+        }
         const value = await this.#request("POST", "/v1/design-references", command, 201, options);
+        return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
+      }
+      case "PromoteVisualBaseline": {
+        const command = assertExactObject(
+          input,
+          ["snapshot_id", "name", "created_by"],
+          "Visual baseline input",
+        );
+        if (
+          typeof command["snapshot_id"] !== "string" ||
+          !SNAPSHOT_ID_PATTERN.test(command["snapshot_id"]) ||
+          typeof command["name"] !== "string" ||
+          command["name"].length === 0
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request("POST", "/v1/design-baselines", command, 201, options);
         return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
       }
       case "GetDesignReference": {
@@ -509,10 +488,37 @@ export class HostLocalApiClient {
         const value = await this.#request("POST", "/v1/review-issues", command, 201, options);
         return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
       }
+      case "CreateReviewIssueFromDifference": {
+        const command = assertExactObject(
+          input,
+          ["comparison_id", "difference_id", "title", "description", "created_by"],
+          "Design difference issue input",
+          true,
+        );
+        const comparisonId = command["comparison_id"];
+        const differenceId = command["difference_id"];
+        if (
+          typeof comparisonId !== "string" ||
+          !COMPARISON_ID_PATTERN.test(comparisonId) ||
+          typeof differenceId !== "string" ||
+          !DIFFERENCE_ID_PATTERN.test(differenceId)
+        ) {
+          throw invalidInput();
+        }
+        const { comparison_id: _omitted, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/design-comparisons/${encodeURIComponent(comparisonId)}/issues`,
+          body,
+          201,
+          options,
+        );
+        return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
+      }
       case "ListReviewIssues": {
         const query = assertExactObject(
           input,
-          ["states", "design_reference_id", "limit", "cursor"],
+          ["states", "design_reference_id", "screen_state_id", "limit", "cursor"],
           "Review issue query",
           true,
         );
@@ -535,6 +541,13 @@ export class HostLocalApiClient {
             throw invalidInput();
           }
           parameters.set("design_reference_id", referenceId);
+        }
+        const screenStateId = query["screen_state_id"];
+        if (screenStateId !== undefined) {
+          if (typeof screenStateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(screenStateId)) {
+            throw invalidInput();
+          }
+          parameters.set("screen_state_id", screenStateId);
         }
         if (query["limit"] !== undefined) {
           if (!Number.isInteger(query["limit"]) || (query["limit"] as number) < 1 || (query["limit"] as number) > 500) {
@@ -622,6 +635,30 @@ export class HostLocalApiClient {
         validateIdentifiedResource(issue, "issue_id", ISSUE_ID_PATTERN);
         return requireObject(value);
       }
+      case "RecaptureAndVerifyIssue": {
+        const command = assertExactObject(
+          input,
+          ["issue_id", "expected_revision", "verified_by"],
+          "Review issue recapture verification input",
+        );
+        const issueId = command["issue_id"];
+        if (typeof issueId !== "string" || !ISSUE_ID_PATTERN.test(issueId)) {
+          throw invalidInput();
+        }
+        const { issue_id: _omitted, ...body } = command;
+        const value = requireObject(await this.#request(
+          "POST",
+          `/v1/review-issues/${encodeURIComponent(issueId)}/recapture-verifications`,
+          body,
+          201,
+          options,
+        ));
+        validateRuntimeSnapshot(value["snapshot"] as JsonValue);
+        validateIdentifiedResource(value["comparison"] as JsonValue, "comparison_id", COMPARISON_ID_PATTERN);
+        validateIdentifiedResource(value["verification"] as JsonValue, "verification_record_id", VERIFICATION_ID_PATTERN);
+        validateIdentifiedResource(value["issue"] as JsonValue, "issue_id", ISSUE_ID_PATTERN);
+        return value;
+      }
       case "CreateTuningPatch": {
         const command = assertExactObject(
           input,
@@ -646,6 +683,25 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "patch_id", TUNING_PATCH_ID_PATTERN);
+      }
+      case "GenerateTuningSourceSuggestions": {
+        const query = assertExactObject(input, ["patch_id"], "Tuning source suggestion input");
+        const patchId = query["patch_id"];
+        if (typeof patchId !== "string" || !TUNING_PATCH_ID_PATTERN.test(patchId)) {
+          throw invalidInput();
+        }
+        const value = requireObject(await this.#request(
+          "GET",
+          `/v1/tuning-patches/${encodeURIComponent(patchId)}/source-suggestions`,
+          undefined,
+          200,
+          options,
+        ));
+        assertKeys(value, ["patch_id", "patch_revision", "target_snapshot_id", "suggestions"]);
+        if (value["patch_id"] !== patchId || !Array.isArray(value["suggestions"])) {
+          throw invalidHostResult();
+        }
+        return value;
       }
       case "ApplyTuningPatch": {
         const command = assertExactObject(
@@ -786,22 +842,36 @@ export class HostLocalApiClient {
       case "GetScreenGraph": {
         const query = assertExactObject(
           input,
-          ["project_id", "application_id"],
+          ["project_id", "application_id", "build_id", "application_version"],
           "Screen graph lookup",
+          true,
         );
         const projectId = query["project_id"];
         const applicationId = query["application_id"];
+        const buildId = query["build_id"];
+        const applicationVersion = query["application_version"];
         if (
           typeof projectId !== "string" ||
           !PROJECT_ID_PATTERN.test(projectId) ||
           typeof applicationId !== "string" ||
-          !APPLICATION_ID_PATTERN.test(applicationId)
+          !APPLICATION_ID_PATTERN.test(applicationId) ||
+          ((buildId === undefined) !== (applicationVersion === undefined)) ||
+          (buildId !== undefined &&
+            (typeof buildId !== "string" || !BUILD_ID_PATTERN.test(buildId))) ||
+          (applicationVersion !== undefined &&
+            (typeof applicationVersion !== "string" ||
+              applicationVersion.length < 1 ||
+              applicationVersion.length > 128))
         ) {
           throw invalidInput();
         }
         const parameters = new URLSearchParams();
         parameters.set("project_id", projectId);
         parameters.set("application_id", applicationId);
+        if (typeof buildId === "string" && typeof applicationVersion === "string") {
+          parameters.set("build_id", buildId);
+          parameters.set("application_version", applicationVersion);
+        }
         const value = await this.#request(
           "GET",
           `/v1/screen-graph?${parameters.toString()}`,
@@ -812,14 +882,37 @@ export class HostLocalApiClient {
         return validateIdentifiedResource(value, "screen_graph_id", SCREEN_GRAPH_ID_PATTERN);
       }
       case "GetScreenState": {
-        const query = assertExactObject(input, ["screen_state_id"], "Screen state lookup");
+        const query = assertExactObject(
+          input,
+          ["screen_state_id", "build_id", "application_version"],
+          "Screen state lookup",
+          true,
+        );
         const stateId = query["screen_state_id"];
-        if (typeof stateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(stateId)) {
+        const buildId = query["build_id"];
+        const applicationVersion = query["application_version"];
+        if (
+          typeof stateId !== "string" ||
+          !SCREEN_STATE_ID_PATTERN.test(stateId) ||
+          ((buildId === undefined) !== (applicationVersion === undefined)) ||
+          (buildId !== undefined &&
+            (typeof buildId !== "string" || !BUILD_ID_PATTERN.test(buildId))) ||
+          (applicationVersion !== undefined &&
+            (typeof applicationVersion !== "string" ||
+              applicationVersion.length < 1 ||
+              applicationVersion.length > 128))
+        ) {
           throw invalidInput();
         }
+        const parameters = new URLSearchParams();
+        if (typeof buildId === "string" && typeof applicationVersion === "string") {
+          parameters.set("build_id", buildId);
+          parameters.set("application_version", applicationVersion);
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
         const value = await this.#request(
           "GET",
-          `/v1/screen-states/${encodeURIComponent(stateId)}`,
+          `/v1/screen-states/${encodeURIComponent(stateId)}${suffix}`,
           undefined,
           200,
           options,
@@ -1257,6 +1350,204 @@ export class HostLocalApiClient {
         );
         return validateWikiNodePage(value);
       }
+      case "CreateKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          ["name", "summary", "node_ids", "link_ids", "entry_node_ids", "created_by"],
+          "Knowledge Collection input",
+          true,
+        );
+        const value = await this.#request(
+          "POST",
+          "/v1/knowledge-collections",
+          command,
+          201,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "UpdateKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          [
+            "collection_id",
+            "expected_revision",
+            "name",
+            "summary",
+            "node_ids",
+            "link_ids",
+            "entry_node_ids",
+            "updated_by",
+          ],
+          "Knowledge Collection revision input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          !Number.isSafeInteger(command["expected_revision"])
+        ) {
+          throw invalidInput();
+        }
+        const { collection_id: _collectionId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/revisions`,
+          body,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "GetKnowledgeCollection": {
+        const query = assertExactObject(
+          input,
+          ["collection_id"],
+          "Knowledge Collection lookup",
+        );
+        const collectionId = query["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId)
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "ListKnowledgeCollections": {
+        const query = assertExactObject(
+          input,
+          ["text", "publication_states", "limit", "cursor"],
+          "Knowledge Collection list input",
+          true,
+        );
+        const parameters = pageParameters(query);
+        const text = query["text"];
+        if (text !== undefined) {
+          if (typeof text !== "string" || text.length === 0 || text.length > 4_096) {
+            throw invalidInput();
+          }
+          parameters.set("text", text);
+        }
+        const states = query["publication_states"];
+        if (states !== undefined) {
+          if (
+            !Array.isArray(states) ||
+            states.length === 0 ||
+            states.some(
+              (state) =>
+                typeof state !== "string" ||
+                !["draft", "published", "archived"].includes(state),
+            )
+          ) {
+            throw invalidInput();
+          }
+          parameters.set("publication_states", states.join(","));
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/knowledge-collections${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResourcePage(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "PublishKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          [
+            "collection_id",
+            "expected_revision",
+            "base_commit_id",
+            "target_ref_name",
+            "ref_precondition",
+            "published_by",
+            "message",
+          ],
+          "Knowledge Collection publication input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          !Number.isSafeInteger(command["expected_revision"]) ||
+          typeof command["base_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(command["base_commit_id"] as string) ||
+          typeof command["target_ref_name"] !== "string" ||
+          !REF_NAME_PATTERN.test(command["target_ref_name"] as string)
+        ) {
+          throw invalidInput();
+        }
+        validateRefPreconditionInput(command["ref_precondition"]);
+        const { collection_id: _collectionId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/publication`,
+          body,
+          201,
+          options,
+        );
+        return validateKnowledgePublicationResult(value, collectionId);
+      }
+      case "ExportKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          ["collection_id", "formats"],
+          "Knowledge Collection export input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        const formats = command["formats"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          (formats !== undefined &&
+            (!Array.isArray(formats) ||
+              formats.length === 0 ||
+              new Set(formats).size !== formats.length ||
+              formats.some(
+                (format) =>
+                  typeof format !== "string" || !["markdown", "html"].includes(format),
+              )))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/exports`,
+          formats === undefined ? {} : { formats },
+          201,
+          options,
+        );
+        return validateKnowledgeExportResult(value, collectionId);
+      }
       case "ValidateSnapshot": {
         const command = assertExactObject(
           input,
@@ -1559,6 +1850,8 @@ export class HostLocalApiClient {
             "maximum_actions",
             "maximum_depth",
             "settle_milliseconds",
+            "application_id",
+            "maximum_recovery_attempts",
             "excluded_stable_ids",
             "actor_id",
           ],
@@ -1568,6 +1861,8 @@ export class HostLocalApiClient {
         const maximumActions = command["maximum_actions"];
         const maximumDepth = command["maximum_depth"];
         const settle = command["settle_milliseconds"];
+        const applicationId = command["application_id"];
+        const maximumRecoveryAttempts = command["maximum_recovery_attempts"];
         const excluded = command["excluded_stable_ids"];
         const actorId = command["actor_id"];
         if (
@@ -1582,6 +1877,14 @@ export class HostLocalApiClient {
             (!Number.isSafeInteger(settle) ||
               (settle as number) < 0 ||
               (settle as number) > 60_000)) ||
+          (applicationId !== undefined &&
+            (typeof applicationId !== "string" ||
+              applicationId.length === 0 ||
+              applicationId.length > 256)) ||
+          (maximumRecoveryAttempts !== undefined &&
+            (!Number.isSafeInteger(maximumRecoveryAttempts) ||
+              (maximumRecoveryAttempts as number) < 0 ||
+              (maximumRecoveryAttempts as number) > 5)) ||
           (excluded !== undefined &&
             (!Array.isArray(excluded) ||
               excluded.length > 128 ||
@@ -1652,7 +1955,7 @@ export class HostLocalApiClient {
         return validateEventTimeline(value);
       }
       default:
-        throw new HostClientError("unsupported", "The Host operation is not implemented.");
+        return unreachableOperation(operation);
     }
   }
 
@@ -1865,6 +2168,13 @@ export class HostLocalApiClient {
       options.signal?.removeEventListener("abort", cancel);
     }
   }
+}
+
+function unreachableOperation(operation: never): never {
+  throw new HostClientError(
+    "unsupported",
+    `The Host operation is not implemented: ${String(operation)}.`,
+  );
 }
 
 /** The byte-body sibling of readBoundedJsonResponse for object downloads. */
@@ -2346,6 +2656,95 @@ function validateRuntimeSnapshot(value: JsonValue): JsonObject {
     throw invalidHostResult();
   }
   return snapshot;
+}
+
+function validateRefPreconditionInput(value: JsonValue | undefined): void {
+  const precondition = requireObject(value);
+  const mode = precondition["mode"];
+  if (mode === "must_match") {
+    assertKeys(precondition, ["mode", "expected_commit_id"]);
+    if (
+      typeof precondition["expected_commit_id"] !== "string" ||
+      !COMMIT_ID_PATTERN.test(precondition["expected_commit_id"])
+    ) {
+      throw invalidInput();
+    }
+    return;
+  }
+  if (mode === "must_not_exist") {
+    assertKeys(precondition, ["mode"]);
+    return;
+  }
+  if (mode === "force") {
+    assertKeys(precondition, ["mode", "authorization"]);
+    requireObject(precondition["authorization"]);
+    return;
+  }
+  throw invalidInput();
+}
+
+function validateKnowledgePublicationResult(
+  value: JsonValue,
+  expectedCollectionId: string,
+): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["collection", "commit", "ref", "bundle_root"]);
+  const collection = validateIdentifiedResource(
+    result["collection"] as JsonValue,
+    "collection_id",
+    KNOWLEDGE_COLLECTION_ID_PATTERN,
+  );
+  const commit = requireObject(result["commit"]);
+  const ref = requireObject(result["ref"]);
+  const commitId = commit["commit_id"];
+  if (
+    collection["collection_id"] !== expectedCollectionId ||
+    typeof commitId !== "string" ||
+    !COMMIT_ID_PATTERN.test(commitId) ||
+    !isObject(commit["manifest"]) ||
+    typeof ref["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(ref["name"]) ||
+    ref["commit_id"] !== commitId ||
+    !Number.isSafeInteger(ref["revision"])
+  ) {
+    throw invalidHostResult();
+  }
+  const publication = requireObject(collection["publication"]);
+  if (publication["state"] !== "published" || publication["commit_id"] !== commitId) {
+    throw invalidHostResult();
+  }
+  validateObjectRef(result["bundle_root"] as JsonValue);
+  return result;
+}
+
+function validateKnowledgeExportResult(
+  value: JsonValue,
+  expectedCollectionId: string,
+): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["collection_id", "objects"]);
+  const objects = result["objects"];
+  if (
+    result["collection_id"] !== expectedCollectionId ||
+    !Array.isArray(objects) ||
+    objects.length === 0 ||
+    objects.length > 2
+  ) {
+    throw invalidHostResult();
+  }
+  const mediaTypes = new Set<string>();
+  for (const object of objects) {
+    const ref = validateObjectRef(object as JsonValue);
+    const mediaType = ref["media_type"];
+    if (
+      (mediaType !== "text/markdown" && mediaType !== "text/html") ||
+      mediaTypes.has(mediaType)
+    ) {
+      throw invalidHostResult();
+    }
+    mediaTypes.add(mediaType);
+  }
+  return result;
 }
 
 function validateSnapshotPage(value: JsonValue): JsonObject {

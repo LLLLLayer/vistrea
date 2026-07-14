@@ -28,7 +28,7 @@ export const VISTREA_CLI_TOOLSETS = {
   workspace: ["workspace"],
   assets: ["snapshot", "events", "object", "pack"],
   exploration: ["explore", "graph", "screen", "driver"],
-  knowledge: ["wiki"],
+  knowledge: ["wiki", "collection"],
   verification: ["design", "issue", "tuning", "validate"],
 } as const;
 
@@ -117,6 +117,7 @@ export async function runVistreaCli(
           "events list",
           "design upload-asset --file <path> --media-type <type> [--name <logical>]",
           "design add-reference --json <command>",
+          "design promote-baseline --json <command>",
           "design get-reference <design_reference_id>",
           "design map --json <command>",
           "design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]",
@@ -124,20 +125,23 @@ export async function runVistreaCli(
           "design list-references [--limit n] [--cursor c]",
           "design list-comparisons [--reference <id>] [--snapshot <id>] [--limit n] [--cursor c]",
           "issue create --json <command>",
-          "issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]",
+          "issue create-from-difference --json <command>",
+          "issue list [--states a,b] [--reference <id>] [--screen-state <id>] [--limit n] [--cursor c]",
           "issue get <issue_id>",
           "issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]",
           "issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]",
+          "issue recapture-verify --json <command>",
           "tuning create-patch --json <command>",
           "tuning get-patch <patch_id>",
+          "tuning source-suggestions <patch_id>",
           "tuning apply --patch <patch_id> [--ttl <ms>]",
           "tuning revert <tuning_application_id>",
           "tuning get-application <tuning_application_id>",
           "tuning list-active",
           "graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <state_kind>] [--entry true|false] [--source <capture_source>] [--session <session_id>]",
           "graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]",
-          "graph show --project <project_id> --application <application_id>",
-          "graph get-state <screen_state_id>",
+          "graph show --project <project_id> --application <application_id> [--build <build_id> --version <application_version>]",
+          "graph get-state <screen_state_id> [--build <build_id> --version <application_version>]",
           "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]",
           "graph tag --project <project_id> --application <application_id> --tag <tag_name>",
           "wiki create --json <command>",
@@ -148,6 +152,12 @@ export async function runVistreaCli(
           "wiki unlink <wiki_link_id> --revision <n>",
           "wiki backlinks <wiki_node_id> [--limit n] [--cursor c]",
           "wiki related --kind <resource_kind> --id <resource_id> [--limit n] [--cursor c]",
+          "collection create --json <command>",
+          "collection update <collection_id> --json <command>",
+          "collection get <collection_id>",
+          "collection list [--text <phrase>] [--states draft,published,archived] [--limit n] [--cursor c]",
+          "collection publish <collection_id> --json <command>",
+          "collection export <collection_id> [--formats markdown,html]",
           "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual] [--disable-rules a,b] [--min-touch-target <points>]",
           "validate graph --project <project_id> --application <application_id> [--disable-rules a,b] [--min-touch-target <points>]",
           "validate get-run <validation_run_id>",
@@ -162,7 +172,7 @@ export async function runVistreaCli(
           "screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]",
           "screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]",
           "screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n> [--actor <id>]",
-          "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
+          "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--application <id>] [--recovery-attempts <0-5>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
           "driver ios doctor",
@@ -302,6 +312,9 @@ function parseArguments(
   if (command[0] === "design" && command[1] === "add-reference") {
     return invocation("AddDesignReference", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
+  if (command[0] === "design" && command[1] === "promote-baseline") {
+    return invocation("PromoteVisualBaseline", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
   if (command[0] === "design" && command[1] === "get-reference" && command.length === 3) {
     return invocation(
       "GetDesignReference",
@@ -353,6 +366,13 @@ function parseArguments(
   if (command[0] === "issue" && command[1] === "create") {
     return invocation("CreateReviewIssue", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
+  if (command[0] === "issue" && command[1] === "create-from-difference") {
+    return invocation(
+      "CreateReviewIssueFromDifference",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "issue" && command[1] === "list") {
     return invocation("ListReviewIssues", parseIssueListOptions(command.slice(2)), timeoutMilliseconds);
   }
@@ -373,11 +393,25 @@ function parseArguments(
       timeoutMilliseconds,
     );
   }
+  if (command[0] === "issue" && command[1] === "recapture-verify") {
+    return invocation(
+      "RecaptureAndVerifyIssue",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "tuning" && command[1] === "create-patch") {
     return invocation("CreateTuningPatch", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
   if (command[0] === "tuning" && command[1] === "get-patch" && command.length === 3) {
     return invocation("GetTuningPatch", { patch_id: command[2] as string }, timeoutMilliseconds);
+  }
+  if (command[0] === "tuning" && command[1] === "source-suggestions" && command.length === 3) {
+    return invocation(
+      "GenerateTuningSourceSuggestions",
+      { patch_id: command[2] as string },
+      timeoutMilliseconds,
+    );
   }
   if (command[0] === "tuning" && command[1] === "apply") {
     return invocation("ApplyTuningPatch", parseTuningApplyOptions(command.slice(2)), timeoutMilliseconds);
@@ -416,23 +450,49 @@ function parseArguments(
   if (command[0] === "graph" && command[1] === "show") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--project", "--application"].includes(key)) {
+      if (!["--project", "--application", "--build", "--version"].includes(key)) {
         throw invalidArguments();
       }
+    }
+    const buildID = values.get("--build");
+    const applicationVersion = values.get("--version");
+    if ((buildID === undefined) !== (applicationVersion === undefined)) {
+      throw invalidArguments();
     }
     return invocation(
       "GetScreenGraph",
       {
         project_id: requireOption(values, "--project"),
         application_id: requireOption(values, "--application"),
+        ...(buildID === undefined ? {} : { build_id: buildID }),
+        ...(applicationVersion === undefined
+          ? {}
+          : { application_version: applicationVersion }),
       },
       timeoutMilliseconds,
     );
   }
-  if (command[0] === "graph" && command[1] === "get-state" && command.length === 3) {
+  if (command[0] === "graph" && command[1] === "get-state" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--build", "--version"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const buildID = values.get("--build");
+    const applicationVersion = values.get("--version");
+    if ((buildID === undefined) !== (applicationVersion === undefined)) {
+      throw invalidArguments();
+    }
     return invocation(
       "GetScreenState",
-      { screen_state_id: command[2] as string },
+      {
+        screen_state_id: command[2] as string,
+        ...(buildID === undefined ? {} : { build_id: buildID }),
+        ...(applicationVersion === undefined
+          ? {}
+          : { application_version: applicationVersion }),
+      },
       timeoutMilliseconds,
     );
   }
@@ -540,6 +600,78 @@ function parseArguments(
         id: requireOption(values, "--id"),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
         ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "create") {
+    return invocation(
+      "CreateKnowledgeCollection",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "update" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "UpdateKnowledgeCollection",
+      { ...input, collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "get" && command.length === 3) {
+    return invocation(
+      "GetKnowledgeCollection",
+      { collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "list") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--text", "--states", "--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const text = values.get("--text");
+    const states = values.get("--states");
+    const cursor = values.get("--cursor");
+    return invocation(
+      "ListKnowledgeCollections",
+      {
+        ...(text === undefined ? {} : { text }),
+        ...(states === undefined ? {} : { publication_states: states.split(",") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "publish" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "PublishKnowledgeCollection",
+      { ...input, collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "export" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--formats"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const formats = values.get("--formats");
+    return invocation(
+      "ExportKnowledgeCollection",
+      {
+        collection_id: command[2] as string,
+        ...(formats === undefined ? {} : { formats: formats.split(",") }),
       },
       timeoutMilliseconds,
     );
@@ -816,17 +948,31 @@ function parseArguments(
   if (command[0] === "explore" && command[1] === "run") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--max-actions", "--max-depth", "--settle", "--exclude", "--actor"].includes(key)) {
+      if (
+        ![
+          "--max-actions",
+          "--max-depth",
+          "--settle",
+          "--application",
+          "--recovery-attempts",
+          "--exclude",
+          "--actor",
+        ].includes(key)
+      ) {
         throw invalidArguments();
       }
     }
     const maxActions = requireOption(values, "--max-actions");
     const maxDepth = values.get("--max-depth");
     const settle = values.get("--settle");
+    const applicationId = values.get("--application");
+    const recoveryAttempts = values.get("--recovery-attempts");
     if (
       !/^[1-9][0-9]{0,2}$/.test(maxActions) ||
       (maxDepth !== undefined && !/^[1-9][0-9]?$/.test(maxDepth)) ||
-      (settle !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(settle))
+      (settle !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(settle)) ||
+      (applicationId !== undefined && (applicationId.length === 0 || applicationId.length > 256)) ||
+      (recoveryAttempts !== undefined && !/^[0-5]$/.test(recoveryAttempts))
     ) {
       throw invalidArguments();
     }
@@ -838,6 +984,10 @@ function parseArguments(
         maximum_actions: Number(maxActions),
         ...(maxDepth === undefined ? {} : { maximum_depth: Number(maxDepth) }),
         ...(settle === undefined ? {} : { settle_milliseconds: Number(settle) }),
+        ...(applicationId === undefined ? {} : { application_id: applicationId }),
+        ...(recoveryAttempts === undefined
+          ? {}
+          : { maximum_recovery_attempts: Number(recoveryAttempts) }),
         ...(exclude === undefined ? {} : { excluded_stable_ids: exclude.split(",") }),
         ...(actor === undefined ? {} : { actor_id: actor }),
       },
@@ -1067,7 +1217,7 @@ function parseValidationConfiguration(values: Map<string, string>): JsonObject {
 function parseIssueListOptions(arguments_: readonly string[]): JsonObject {
   const values = parseOptionPairs(arguments_);
   for (const key of values.keys()) {
-    if (!["--states", "--reference", "--limit", "--cursor"].includes(key)) {
+    if (!["--states", "--reference", "--screen-state", "--limit", "--cursor"].includes(key)) {
       throw invalidArguments();
     }
   }
@@ -1077,10 +1227,12 @@ function parseIssueListOptions(arguments_: readonly string[]): JsonObject {
   }
   const states = values.get("--states");
   const reference = values.get("--reference");
+  const screenState = values.get("--screen-state");
   const cursor = values.get("--cursor");
   return {
     ...(states === undefined ? {} : { states: states.split(",") }),
     ...(reference === undefined ? {} : { design_reference_id: reference }),
+    ...(screenState === undefined ? {} : { screen_state_id: screenState }),
     ...(limitSource === undefined ? {} : { limit: Number(limitSource) }),
     ...(cursor === undefined ? {} : { cursor }),
   };

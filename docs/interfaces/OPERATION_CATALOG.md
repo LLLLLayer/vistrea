@@ -4,7 +4,7 @@ Status: **Implemented surface plus reserved draft for protocol version 1.0**
 
 This catalog closes the parity gap between Studio, CLI, Skills, CI, Engine modules, and Data ports. Section 1 lists the operations that exist today; section 2 reserves draft names for future phases. Named request and result types become machine-readable schemas as each phase begins.
 
-The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OPERATIONS` in `integrations/shared/host-local-client.ts`. CLI commands follow `integrations/cli/README.md`, and the Host routes follow `apps/host/README.md`.
+The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/shared/host-operation-manifest.ts`. It defines every implemented operation, kind, Host route, and CLI command. The Host contract suite proves that the Host client switch, CLI dispatch, and the implemented tables below remain exactly aligned with that manifest.
 
 ## Legend
 
@@ -17,7 +17,7 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 55 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 65 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -35,6 +35,7 @@ All 55 operations below are implemented end to end through the Host Local API an
 |---|---|---|---|
 | `AddDesignAsset` | C | `POST /v1/design-assets` | `design upload-asset` |
 | `AddDesignReference` | C | `POST /v1/design-references` | `design add-reference` |
+| `PromoteVisualBaseline` | C | `POST /v1/design-baselines` | `design promote-baseline` |
 | `GetDesignReference` | Q | `GET /v1/design-references/<id>` | `design get-reference` |
 | `ListDesignReferences` | Q | `GET /v1/design-references` | `design list-references` |
 | `MapDesignRegion` | C | `POST /v1/design-mappings` | `design map` |
@@ -42,10 +43,12 @@ All 55 operations below are implemented end to end through the Host Local API an
 | `GetDesignComparison` | Q | `GET /v1/design-comparisons/<id>` | `design get-comparison` |
 | `ListDesignComparisons` | Q | `GET /v1/design-comparisons` | `design list-comparisons` |
 | `CreateReviewIssue` | C | `POST /v1/review-issues` | `issue create` |
+| `CreateReviewIssueFromDifference` | C | `POST /v1/design-comparisons/<id>/issues` | `issue create-from-difference` |
 | `ListReviewIssues` | Q | `GET /v1/review-issues` | `issue list` |
 | `GetReviewIssue` | Q | `GET /v1/review-issues/<id>` | `issue get` |
 | `TransitionReviewIssue` | C | `POST /v1/review-issues/<id>/transitions` | `issue transition` |
 | `VerifyReviewIssue` | C | `POST /v1/review-issues/<id>/verifications` | `issue verify` |
+| `RecaptureAndVerifyIssue` | C | `POST /v1/review-issues/<id>/recapture-verifications` | `issue recapture-verify` |
 
 ### Protected tuning
 
@@ -53,6 +56,7 @@ All 55 operations below are implemented end to end through the Host Local API an
 |---|---|---|---|
 | `CreateTuningPatch` | C | `POST /v1/tuning-patches` | `tuning create-patch` |
 | `GetTuningPatch` | Q | `GET /v1/tuning-patches/<id>` | `tuning get-patch` |
+| `GenerateTuningSourceSuggestions` | Q | `GET /v1/tuning-patches/<id>/source-suggestions` | `tuning source-suggestions` |
 | `ApplyTuningPatch` | C | `POST /v1/tuning-applications` | `tuning apply` |
 | `RevertTuningApplication` | C | `POST /v1/tuning-applications/<id>/revert` | `tuning revert` |
 | `GetTuningApplication` | Q | `GET /v1/tuning-applications/<id>` | `tuning get-application` |
@@ -87,6 +91,12 @@ All 55 operations below are implemented end to end through the Host Local API an
 | `UnlinkWikiNode` | C | `POST /v1/wiki/links/<id>/unlink` | `wiki unlink` |
 | `GetWikiBacklinks` | Q | `GET /v1/wiki/nodes/<id>/backlinks` | `wiki backlinks` |
 | `GetRelatedWikiNodes` | Q | `GET /v1/wiki/related` | `wiki related` |
+| `CreateKnowledgeCollection` | C | `POST /v1/knowledge-collections` | `collection create` |
+| `UpdateKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/revisions` | `collection update` |
+| `GetKnowledgeCollection` | Q | `GET /v1/knowledge-collections/<id>` | `collection get` |
+| `ListKnowledgeCollections` | Q | `GET /v1/knowledge-collections` | `collection list` |
+| `PublishKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/publication` | `collection publish` |
+| `ExportKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/exports` | `collection export` |
 
 ### Validation and build diff
 
@@ -120,6 +130,7 @@ Earlier drafts of this catalog used different names for some implemented operati
 | `GetBacklinks` | `GetWikiBacklinks` |
 | `GetRelatedRuntimeContext` | `GetRelatedWikiNodes` |
 | `SearchWiki` | `ListWikiNodes` (the CLI command remains `wiki search`) |
+| `ExportWiki` | `ExportKnowledgeCollection` |
 | `RunValidation` | `ValidateSnapshot` and `ValidateScreenGraph` |
 | `GetValidationOperation` | `GetValidationRun` |
 | `RunBuildComparison` | `CompareBuilds` |
@@ -198,8 +209,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 | Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `AttachRuntimeEvidence` | C | `AttachRuntimeEvidenceCommand -> WikiLink` | sync | Knowledge / K,Sn,Obj,Vr | evidence access | `wiki attach` / — | 3 |
-| `ExportWiki` | C | `ExportWikiCommand -> ObjectRef` | async | Knowledge / K,Obj,X,Op | export/redaction policy | `wiki export` / — | 3 |
-| `PublishKnowledgeCollection` | C | `PublishKnowledgeCollectionCommand -> PublishResult` | async | Knowledge/Sync / K,Vr,Sy,Op | publication policy | `wiki publish` / — | 5 |
 | `GetKnowledgeGraph` | Q | `KnowledgeGraphQuery -> KnowledgeGraph` | sync | Knowledge / K | graph scope | `wiki graph` / — | 3 |
 
 ### Versioning and synchronization

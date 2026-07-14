@@ -12,6 +12,7 @@ vistrea snapshot get <snapshot_id>
 vistrea events list [--epoch <event_epoch_id>] [--kinds a,b] [--first-sequence <n>] [--last-sequence <n>]
 vistrea design upload-asset --file <path> --media-type <type> [--name <logical>]
 vistrea design add-reference --json <command>
+vistrea design promote-baseline --json <command>
 vistrea design get-reference <design_reference_id>
 vistrea design map --json <command>
 vistrea design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]
@@ -19,23 +20,27 @@ vistrea design get-comparison <comparison_id>
 vistrea design list-references [--limit <n>] [--cursor <cursor>]
 vistrea design list-comparisons [--reference <id>] [--snapshot <id>] [--limit <n>] [--cursor <cursor>]
 vistrea issue create --json <command>
-vistrea issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]
+vistrea issue create-from-difference --json <command>
+vistrea issue list [--states a,b] [--reference <id>] [--screen-state <id>] [--limit n] [--cursor c]
 vistrea issue get <issue_id>
 vistrea issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]
 vistrea issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]
+vistrea issue recapture-verify --json <command>
 vistrea tuning create-patch --json <command>
 vistrea tuning get-patch <patch_id>
+vistrea tuning source-suggestions <patch_id>
 vistrea tuning apply --patch <patch_id> [--ttl <ms>]
 vistrea tuning revert <tuning_application_id>
 vistrea tuning get-application <tuning_application_id>
 vistrea tuning list-active
 vistrea graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <state_kind>] [--entry true|false] [--source <capture_source>] [--session <session_id>]
 vistrea graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]
-vistrea graph show --project <project_id> --application <application_id>
-vistrea graph get-state <screen_state_id>
+vistrea graph show --project <project_id> --application <application_id> [--build <build_id> --version <application_version>]
+vistrea graph get-state <screen_state_id> [--build <build_id> --version <application_version>]
 vistrea graph tag --project <project_id> --application <application_id> --tag <tag_name>
 vistrea screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]
 vistrea screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]
+vistrea screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n> [--actor <id>]
 vistrea graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]
 vistrea wiki create --json <command>
 vistrea wiki update <wiki_node_id> --json <command>
@@ -45,6 +50,12 @@ vistrea wiki link --json <command>
 vistrea wiki unlink <wiki_link_id> --revision <n>
 vistrea wiki backlinks <wiki_node_id> [--limit <n>] [--cursor <cursor>]
 vistrea wiki related --kind <resource_kind> --id <resource_id> [--limit <n>] [--cursor <cursor>]
+vistrea collection create --json <command>
+vistrea collection update <collection_id> --json <command>
+vistrea collection get <collection_id>
+vistrea collection list [--text <phrase>] [--states draft,published,archived] [--limit <n>] [--cursor <cursor>]
+vistrea collection publish <collection_id> --json <command>
+vistrea collection export <collection_id> [--formats markdown,html]
 vistrea validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual] [--disable-rules a,b] [--min-touch-target <points>]
 vistrea validate graph --project <project_id> --application <application_id> [--disable-rules a,b] [--min-touch-target <points>]
 vistrea validate get-run <validation_run_id>
@@ -56,7 +67,7 @@ vistrea validate get-build-diff <build_diff_id>
 vistrea pack export --json <command>
 vistrea pack import --file <path>
 vistrea object get --hash <sha256:...> --output <path>
-vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]
+vistrea explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--application <id>] [--recovery-attempts <0-5>] [--exclude id1,id2] [--actor <id>]
 vistrea explore get <operation_id>
 vistrea explore cancel <operation_id>
 ```
@@ -113,7 +124,7 @@ Ctrl+C. They belong to the `exploration` toolset.
 `VISTREA_CLI_TOOLSETS` selects which named command surfaces the CLI exposes,
 keyed by the first command word: `workspace` (always on), `assets`
 (`snapshot`, `events`, `object`, `pack`), `exploration` (`explore`, `graph`,
-`screen`, `driver`), `knowledge` (`wiki`), and `verification` (`design`, `issue`,
+`screen`, `driver`), `knowledge` (`wiki`, `collection`), and `verification` (`design`, `issue`,
 `tuning`, `validate`). Unset means every surface. A masked command group
 disappears from `help` and fails closed as `unsupported` (exit 6) at dispatch;
 an unknown set name is `invalid_argument` (exit 2) naming the valid sets.

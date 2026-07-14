@@ -84,23 +84,27 @@ The examples below define semantic operation names, not a programming-language A
 - `CompareScreenGraphs`
 - `ExplainStateIdentity`
 
-`RunExploration` is asynchronous and returns `OperationRef`. Progress events report current state, depth, action, discovered states, blocked actions, and warnings.
+`RunExploration` is asynchronous and returns `OperationRef`. Progress events report graph steps while the terminal `ExplorationReport` accounts for every provider action. `maximum_recovery_attempts` (zero through five, default two) bounds relaunch-and-restore recovery after a lost Runtime capture; `application_id` may override the captured launch identity. Recovery relaunches the app, replays the known stable-ID path from the entry state, validates every restored structural Screen State, and counts launch/replay actions against `maximum_actions`.
+
+`GetScreenGraph` accepts either application identity alone or an exact `build_id` + `application_version` pair. The stored graph remains the application-level fact base; a scoped query attaches `extensions["vistrea.build_scope"]` with the visible Screen State and Transition IDs for that build. `GetScreenState` accepts the same pair and resolves `canonical_snapshot_id` from evidence in that build, failing `not_found` when the state was not observed there.
 
 ## 6. Design review and tuning use cases
 
 ### Commands
 
 - `AddDesignReference`
+- `PromoteVisualBaseline`
 - `MapDesignRegion`
 - `CreateReviewIssue`
+- `CreateReviewIssueFromDifference`
 - `UpdateReviewIssue`
 - `VerifyReviewIssue`
+- `RecaptureAndVerifyIssue`
 - `CreateTuningPatch`
 - `RunDesignComparison`
 - `ApplyTuningPatch`
 - `RevertTuningApplication`
 - `ExportTuningPatch`
-- `PromoteDesignBaseline`
 
 ### Queries
 
@@ -108,9 +112,12 @@ The examples below define semantic operation names, not a programming-language A
 - `ListReviewIssues`
 - `GetReviewIssue`
 - `GetTuningPatch`
+- `GenerateTuningSourceSuggestions`
 - `ListActiveTuning`
 
-Every tuning command must preserve original value, target Snapshot, project policy, and actor. A preview never marks an issue fixed until a later real build is verified.
+Every tuning command preserves original value, target Snapshot, project policy, and actor. The implemented allowlist covers alpha, foreground/background color, font, spacing, content insets, and corner radius. A preview never marks an issue fixed until `RecaptureAndVerifyIssue` captures and compares a later real build with complete evidence.
+
+`ListReviewIssues.screen_state_id` is evaluated by the Data API against persisted Observation-to-Snapshot membership. Product UI must use it for a selected Screen State instead of loading every issue and filtering by presentation state.
 
 ## 7. Validation use cases
 
@@ -140,9 +147,11 @@ Validation input may be a Snapshot, Screen State, graph, path, build, design bas
 - `UpdateWikiNode`
 - `LinkWikiNode`
 - `UnlinkWikiNode`
-- `AttachRuntimeEvidence`
-- `ExportWiki`
+- `CreateKnowledgeCollection`
+- `UpdateKnowledgeCollection`
 - `PublishKnowledgeCollection`
+- `ExportKnowledgeCollection`
+- `AttachRuntimeEvidence`
 
 ### Queries
 
@@ -150,7 +159,11 @@ Validation input may be a Snapshot, Screen State, graph, path, build, design bas
 - `GetWikiBacklinks`
 - `ListWikiNodes`
 - `GetRelatedWikiNodes`
+- `GetKnowledgeCollection`
+- `ListKnowledgeCollections`
 - `GetKnowledgeGraph`
+
+The implemented Collection publication command freezes the exact member nodes and links as a canonical Object Store root, creates a Working Set and Commit, advances the target Ref with the caller's compare-and-set precondition, and updates the live Collection projection in the same metadata transaction. `ExportKnowledgeCollection` reads only that immutable root and returns Markdown and/or safe HTML `ObjectRef`s. `AttachRuntimeEvidence` and a general `GetKnowledgeGraph` projection remain reserved operations.
 
 ## 9. Version and synchronization use cases
 
