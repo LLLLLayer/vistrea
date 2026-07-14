@@ -9,9 +9,10 @@ The initial service may use HTTP/JSON plus object-transfer URLs. Shared manifest
 ### 1.1 Implemented Hub Beta boundary
 
 The current executable Hub implements project-namespaced refs and pack sync,
-five startup-managed roles, an append-only operational audit store, and a safe
-pollable activity projection. It does not yet implement organization/team
-inheritance, permission mutation, search, subscriptions, or the versioned
+five dynamically managed roles, durable project grants, revocable token
+rotation, an append-only operational audit store, and a safe pollable activity
+projection. It does not yet implement organization/team inheritance, search,
+subscriptions, or the versioned
 Review Issue/Design Baseline/Knowledge Collection mutation endpoints below.
 
 The additional executable endpoints are:
@@ -19,13 +20,20 @@ The additional executable endpoints are:
 ```text
 GET /v1/projects/{project_id}/me
 GET /v1/projects/{project_id}/permissions       # admin only
+POST /v1/projects/{project_id}/permissions:grant
+PATCH /v1/projects/{project_id}/permissions/{principal_id}
+DELETE /v1/projects/{project_id}/permissions/{principal_id}
+POST /v1/projects/{project_id}/permissions/{principal_id}:rotate-token
 GET /v1/projects/{project_id}/audit-events      # admin only, cursor paginated
 GET /v1/projects/{project_id}/events            # project activity, cursor paginated
 ```
 
-`events` contains only successful ref and pack activity that every project
-viewer may already observe. It never exposes tokens, unauthorized object
-hashes, failed authorization details, or the admin audit stream.
+Grant and rotation responses return the new bearer token exactly once. The
+permission list, audit stream, activity stream, and durable role file never
+contain tokens. `events` contains only successful ref, pack, and permission
+activity that every project viewer may already observe. It never exposes
+tokens, unauthorized object hashes, failed authorization details, or the admin
+audit stream.
 
 ## 2. Resource hierarchy
 
@@ -165,14 +173,31 @@ The executable Beta orders these roles monotonically and currently grants:
 | `contributor` | viewer plus reserved collaboration contribution capability |
 | `reviewer` | contributor plus reserved review capability |
 | `maintainer` | reviewer plus import packs, update refs, and future retention management |
-| `admin` | maintainer plus permission listing and audit access |
+| `admin` | maintainer plus permission administration, token rotation, and audit access |
 
 Each project always receives rotating bootstrap admin and viewer tokens for
-backward compatibility. Named principal grants are configured at server start;
-tokens appear only in the mode-`0600` connection descriptor. Permission
-mutation and token rotation APIs are intentionally not claimed yet. One Beta
-process serves at most 128 projects and 256 principals per project so token
-checks and permission responses remain bounded.
+backward compatibility. `--grant` seeds named principals when the standalone
+mode-`0600` permission file is first created; later role mutations atomically
+replace that file and survive restart. Bootstrap roles cannot be changed or
+revoked, but their tokens can be rotated. All bearer tokens are 256-bit random
+values held by the server only as SHA-256 digests. They rotate on every process
+start and may be individually rotated online; the old digest is invalidated
+before the new one-time response is returned. One Beta process serves at most
+128 projects and 256 principals per project so token checks and permission
+responses remain bounded.
+
+Permission request bodies are exact and bounded:
+
+```json
+{"principal_id":"alice","role":"contributor"}
+```
+
+The grant endpoint creates only; a duplicate returns `already_exists`. `PATCH`
+accepts only `{ "role": <HubRole> }`. `DELETE` revokes the principal and its
+token. Mutation is serialized per project, writes an audit attempt, persists
+the new role set before changing live authorization, and records success or
+failure. Token rotation changes only the in-memory digest because every token
+is intentionally reissued after restart.
 
 ## 8. Publication model
 
@@ -214,8 +239,10 @@ The current `events` and `audit-events` endpoints accept `cursor=<last
 sequence>` and `limit=<1..500>` and always return `next_cursor`. API sequences
 are project-local even though the standalone audit file has one strictly
 ordered append stream, so cursors do not reveal another project's traffic.
-The safe activity projection may contain gaps where project-private audit
-events were omitted; a gap does not imply lost activity.
+The safe activity projection maps successful grant, role, revocation, and token
+rotation operations to `PermissionChanged` without including the credential.
+It may contain gaps where project-private audit events were omitted; a gap does
+not imply lost activity.
 
 ## 11. Security and data lifecycle
 
@@ -227,13 +254,15 @@ events were omitted; a gap does not imply lost activity.
 - Content hash namespaces must not leak cross-tenant object existence.
 - Deletion creates an auditable tombstone where policy requires it.
 
-The standalone Beta stores append-only JSON Lines with mode `0600`. A shared
+The standalone Beta stores append-only JSON Lines and an atomic role document
+with mode `0600`. A shared
 mutation records `attempted` before changing Workspace state and then records
 `succeeded` or `failed`. This provides durable intent evidence even if the
 post-mutation audit write fails; it is not a claim of a distributed atomic
 transaction between the operational audit file and Workspace metadata.
 The executable Beta records authenticated role denials, Ref reads and updates,
-pack imports and exports, and administrator permission/audit reads. It omits
+pack imports and exports, permission mutations and rotations, and administrator
+permission/audit reads. It omits
 invalid-token attempts and activity-feed polling to prevent unauthenticated or
 self-amplifying audit-log exhaustion; deployment ingress owns rate-limited
 network authentication telemetry.

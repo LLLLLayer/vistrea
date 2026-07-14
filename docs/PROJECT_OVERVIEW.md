@@ -526,9 +526,12 @@ parity. The optional multi-project Hub pack relay serves fast-forward push and
 fetch over loopback or TLS 1.3 with project-scoped viewer, contributor,
 reviewer, maintainer, and admin grants. It persists an append-only operational
 audit log and exposes admin audit/permission views plus a project-safe pollable
-activity feed. Permission mutation and rotation, organization/team inheritance,
-searchable discovery, versioned collaboration mutations, subscriptions, and a
-user-facing Studio sync experience remain future Hub work.
+activity feed. Admins can grant, re-role, revoke, and rotate named-principal
+access; roles persist in a private atomic service document while plaintext
+tokens remain one-time or descriptor-only values and rotate at restart.
+Organization/team inheritance, searchable discovery, versioned collaboration
+mutations, subscriptions, and a user-facing Studio sync experience remain
+future Hub work.
 
 ## 12. First complete demonstration
 

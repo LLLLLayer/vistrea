@@ -28,11 +28,17 @@ refs, export, and the collaboration feed. Contributor/reviewer capabilities are
 reserved for their versioned collaboration endpoints. Maintainer adds pack
 import and ref update. Admin adds permission and audit visibility. A token from
 one namespace remains indistinguishable from an invalid token in another.
+Admins can grant a named principal, change its role, revoke it, or rotate its
+token through the Hub API. Bootstrap roles are protected from change/revocation
+for compatibility, while their tokens remain rotatable.
 
 The Beta also implements:
 
 - `GET /v1/projects/{project_id}/me` for the caller's role and capabilities;
 - admin-only `GET .../permissions`, which never returns tokens;
+- admin-only `POST .../permissions:grant`, `PATCH`/`DELETE
+  .../permissions/{principal_id}`, and `POST
+  .../permissions/{principal_id}:rotate-token`;
 - admin-only cursor-paginated `GET .../audit-events`;
 - project-readable cursor-paginated `GET .../events`, a safe activity
   projection of successful ref and pack operations.
@@ -53,6 +59,15 @@ cursors. A private sidecar lock prevents two Hub processes from appending the
 same file; a lock left after process death requires explicit operator recovery.
 Epoch-aware online rotation remains a deployment follow-up.
 
+The standalone service also persists named roles in a private, atomically
+replaced permission document (the first Workspace's
+`.hub/permissions.json` by default). `--grant` values seed only its first
+creation; subsequent API mutations are authoritative. Bearer tokens are never
+written there: the descriptor and one-time grant/rotation responses are the
+only plaintext handoff surfaces, while Hub retains SHA-256 digests. Every
+process start reissues all tokens. `--permission-file` selects another absolute
+path. A sidecar lock prevents concurrent writers.
+
 Plain HTTP binds loopback interfaces only. Configuring TLS
 (`--tls-cert`/`--tls-key` PEM files) unlocks non-loopback binds and enforces TLS
 1.3 for cross-team collaboration.
@@ -68,12 +83,13 @@ node .build/typescript/services/hub/main.js \
   --grant maya:maintainer \
   [--project <project_id> --workspace <abs-path> --grant <principal:role>]... \
   [--connection-file <abs-path>] [--audit-log <abs-path>] \
+  [--permission-file <abs-path>] \
   [--host <address>] [--port <port>] [--tls-cert <pem> --tls-key <pem>]
 ```
 
-Permission mutation/rotation, organization and team inheritance, searchable
-discovery, versioned collaboration mutations, subscriptions, and user-facing
-Studio sync remain later slices.
+Organization and team inheritance, searchable discovery, versioned
+collaboration mutations, subscriptions, and user-facing Studio sync remain
+later slices.
 
 See [Vistrea Hub API](../../docs/interfaces/HUB_API.md).
 

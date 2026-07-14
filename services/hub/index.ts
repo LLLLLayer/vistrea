@@ -23,3 +23,10 @@ export {
   type ListHubAuditEvents,
   type RecordHubAuditEvent,
 } from "./audit-store.js";
+export {
+  FileHubPermissionStore,
+  MemoryHubPermissionStore,
+  type HubPermissionProject,
+  type HubPermissionStore,
+  type HubStoredAccessGrant,
+} from "./permission-store.js";

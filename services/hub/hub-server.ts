@@ -23,6 +23,11 @@ import {
   type RecordHubAuditEvent,
   type HubRole,
 } from "./audit-store.js";
+import {
+  MemoryHubPermissionStore,
+  type HubPermissionStore,
+  type HubStoredAccessGrant,
+} from "./permission-store.js";
 
 const TOKEN_BYTES = 32;
 const MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
@@ -70,6 +75,8 @@ export interface StartHubServerOptions {
   readonly tls?: HubTlsConfig;
   /** Defaults to an in-memory store; standalone Hub composition supplies a durable store. */
   readonly audit?: HubAuditStore;
+  /** Defaults to process-local roles; standalone Hub composition supplies a durable store. */
+  readonly permissions?: HubPermissionStore;
 }
 
 export interface HubIssuedAccessGrant extends HubAccessGrant {
@@ -102,10 +109,18 @@ interface HubPrincipalRuntime {
   readonly bearerDigest: Buffer;
 }
 
+interface PublicHubPermission extends JsonObject {
+  readonly principal_id: string;
+  readonly role: HubRole;
+  readonly capabilities: readonly string[];
+}
+
 interface HubProjectRuntime {
   readonly project: HubProject;
   readonly exchange: PackExchangeService;
-  readonly principals: readonly HubPrincipalRuntime[];
+  readonly principals: Map<string, HubPrincipalRuntime>;
+  readonly permissions: HubPermissionStore;
+  permissionMutation: Promise<void>;
 }
 
 interface PublicError {
@@ -138,28 +153,51 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
       `The Hub serves between 1 and ${HUB_SERVER_LIMITS.projects} projects per process.`,
     );
   }
-  const projects = new Map<string, HubProjectRuntime>();
-  const projectTokens: HubProjectTokens[] = [];
+  const projectIds = new Set<string>();
   for (const project of options.projects) {
     if (!PROJECT_ID_PATTERN.test(project.project_id)) {
       throw new DataError("invalid_argument", "A Hub project identifier is invalid.");
     }
-    if (projects.has(project.project_id)) {
+    if (projectIds.has(project.project_id)) {
       throw new DataError("invalid_argument", "Hub project identifiers must be unique.");
     }
-    const issued = issueProjectAccess(project);
+    projectIds.add(project.project_id);
+  }
+  const permissions =
+    options.permissions ??
+    new MemoryHubPermissionStore(
+      options.projects.map((project) => ({
+        project_id: project.project_id,
+        grants: project.access ?? [],
+      })),
+    );
+  const projects = new Map<string, HubProjectRuntime>();
+  const projectTokens: HubProjectTokens[] = [];
+  for (const project of options.projects) {
+    const configuredProject = {
+      ...project,
+      access: permissions.listProjectGrants(project.project_id),
+    };
+    const issued = issueProjectAccess(configuredProject);
     projects.set(project.project_id, {
-      project,
+      project: configuredProject,
       exchange: new PackExchangeService({
         data: project.workspace,
         objects: project.objects,
         validator: options.validator,
       }),
-      principals: issued.accessGrants.map((grant) => ({
-        principalId: grant.principal_id,
-        role: grant.role,
-        bearerDigest: digestToken(grant.bearerToken),
-      })),
+      principals: new Map(
+        issued.accessGrants.map((grant) => [
+          grant.principal_id,
+          {
+            principalId: grant.principal_id,
+            role: grant.role,
+            bearerDigest: digestToken(grant.bearerToken),
+          },
+        ]),
+      ),
+      permissions,
+      permissionMutation: Promise.resolve(),
     });
     projectTokens.push({
       project_id: project.project_id,
@@ -231,7 +269,8 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
           await closeServer(server);
         } finally {
           for (const runtime of projects.values()) {
-            for (const principal of runtime.principals) {
+            await runtime.permissionMutation;
+            for (const principal of runtime.principals.values()) {
               principal.bearerDigest.fill(0);
             }
           }
@@ -263,7 +302,8 @@ async function handleRequest(
   const runtime = projects.get(projectId);
   // The token is checked against THIS project, so a token for another
   // namespace is indistinguishable from no token at all.
-  const principal = runtime === undefined ? undefined : authorize(request, runtime.principals);
+  const principal =
+    runtime === undefined ? undefined : authorize(request, runtime.principals.values());
   if (runtime === undefined || principal === undefined) {
     throw new HubRequestError({
       status: 401,
@@ -288,12 +328,8 @@ async function handleRequest(
 
   if (resource === "permissions" && request.method === "GET") {
     await requireRole(audit, projectId, principal, "admin", resource);
-    const items = runtime.principals
-      .map((candidate) => ({
-        principal_id: candidate.principalId,
-        role: candidate.role,
-        capabilities: capabilitiesForRole(candidate.role),
-      }))
+    const items = [...runtime.principals.values()]
+      .map(publicPermission)
       .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
     await audit.record({
       project_id: projectId,
@@ -304,6 +340,149 @@ async function handleRequest(
       resource,
     });
     writeJson(response, 200, { items });
+    return;
+  }
+
+  if (resource === "permissions:grant" && request.method === "POST") {
+    await requireRole(audit, projectId, principal, "admin", resource);
+    const body = await readJsonBody(request);
+    assertExactBodyKeys(body, ["principal_id", "role"]);
+    const targetPrincipalId = parseMutablePrincipalId(body["principal_id"]);
+    const role = parseRole(body["role"]);
+    const result = await auditedOperation(
+      audit,
+      auditContext(projectId, principal, "permission_granted", resource, {
+        target_principal_id: targetPrincipalId,
+        target_role: role,
+      }),
+      true,
+      () =>
+        mutateProjectPermissions(runtime, async () => {
+          if (runtime.principals.has(targetPrincipalId)) {
+            throw new HubRequestError({
+              status: 409,
+              code: "already_exists",
+              message: "The Hub principal already has project access.",
+            });
+          }
+          if (runtime.principals.size >= HUB_SERVER_LIMITS.principalsPerProject) {
+            throw new DataError(
+              "resource_exhausted",
+              `A Hub project supports at most ${HUB_SERVER_LIMITS.principalsPerProject} principals.`,
+            );
+          }
+          const bearerToken = issueBearerToken();
+          const created: HubPrincipalRuntime = {
+            principalId: targetPrincipalId,
+            role,
+            bearerDigest: digestToken(bearerToken),
+          };
+          const next = new Map(runtime.principals);
+          next.set(targetPrincipalId, created);
+          try {
+            await runtime.permissions.replaceProjectGrants(projectId, storedGrants(next));
+          } catch (error) {
+            created.bearerDigest.fill(0);
+            throw error;
+          }
+          runtime.principals.set(targetPrincipalId, created);
+          return { ...publicPermission(created), bearer_token: bearerToken };
+        }),
+    );
+    writeJson(response, 201, result);
+    return;
+  }
+
+  const rotatePermissionMatch = /^permissions\/([^/]+):rotate-token$/.exec(resource);
+  if (rotatePermissionMatch !== null && request.method === "POST") {
+    await requireRole(audit, projectId, principal, "admin", "permissions");
+    await assertEmptyBody(request);
+    const targetPrincipalId = parsePrincipalId(
+      decodePathComponent(rotatePermissionMatch[1] as string),
+    );
+    const result = await auditedOperation(
+      audit,
+      auditContext(projectId, principal, "permission_token_rotated", "permissions", {
+        target_principal_id: targetPrincipalId,
+      }),
+      true,
+      () =>
+        mutateProjectPermissions(runtime, async () => {
+          const existing = requiredPrincipal(runtime, targetPrincipalId);
+          const bearerToken = issueBearerToken();
+          const rotated: HubPrincipalRuntime = {
+            principalId: existing.principalId,
+            role: existing.role,
+            bearerDigest: digestToken(bearerToken),
+          };
+          runtime.principals.set(targetPrincipalId, rotated);
+          existing.bearerDigest.fill(0);
+          return { ...publicPermission(rotated), bearer_token: bearerToken };
+        }),
+    );
+    writeJson(response, 200, result);
+    return;
+  }
+
+  const permissionMatch = /^permissions\/([^/]+)$/.exec(resource);
+  if (permissionMatch !== null && request.method === "PATCH") {
+    await requireRole(audit, projectId, principal, "admin", "permissions");
+    const targetPrincipalId = parseMutablePrincipalId(
+      decodePathComponent(permissionMatch[1] as string),
+    );
+    const body = await readJsonBody(request);
+    assertExactBodyKeys(body, ["role"]);
+    const role = parseRole(body["role"]);
+    const result = await auditedOperation(
+      audit,
+      auditContext(projectId, principal, "permission_role_updated", "permissions", {
+        target_principal_id: targetPrincipalId,
+        target_role: role,
+      }),
+      true,
+      () =>
+        mutateProjectPermissions(runtime, async () => {
+          const existing = requiredPrincipal(runtime, targetPrincipalId);
+          const updated: HubPrincipalRuntime = {
+            principalId: existing.principalId,
+            role,
+            bearerDigest: existing.bearerDigest,
+          };
+          const next = new Map(runtime.principals);
+          next.set(targetPrincipalId, updated);
+          await runtime.permissions.replaceProjectGrants(projectId, storedGrants(next));
+          runtime.principals.set(targetPrincipalId, updated);
+          return publicPermission(updated);
+        }),
+    );
+    writeJson(response, 200, result);
+    return;
+  }
+
+  if (permissionMatch !== null && request.method === "DELETE") {
+    await requireRole(audit, projectId, principal, "admin", "permissions");
+    await assertEmptyBody(request);
+    const targetPrincipalId = parseMutablePrincipalId(
+      decodePathComponent(permissionMatch[1] as string),
+    );
+    await auditedOperation(
+      audit,
+      auditContext(projectId, principal, "permission_revoked", "permissions", {
+        target_principal_id: targetPrincipalId,
+      }),
+      true,
+      () =>
+        mutateProjectPermissions(runtime, async () => {
+          const existing = requiredPrincipal(runtime, targetPrincipalId);
+          const next = new Map(runtime.principals);
+          next.delete(targetPrincipalId);
+          await runtime.permissions.replaceProjectGrants(projectId, storedGrants(next));
+          runtime.principals.delete(targetPrincipalId);
+          existing.bearerDigest.fill(0);
+        }),
+    );
+    response.writeHead(204);
+    response.end();
     return;
   }
 
@@ -550,7 +729,7 @@ function decodePathComponent(value: string): string {
 
 function authorize(
   request: IncomingMessage,
-  principals: readonly HubPrincipalRuntime[],
+  principals: Iterable<HubPrincipalRuntime>,
 ): HubPrincipalRuntime | undefined {
   const header = request.headers.authorization;
   const match =
@@ -577,8 +756,8 @@ function issueProjectAccess(project: HubProject): {
       `A Hub project supports at most ${HUB_SERVER_LIMITS.principalsPerProject} principals.`,
     );
   }
-  const bootstrapAdminToken = randomBytes(TOKEN_BYTES).toString("base64url");
-  const bootstrapViewerToken = randomBytes(TOKEN_BYTES).toString("base64url");
+  const bootstrapAdminToken = issueBearerToken();
+  const bootstrapViewerToken = issueBearerToken();
   const accessGrants: HubIssuedAccessGrant[] = [
     {
       principal_id: "hub-bootstrap-admin",
@@ -607,10 +786,114 @@ function issueProjectAccess(project: HubProject): {
     accessGrants.push({
       principal_id: grant.principal_id,
       role: grant.role,
-      bearerToken: randomBytes(TOKEN_BYTES).toString("base64url"),
+      bearerToken: issueBearerToken(),
     });
   }
   return { bootstrapAdminToken, bootstrapViewerToken, accessGrants };
+}
+
+async function mutateProjectPermissions<T>(
+  runtime: HubProjectRuntime,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = runtime.permissionMutation.then(operation);
+  runtime.permissionMutation = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+function requiredPrincipal(
+  runtime: HubProjectRuntime,
+  principalId: string,
+): HubPrincipalRuntime {
+  const principal = runtime.principals.get(principalId);
+  if (principal === undefined) {
+    throw new HubRequestError({
+      status: 404,
+      code: "not_found",
+      message: "The Hub principal does not have project access.",
+    });
+  }
+  return principal;
+}
+
+function storedGrants(
+  principals: ReadonlyMap<string, HubPrincipalRuntime>,
+): readonly HubStoredAccessGrant[] {
+  return [...principals.values()]
+    .filter(
+      (principal) =>
+        principal.principalId !== "hub-bootstrap-admin" &&
+        principal.principalId !== "hub-bootstrap-viewer",
+    )
+    .map((principal) => ({
+      principal_id: principal.principalId,
+      role: principal.role,
+    }))
+    .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
+}
+
+function publicPermission(principal: HubPrincipalRuntime): PublicHubPermission {
+  return {
+    principal_id: principal.principalId,
+    role: principal.role,
+    capabilities: capabilitiesForRole(principal.role),
+  };
+}
+
+function parseMutablePrincipalId(value: unknown): string {
+  const principalId = parsePrincipalId(value);
+  if (principalId === "hub-bootstrap-admin" || principalId === "hub-bootstrap-viewer") {
+    throw new HubRequestError({
+      status: 409,
+      code: "conflict",
+      message: "Bootstrap Hub grants cannot be added, changed, or revoked.",
+    });
+  }
+  return principalId;
+}
+
+function parsePrincipalId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(value)) {
+    throw new HubRequestError({
+      status: 400,
+      code: "invalid_argument",
+      message: "A bounded Hub principal identifier is required.",
+    });
+  }
+  return value;
+}
+
+function parseRole(value: unknown): HubRole {
+  if (typeof value !== "string" || !HUB_ROLES.includes(value as HubRole)) {
+    throw new HubRequestError({
+      status: 400,
+      code: "invalid_argument",
+      message: "A supported Hub role is required.",
+    });
+  }
+  return value as HubRole;
+}
+
+function assertExactBodyKeys(body: JsonObject, expected: readonly string[]): void {
+  const keys = Object.keys(body).sort();
+  const sortedExpected = [...expected].sort();
+  if (
+    keys.length !== sortedExpected.length ||
+    keys.some((key, index) => key !== sortedExpected[index])
+  ) {
+    throw new HubRequestError({
+      status: 400,
+      code: "invalid_argument",
+      message: "The Hub permission request contains unsupported fields.",
+    });
+  }
+}
+
+function issueBearerToken(): string {
+  return randomBytes(TOKEN_BYTES).toString("base64url");
 }
 
 const HUB_ROLE_ORDER: Readonly<Record<HubRole, number>> = {
@@ -659,7 +942,7 @@ function capabilitiesForRole(role: HubRole): readonly string[] {
     capabilities.push("refs.update", "packs.import", "retention.manage");
   }
   if (role === "admin") {
-    capabilities.push("permissions.read", "audit.read");
+    capabilities.push("permissions.read", "permissions.write", "tokens.rotate", "audit.read");
   }
   return capabilities;
 }
@@ -752,7 +1035,15 @@ function parseEventPagination(url: URL): { readonly afterSequence: number; reado
 }
 
 function isCollaborationAction(action: HubAuditAction): boolean {
-  return action === "ref_updated" || action === "pack_imported" || action === "pack_exported";
+  return (
+    action === "ref_updated" ||
+    action === "pack_imported" ||
+    action === "pack_exported" ||
+    action === "permission_granted" ||
+    action === "permission_role_updated" ||
+    action === "permission_revoked" ||
+    action === "permission_token_rotated"
+  );
 }
 
 function collaborationEvent(event: HubAuditEvent): JsonObject {
@@ -761,7 +1052,9 @@ function collaborationEvent(event: HubAuditEvent): JsonObject {
       ? "RefUpdated"
       : event.action === "pack_imported"
         ? "HubPackImported"
-        : "HubPackExported";
+        : event.action === "pack_exported"
+          ? "HubPackExported"
+          : "PermissionChanged";
   return {
     event_id: event.event_id,
     sequence: event.sequence,
@@ -789,7 +1082,8 @@ async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
     chunks.push(bytes);
   }
   try {
-    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    const source = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    const parsed = JSON.parse(source) as unknown;
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("not an object");
     }
@@ -800,6 +1094,18 @@ async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {
       code: "invalid_argument",
       message: "The request body must be a JSON object.",
     });
+  }
+}
+
+async function assertEmptyBody(request: IncomingMessage): Promise<void> {
+  for await (const chunk of request) {
+    if ((chunk as Buffer).byteLength > 0) {
+      throw new HubRequestError({
+        status: 400,
+        code: "invalid_argument",
+        message: "This Hub operation does not accept a request body.",
+      });
+    }
   }
 }
 

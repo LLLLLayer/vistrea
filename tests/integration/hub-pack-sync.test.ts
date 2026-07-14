@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import https from "node:https";
 import { test, type TestContext } from "node:test";
 
@@ -14,7 +14,11 @@ import {
 import { createRepositoryProtocolValidator, MemoryDataStore } from "../../data/memory/index.js";
 import { FileObjectStore } from "../../data/objects/index.js";
 import { HubPackSync, type HubRemote } from "../../data/sync/index.js";
-import { FileHubAuditStore, startHubServer } from "../../services/hub/index.js";
+import {
+  FileHubAuditStore,
+  FileHubPermissionStore,
+  startHubServer,
+} from "../../services/hub/index.js";
 
 const repositoryRoot = process.cwd();
 const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
@@ -105,6 +109,47 @@ async function hubJson(
     throw new Error("The Hub returned a non-object JSON response.");
   }
   return { status: response.status, body: value as JsonObject };
+}
+
+async function readReadyLine(
+  child: ChildProcessWithoutNullStreams,
+  stderr: () => string,
+): Promise<JsonObject> {
+  return await new Promise<JsonObject>((resolve, reject) => {
+    let source = "";
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`The standalone Hub did not become ready: ${stderr()}`));
+    }, 15_000);
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      child.stdout.off("data", onData);
+      child.off("exit", onExit);
+    };
+    const onExit = (code: number | null): void => {
+      cleanup();
+      reject(new Error(`The standalone Hub exited with ${String(code)}: ${stderr()}`));
+    };
+    const onData = (chunk: Buffer): void => {
+      source += chunk.toString("utf8");
+      const newline = source.indexOf("\n");
+      if (newline === -1) {
+        return;
+      }
+      cleanup();
+      try {
+        const value = JSON.parse(source.slice(0, newline)) as unknown;
+        if (value === null || typeof value !== "object" || Array.isArray(value)) {
+          throw new Error("not an object");
+        }
+        resolve(value as JsonObject);
+      } catch {
+        reject(new Error(`The standalone Hub emitted an invalid ready line: ${source}`));
+      }
+    };
+    child.stdout.on("data", onData);
+    child.once("exit", onExit);
+  });
 }
 
 async function seedCommit(
@@ -456,6 +501,219 @@ test("the Hub exposes project RBAC, administrator audit, and a safe activity fee
   );
 });
 
+test("Hub administrators manage roles and rotate revocable one-time tokens", async (t) => {
+  const validator = await validatorPromise;
+  const party = await makeParty(t, "permission-admin");
+  const hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [{ project_id: PROJECT_ID, workspace: party.workspace, objects: party.objects }],
+    validator,
+  });
+  t.after(() => hub.close());
+  const admin = tokenFor(hub, PROJECT_ID).bearerToken;
+  const viewer = tokenFor(hub, PROJECT_ID).readOnlyToken;
+
+  const deniedGrant = await hubJson(hub.baseUrl, PROJECT_ID, "permissions:grant", viewer, {
+    method: "POST",
+    body: { principal_id: "zoe", role: "viewer" },
+  });
+  assert.equal(deniedGrant.status, 403);
+
+  const [firstGrant, duplicateGrant] = await Promise.all([
+    hubJson(hub.baseUrl, PROJECT_ID, "permissions:grant", admin, {
+      method: "POST",
+      body: { principal_id: "zoe", role: "viewer" },
+    }),
+    hubJson(hub.baseUrl, PROJECT_ID, "permissions:grant", admin, {
+      method: "POST",
+      body: { principal_id: "zoe", role: "viewer" },
+    }),
+  ]);
+  const granted = firstGrant.status === 201 ? firstGrant : duplicateGrant;
+  const duplicate = firstGrant.status === 409 ? firstGrant : duplicateGrant;
+  assert.equal(granted.status, 201);
+  assert.equal(duplicate.status, 409);
+  const originalToken = granted.body["bearer_token"];
+  assert.equal(typeof originalToken, "string");
+  assert.match(originalToken as string, /^[A-Za-z0-9_-]{43}$/);
+
+  const originalIdentity = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "me",
+    originalToken as string,
+  );
+  assert.equal(originalIdentity.body["role"], "viewer");
+
+  const updated = await hubJson(hub.baseUrl, PROJECT_ID, "permissions/zoe", admin, {
+    method: "PATCH",
+    body: { role: "maintainer" },
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body["role"], "maintainer");
+  const updatedIdentity = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "me",
+    originalToken as string,
+  );
+  assert.equal(updatedIdentity.body["role"], "maintainer");
+
+  const invalidUtf8 = await fetch(
+    `${hub.baseUrl}/v1/projects/${PROJECT_ID}/permissions:grant`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${admin}`,
+        "content-type": "application/json",
+      },
+      body: new Uint8Array([0xff]),
+    },
+  );
+  assert.equal(invalidUtf8.status, 400);
+  const unexpectedRotationBody = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions/zoe:rotate-token",
+    admin,
+    { method: "POST", body: {} },
+  );
+  assert.equal(unexpectedRotationBody.status, 400);
+
+  const rotated = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions/zoe:rotate-token",
+    admin,
+    { method: "POST" },
+  );
+  assert.equal(rotated.status, 200);
+  const rotatedToken = rotated.body["bearer_token"];
+  assert.equal(typeof rotatedToken, "string");
+  assert.notEqual(rotatedToken, originalToken);
+  assert.equal(
+    (await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/me`, {
+      headers: { authorization: `Bearer ${originalToken as string}` },
+    })).status,
+    401,
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", rotatedToken as string)).body["role"],
+    "maintainer",
+  );
+
+  const protectedBootstrap = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions/hub-bootstrap-admin",
+    admin,
+    { method: "PATCH", body: { role: "viewer" } },
+  );
+  assert.equal(protectedBootstrap.status, 409);
+
+  const revoked = await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/permissions/zoe`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${admin}` },
+  });
+  assert.equal(revoked.status, 204);
+  assert.equal(
+    (await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/me`, {
+      headers: { authorization: `Bearer ${rotatedToken as string}` },
+    })).status,
+    401,
+  );
+
+  const permissions = await hubJson(hub.baseUrl, PROJECT_ID, "permissions", admin);
+  assert.equal(JSON.stringify(permissions.body).includes("bearer_token"), false);
+  assert.equal(JSON.stringify(permissions.body).includes(originalToken as string), false);
+  assert.equal(JSON.stringify(permissions.body).includes(rotatedToken as string), false);
+
+  const activity = await hubJson(hub.baseUrl, PROJECT_ID, "events?limit=100", viewer);
+  const permissionEvents = (activity.body["items"] as readonly JsonObject[]).filter(
+    (event) => event["kind"] === "PermissionChanged",
+  );
+  assert.equal(permissionEvents.length, 4);
+  assert.equal(JSON.stringify(permissionEvents).includes("token"), false);
+
+  const audit = await hubJson(hub.baseUrl, PROJECT_ID, "audit-events?limit=100", admin);
+  const auditItems = audit.body["items"] as readonly JsonObject[];
+  for (const action of [
+    "permission_granted",
+    "permission_role_updated",
+    "permission_token_rotated",
+    "permission_revoked",
+  ]) {
+    assert.equal(
+      auditItems.some((event) => event["action"] === action && event["outcome"] === "succeeded"),
+      true,
+    );
+  }
+  assert.equal(JSON.stringify(audit.body).includes(originalToken as string), false);
+  assert.equal(JSON.stringify(audit.body).includes(rotatedToken as string), false);
+});
+
+test("the private Hub permission store survives restart while tokens do not", async (t) => {
+  const validator = await validatorPromise;
+  const party = await makeParty(t, "permission-store");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-permissions-"));
+  t.after(async () => fs.rm(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, "permissions.json");
+  const configured = [{
+    project_id: PROJECT_ID,
+    grants: [{ principal_id: "zoe", role: "viewer" as const }],
+  }];
+
+  let store = await FileHubPermissionStore.open(filename, configured);
+  let hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [{ project_id: PROJECT_ID, workspace: party.workspace, objects: party.objects }],
+    validator,
+    permissions: store,
+  });
+  const firstAdmin = tokenFor(hub, PROJECT_ID).bearerToken;
+  const firstZoe = grantTokenFor(hub, PROJECT_ID, "zoe");
+  const changed = await hubJson(hub.baseUrl, PROJECT_ID, "permissions/zoe", firstAdmin, {
+    method: "PATCH",
+    body: { role: "reviewer" },
+  });
+  assert.equal(changed.status, 200);
+  await hub.close();
+  await store.close();
+
+  assert.equal((await fs.stat(filename)).mode & 0o777, 0o600);
+  const persistedSource = await fs.readFile(filename, "utf8");
+  assert.match(persistedSource, /"principal_id":"zoe","role":"reviewer"/);
+  assert.equal(persistedSource.includes(firstAdmin), false);
+  assert.equal(persistedSource.includes(firstZoe), false);
+
+  store = await FileHubPermissionStore.open(filename, configured);
+  await assert.rejects(
+    FileHubPermissionStore.open(filename, configured),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [{ project_id: PROJECT_ID, workspace: party.workspace, objects: party.objects }],
+    validator,
+    permissions: store,
+  });
+  t.after(async () => {
+    await hub.close();
+    await store.close();
+  });
+  const secondAdmin = tokenFor(hub, PROJECT_ID).bearerToken;
+  const secondZoe = grantTokenFor(hub, PROJECT_ID, "zoe");
+  assert.notEqual(secondAdmin, firstAdmin);
+  assert.notEqual(secondZoe, firstZoe);
+  assert.equal((await hubJson(hub.baseUrl, PROJECT_ID, "me", secondZoe)).body["role"], "reviewer");
+  assert.equal(
+    (await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/me`, {
+      headers: { authorization: `Bearer ${firstZoe}` },
+    })).status,
+    401,
+  );
+});
+
 test("the file Hub audit store survives reopen and enforces private file mode", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-audit-"));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
@@ -512,6 +770,106 @@ test("the file Hub audit store survives reopen and enforces private file mode", 
     project_id: "project_019f0000-0000-7000-8000-000000000002",
   });
   assert.deepEqual(otherProject.items.map((event) => event.sequence), [1]);
+});
+
+test("the standalone Hub composes durable permissions and private token handoff", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-standalone-"));
+  const workspace = path.join(directory, "workspace");
+  const connectionFile = path.join(directory, "connection.json");
+  const permissionFile = path.join(directory, "permissions.json");
+  const auditLog = path.join(directory, "audit.jsonl");
+  let active: ChildProcessWithoutNullStreams | undefined;
+
+  const stop = async (): Promise<void> => {
+    const child = active;
+    active = undefined;
+    if (child === undefined || child.exitCode !== null) {
+      return;
+    }
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    child.kill("SIGTERM");
+    await exited;
+  };
+  t.after(async () => {
+    await stop();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  const start = async (): Promise<{
+    readonly admin: string;
+    readonly zoe: string;
+    readonly baseUrl: string;
+  }> => {
+    let stderr = "";
+    const child = spawn(
+      process.execPath,
+      [
+        path.join(repositoryRoot, ".build", "typescript", "services", "hub", "main.js"),
+        "--project", PROJECT_ID,
+        "--workspace", workspace,
+        "--grant", "zoe:viewer",
+        "--connection-file", connectionFile,
+        "--permission-file", permissionFile,
+        "--audit-log", auditLog,
+      ],
+      { cwd: repositoryRoot, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    active = child;
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const ready = await readReadyLine(child, () => stderr);
+    assert.equal(ready["status"], "ready");
+    const descriptor = JSON.parse(await fs.readFile(connectionFile, "utf8")) as {
+      readonly hub_url: string;
+      readonly permission_file: string;
+      readonly projects: readonly {
+        readonly hub_token: string;
+        readonly access_grants: readonly {
+          readonly principal_id: string;
+          readonly hub_token: string;
+        }[];
+      }[];
+    };
+    assert.equal(descriptor.permission_file, permissionFile);
+    const project = descriptor.projects[0];
+    const zoe = project?.access_grants.find((grant) => grant.principal_id === "zoe")?.hub_token;
+    assert.equal(typeof project?.hub_token, "string");
+    assert.equal(typeof zoe, "string");
+    return {
+      admin: project?.hub_token as string,
+      zoe: zoe as string,
+      baseUrl: descriptor.hub_url,
+    };
+  };
+
+  const first = await start();
+  assert.equal((await hubJson(first.baseUrl, PROJECT_ID, "me", first.zoe)).body["role"], "viewer");
+  const updated = await hubJson(first.baseUrl, PROJECT_ID, "permissions/zoe", first.admin, {
+    method: "PATCH",
+    body: { role: "reviewer" },
+  });
+  assert.equal(updated.status, 200);
+  await stop();
+  await assert.rejects(fs.access(connectionFile));
+  assert.equal((await fs.stat(permissionFile)).mode & 0o777, 0o600);
+
+  const second = await start();
+  assert.notEqual(second.admin, first.admin);
+  assert.notEqual(second.zoe, first.zoe);
+  assert.equal((await hubJson(second.baseUrl, PROJECT_ID, "me", second.zoe)).body["role"], "reviewer");
+  assert.equal(
+    (await fetch(`${second.baseUrl}/v1/projects/${PROJECT_ID}/me`, {
+      headers: { authorization: `Bearer ${first.zoe}` },
+    })).status,
+    401,
+  );
+  const persisted = await fs.readFile(permissionFile, "utf8");
+  assert.equal(persisted.includes(first.admin), false);
+  assert.equal(persisted.includes(first.zoe), false);
+  assert.equal(persisted.includes(second.admin), false);
+  assert.equal(persisted.includes(second.zoe), false);
+  await stop();
 });
 
 test("the Hub serves TLS when configured and refuses non-loopback plain HTTP", async (t) => {

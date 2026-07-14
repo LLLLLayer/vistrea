@@ -29,8 +29,11 @@ even when a content mutation fails or a user later moves a Ref.
    endpoints rather than granting low-level Ref mutation.
 2. Each Hub process issues independent opaque tokens for named principals.
    The existing write and read tokens remain compatible as bootstrap admin and
-   viewer principals. Tokens exist only in the private mode-`0600` connection
-   descriptor and never appear in permission, audit, or activity responses.
+   viewer principals. Admin grant and rotation calls return a new token exactly
+   once; otherwise tokens exist only in the private mode-`0600` connection
+   descriptor. Hub stores only their SHA-256 digests, rotates all credentials
+   on restart, and never includes them in permission, audit, or activity
+   responses.
 3. Authenticated role denials and sensitive project operations append to a
    `HubAuditStore`. The standalone composition uses a mode-`0600`, append-only
    JSON Lines file with strictly increasing server-global storage sequences.
@@ -43,17 +46,23 @@ even when a content mutation fails or a user later moves a Ref.
    write the attempt fails closed. A post-mutation audit failure may make the
    request result uncertain, so clients reconcile through canonical Refs
    rather than assuming that an HTTP failure rolled back shared state.
-5. The project activity feed is a least-privilege projection of successful Ref
-   and pack audit events. It omits denials, failed operations, tokens, and the
-   administrator audit stream. Collaboration resources themselves remain
-   projections of canonical Commit state selected by an explicit version.
+5. The project activity feed is a least-privilege projection of successful Ref,
+   pack, and permission audit events. Permission changes share one
+   `PermissionChanged` event kind and omit credentials. The feed also omits
+   denials, failed operations, and the administrator audit stream.
+   Collaboration resources themselves remain projections of canonical Commit
+   state selected by an explicit version.
 6. Invalid or cross-project bearer tokens return the same unauthenticated
    response and are not written to the project audit file. This avoids both
    namespace disclosure and unauthenticated audit-log exhaustion; deployment
    ingress may retain rate-limited network authentication telemetry.
-7. The Beta manages grants at process startup. Permission mutation, token
-   rotation APIs, organization/team inheritance, external identity providers,
-   retention automation, and deployment-grade audit export remain later work.
+7. The Beta persists named project roles outside the Workspace in a private,
+   single-writer JSON document. Admins may grant, re-role, revoke, and rotate
+   tokens online. Role changes are serialized per project and atomically
+   persisted before live authorization changes. Bootstrap roles cannot be
+   changed or revoked, preserving the existing client contract. Organization
+   and team inheritance, external identity providers, retention automation,
+   and deployment-grade audit export remain later work.
 
 ## Alternatives considered
 
@@ -90,13 +99,15 @@ rotation exists.
   administrators.
 - Viewers can follow safe collaboration activity without receiving security
   evidence or secrets.
+- Administrators can change one principal without restarting Hub or rotating
+  every other team's credential.
 - Local Workspaces and portable packs remain independent of Hub availability.
 
 ### Negative
 
 - Audit and Workspace writes are deliberately not one distributed transaction.
-- Startup-managed grants require a Hub restart to add, remove, or rotate a
-  principal in the Beta.
+- The standalone Beta has one permission-file writer and is not yet a
+  multi-node identity or policy service.
 - The JSON Lines implementation requires operator rotation after its bounded
   size is reached and is not a multi-node audit backend.
 
@@ -106,6 +117,9 @@ rotation exists.
   paths, no-follow opening, an exclusive sidecar ownership lock, regular-file
   validation, private permissions, strict event validation, and monotonic
   sequence checks on reopen. Crash-stale lock recovery is explicit.
+- Permission-file replacement uses the same absolute-path, no-follow,
+  regular-file, private-mode, ownership-lock, fsync, and atomic-rename
+  principles; it stores roles only, never bearer tokens.
 - A cross-project token oracle is prevented by authorizing only against the
   requested project and returning one unauthenticated error shape.
 - A response may be uncertain after a successful mutation and failed outcome
@@ -117,13 +131,16 @@ rotation exists.
 
 Existing Hub clients continue to use `bearerToken` as bootstrap admin and
 `readOnlyToken` as bootstrap viewer. The sync and pack contracts do not change.
-Named grants and audit endpoints are additive service behavior; no Workspace,
-protocol fixture, or `.vistrea-pack` migration is required.
+Named grants, online permission administration, and audit endpoints are
+additive service behavior; no Workspace, protocol fixture, or `.vistrea-pack`
+migration is required. On first standalone start, `--grant` values seed the
+permission document. After that, the persisted document is authoritative, so
+an API mutation survives a restart without persisting the old token.
 
 ## Validation
 
-Integration coverage is written for role hierarchy, project isolation,
-bootstrap compatibility, token non-disclosure, role-denial audit, mutation
-attempt/outcome audit, safe activity projection, private file mode, and audit
-sequence continuity after reopen. Execution is intentionally deferred while
-the project owner has paused testing.
+Integration coverage passes for role hierarchy, project isolation, bootstrap
+compatibility, concurrent duplicate-grant serialization, role mutation,
+selective revocation and rotation, token non-disclosure, role-denial audit,
+mutation attempt/outcome audit, safe activity projection, private file mode,
+and both permission and audit continuity after reopen.

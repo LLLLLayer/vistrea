@@ -7,6 +7,7 @@ import path from "node:path";
 import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
 import { LocalDataWorkspace } from "../../data/workspace/index.js";
 import { FileHubAuditStore, HUB_ROLES, type HubRole } from "./audit-store.js";
+import { FileHubPermissionStore } from "./permission-store.js";
 import {
   HUB_SERVER_LIMITS,
   startHubServer,
@@ -18,7 +19,8 @@ const USAGE =
   "Usage: vistrea-hub (--project <project_id> --workspace <abs-path>)... " +
   "[--grant <principal_id:role>]... " +
   "[--connection-file <abs-path>] [--host <address>] [--port <port>] " +
-  "[--tls-cert <pem> --tls-key <pem>] [--audit-log <abs-path>]\n";
+  "[--tls-cert <pem> --tls-key <pem>] [--audit-log <abs-path>] " +
+  "[--permission-file <abs-path>]\n";
 const PRINCIPAL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
 
 const values = new Map<string, string>();
@@ -44,6 +46,7 @@ for (let index = 0; index < args.length; index += 1) {
       "--tls-cert",
       "--tls-key",
       "--audit-log",
+      "--permission-file",
     ].includes(option)
   ) {
     process.stderr.write(USAGE);
@@ -92,6 +95,7 @@ const tlsCert = values.get("--tls-cert");
 const tlsKey = values.get("--tls-key");
 const configuredConnectionFile = values.get("--connection-file");
 const configuredAuditLog = values.get("--audit-log");
+const configuredPermissionFile = values.get("--permission-file");
 if (
   projectPairs.length === 0 ||
   projectPairs.length > HUB_SERVER_LIMITS.projects ||
@@ -103,7 +107,8 @@ if (
   (tlsCert === undefined) !== (tlsKey === undefined) ||
   (tlsCert !== undefined && (!path.isAbsolute(tlsCert) || !path.isAbsolute(tlsKey as string))) ||
   (configuredConnectionFile !== undefined && !path.isAbsolute(configuredConnectionFile)) ||
-  (configuredAuditLog !== undefined && !path.isAbsolute(configuredAuditLog))
+  (configuredAuditLog !== undefined && !path.isAbsolute(configuredAuditLog)) ||
+  (configuredPermissionFile !== undefined && !path.isAbsolute(configuredPermissionFile))
 ) {
   process.stderr.write(USAGE);
   process.exit(2);
@@ -122,11 +127,19 @@ if (workspaceRoots.size !== projectPairs.length || projectIds.size !== projectPa
 const auditLog =
   configuredAuditLog ??
   path.join(projectPairs[0]?.workspaceRoot as string, ".hub", "audit.jsonl");
+const permissionFile =
+  configuredPermissionFile ??
+  path.join(projectPairs[0]?.workspaceRoot as string, ".hub", "permissions.json");
 const connectionFile =
   configuredConnectionFile ?? path.join(os.tmpdir(), `vistrea-hub-${process.pid}.json`);
+if (new Set([auditLog, permissionFile, connectionFile]).size !== 3) {
+  process.stderr.write(USAGE);
+  process.exit(2);
+}
 
 const openWorkspaces = [] as Awaited<ReturnType<typeof LocalDataWorkspace.open>>[];
 let audit: FileHubAuditStore | undefined;
+let permissions: FileHubPermissionStore | undefined;
 let hub: Awaited<ReturnType<typeof startHubServer>> | undefined;
 let connectionFileCreated = false;
 try {
@@ -146,8 +159,18 @@ try {
       project_id: pair.projectId,
       workspace: workspace.data as never,
       objects: workspace.objects as never,
-      access: pair.grants,
+      access: [],
     });
+  }
+  permissions = await FileHubPermissionStore.open(
+    permissionFile,
+    projectPairs.map((pair) => ({
+      project_id: pair.projectId,
+      grants: pair.grants,
+    })),
+  );
+  for (const project of projects) {
+    project.access = permissions.listProjectGrants(project.project_id);
   }
   audit = await FileHubAuditStore.open(auditLog);
   hub = await startHubServer({
@@ -156,13 +179,15 @@ try {
     projects,
     validator,
     audit,
+    permissions,
     ...(tlsCert === undefined
       ? {}
       : { tls: { certificatePath: tlsCert, privateKeyPath: tlsKey as string } }),
   });
 
-  // The rotating token travels only through a private connection descriptor,
-  // exactly like the Host: never argv, stdout, or logs.
+  // Startup tokens travel only through a private connection descriptor,
+  // exactly like the Host: never argv, stdout, or logs. Later grant/rotation
+  // calls return a replacement exactly once through the authenticated API.
   await fs.mkdir(path.dirname(connectionFile), { recursive: true, mode: 0o700 });
   const handle = await fs.open(connectionFile, "wx", 0o600);
   connectionFileCreated = true;
@@ -181,6 +206,7 @@ try {
           })),
         })),
         audit_log: auditLog,
+        permission_file: permissionFile,
       })}\n`,
       "utf8",
     );
@@ -190,6 +216,7 @@ try {
 } catch (error) {
   await hub?.close().catch(() => {});
   await audit?.close().catch(() => {});
+  await permissions?.close().catch(() => {});
   for (const workspace of openWorkspaces.reverse()) {
     await workspace.close().catch(() => {});
   }
@@ -201,7 +228,8 @@ try {
 
 const runningHub = hub;
 const runningAudit = audit;
-if (runningHub === undefined || runningAudit === undefined) {
+const runningPermissions = permissions;
+if (runningHub === undefined || runningAudit === undefined || runningPermissions === undefined) {
   throw new Error("The Hub composition did not finish startup.");
 }
 process.stdout.write(
@@ -218,6 +246,7 @@ const shutdown = async (): Promise<void> => {
   for (const operation of [
     () => runningHub.close(),
     () => runningAudit.close(),
+    () => runningPermissions.close(),
     ...openWorkspaces.reverse().map((workspace) => () => workspace.close()),
     () => fs.rm(connectionFile, { force: true }),
   ]) {

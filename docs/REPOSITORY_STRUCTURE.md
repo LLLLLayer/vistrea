@@ -141,6 +141,7 @@ vistrea/
 │   └── hub/
 │       ├── README.md
 │       ├── audit-store.ts       # operational append-only audit port and JSONL store
+│       ├── permission-store.ts  # private durable project roles; never bearer tokens
 │       ├── hub-server.ts        # optional RBAC pack relay and activity feed
 │       ├── index.ts
 │       └── main.ts

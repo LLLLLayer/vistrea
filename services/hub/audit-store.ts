@@ -37,6 +37,10 @@ export type HubRole = (typeof HUB_ROLES)[number];
 export const HUB_AUDIT_ACTIONS = [
   "access_denied",
   "permissions_listed",
+  "permission_granted",
+  "permission_role_updated",
+  "permission_revoked",
+  "permission_token_rotated",
   "audit_listed",
   "refs_listed",
   "ref_resolved",
