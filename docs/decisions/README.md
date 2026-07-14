@@ -13,3 +13,4 @@ Record schema format, transport, storage, implementation language, state dedupli
 - `0008-cli-only-agent-adapter.md`: retired the stdio MCP server; the strict JSON CLI with `VISTREA_CLI_TOOLSETS` focus is the single agent adapter
 - `0009-direct-macos-distribution.md`: accepted Developer ID, notarized GitHub Releases, and signed Sparkle updates for direct Studio distribution
 - `0010-physical-runtime-tls.md`: accepted exact-IP TLS 1.3 with leaf-certificate pinning for physical-device Runtime connections while the Host Local API stays loopback-only
+- `0011-hub-rbac-and-operational-audit.md`: accepted project-scoped Hub RBAC, per-principal grants, separate append-only operational audit, and a least-privilege activity projection

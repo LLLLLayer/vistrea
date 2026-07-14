@@ -14,7 +14,7 @@ import {
 import { createRepositoryProtocolValidator, MemoryDataStore } from "../../data/memory/index.js";
 import { FileObjectStore } from "../../data/objects/index.js";
 import { HubPackSync, type HubRemote } from "../../data/sync/index.js";
-import { startHubServer } from "../../services/hub/index.js";
+import { FileHubAuditStore, startHubServer } from "../../services/hub/index.js";
 
 const repositoryRoot = process.cwd();
 const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
@@ -33,14 +33,39 @@ async function countObjects(root: string): Promise<number> {
 
 /** Tokens are per project: a Hub token never reaches another namespace. */
 function tokenFor(
-  hub: { readonly projects: readonly { project_id: string; bearerToken: string; readOnlyToken: string }[] },
+  hub: {
+    readonly projects: readonly {
+      project_id: string;
+      bearerToken: string;
+      readOnlyToken: string;
+      accessGrants?: readonly { principal_id: string; role: string; bearerToken: string }[];
+    }[];
+  },
   projectId: string,
-): { bearerToken: string; readOnlyToken: string } {
+): {
+  bearerToken: string;
+  readOnlyToken: string;
+  accessGrants?: readonly { principal_id: string; role: string; bearerToken: string }[];
+} {
   const project = hub.projects.find((candidate) => candidate.project_id === projectId);
   if (project === undefined) {
     throw new Error(`The Hub does not serve ${projectId}.`);
   }
   return project;
+}
+
+function grantTokenFor(
+  hub: Parameters<typeof tokenFor>[0],
+  projectId: string,
+  principalId: string,
+): string {
+  const grant = tokenFor(hub, projectId).accessGrants?.find(
+    (candidate) => candidate.principal_id === principalId,
+  );
+  if (grant === undefined) {
+    throw new Error(`The Hub did not issue a token for ${principalId}.`);
+  }
+  return grant.bearerToken;
 }
 
 interface Party {
@@ -58,6 +83,28 @@ async function makeParty(t: TestContext, label: string): Promise<Party> {
   const objects = await FileObjectStore.open({ workspaceRoot: root });
   const sync = new HubPackSync({ workspace, objects, validator });
   return { root, workspace, objects, sync };
+}
+
+async function hubJson(
+  baseUrl: string,
+  projectId: string,
+  resource: string,
+  token: string,
+  options: { readonly method?: string; readonly body?: JsonObject } = {},
+): Promise<{ readonly status: number; readonly body: JsonObject }> {
+  const response = await fetch(`${baseUrl}/v1/projects/${projectId}/${resource}`, {
+    method: options.method ?? "GET",
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+    },
+    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+  });
+  const value = (await response.json()) as unknown;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The Hub returned a non-object JSON response.");
+  }
+  return { status: response.status, body: value as JsonObject };
 }
 
 async function seedCommit(
@@ -279,6 +326,192 @@ test("the Hub isolates project namespaces and enforces read-only tokens", async 
     await reader.sync.fetch({ remote: readOnlyRemote, ref_names: [REF_NAME], created_by: ACTOR });
   }
   assert.equal(await countObjects(partyA.root), beforeExports);
+});
+
+test("the Hub exposes project RBAC, administrator audit, and a safe activity feed", async (t) => {
+  const validator = await validatorPromise;
+  const party = await makeParty(t, "rbac");
+  const hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [
+      {
+        project_id: PROJECT_ID,
+        workspace: party.workspace,
+        objects: party.objects,
+        access: [
+          { principal_id: "alice", role: "contributor" },
+          { principal_id: "riley", role: "reviewer" },
+          { principal_id: "maya", role: "maintainer" },
+        ],
+      },
+    ],
+    validator,
+  });
+  t.after(() => hub.close());
+
+  const projectTokens = tokenFor(hub, PROJECT_ID);
+  const alice = grantTokenFor(hub, PROJECT_ID, "alice");
+  const riley = grantTokenFor(hub, PROJECT_ID, "riley");
+  const maya = grantTokenFor(hub, PROJECT_ID, "maya");
+
+  for (const [token, principal, role] of [
+    [projectTokens.readOnlyToken, "hub-bootstrap-viewer", "viewer"],
+    [alice, "alice", "contributor"],
+    [riley, "riley", "reviewer"],
+    [maya, "maya", "maintainer"],
+    [projectTokens.bearerToken, "hub-bootstrap-admin", "admin"],
+  ] as const) {
+    const response = await hubJson(hub.baseUrl, PROJECT_ID, "me", token);
+    assert.equal(response.status, 200);
+    assert.equal(response.body["principal_id"], principal);
+    assert.equal(response.body["role"], role);
+  }
+
+  const permissions = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions",
+    projectTokens.bearerToken,
+  );
+  assert.equal(permissions.status, 200);
+  assert.equal((permissions.body["items"] as readonly unknown[]).length, 5);
+  assert.equal(JSON.stringify(permissions.body).includes(projectTokens.bearerToken), false);
+
+  const deniedPermissions = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions",
+    projectTokens.readOnlyToken,
+  );
+  assert.equal(deniedPermissions.status, 403);
+  const deniedRef = await hubJson(hub.baseUrl, PROJECT_ID, "refs:update", alice, {
+    method: "POST",
+    body: {},
+  });
+  assert.equal(deniedRef.status, 403);
+  const maintainerReachedValidation = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "refs:update",
+    maya,
+    { method: "POST", body: {} },
+  );
+  assert.equal(maintainerReachedValidation.status, 400);
+
+  const author = await makeParty(t, "rbac-author");
+  await seedCommit(author, "Publish RBAC activity.", '{"screens":["rbac"]}');
+  await author.sync.push({
+    remote: {
+      baseUrl: hub.baseUrl,
+      bearerToken: projectTokens.bearerToken,
+      projectId: PROJECT_ID,
+    },
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+
+  const activity = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "events?limit=50",
+    projectTokens.readOnlyToken,
+  );
+  assert.equal(activity.status, 200);
+  const activityItems = activity.body["items"] as readonly JsonObject[];
+  assert.equal(activityItems.some((event) => event["kind"] === "HubPackImported"), true);
+  assert.equal(JSON.stringify(activity.body).includes(projectTokens.bearerToken), false);
+
+  const forbiddenAudit = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "audit-events",
+    riley,
+  );
+  assert.equal(forbiddenAudit.status, 403);
+  const audit = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "audit-events?limit=100",
+    projectTokens.bearerToken,
+  );
+  assert.equal(audit.status, 200);
+  const auditItems = audit.body["items"] as readonly JsonObject[];
+  assert.equal(
+    auditItems.some(
+      (event) => event["action"] === "access_denied" && event["principal_id"] === "alice",
+    ),
+    true,
+  );
+  assert.equal(
+    auditItems.some(
+      (event) => event["action"] === "pack_imported" && event["outcome"] === "attempted",
+    ),
+    true,
+  );
+  assert.equal(
+    auditItems.some(
+      (event) => event["action"] === "pack_imported" && event["outcome"] === "succeeded",
+    ),
+    true,
+  );
+});
+
+test("the file Hub audit store survives reopen and enforces private file mode", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-audit-"));
+  t.after(async () => fs.rm(directory, { recursive: true, force: true }));
+  const filename = path.join(directory, "audit.jsonl");
+  const first = await FileHubAuditStore.open(filename, {
+    now: () => new Date("2026-07-14T10:00:00.000Z"),
+  });
+  t.after(() => first.close());
+  await first.record({
+    project_id: PROJECT_ID,
+    principal_id: "audit-test",
+    role: "admin",
+    action: "permissions_listed",
+    outcome: "succeeded",
+    resource: "permissions",
+  });
+  await assert.rejects(
+    FileHubAuditStore.open(filename),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  await first.record({
+    project_id: "project_019f0000-0000-7000-8000-000000000002",
+    principal_id: "other-project-admin",
+    role: "admin",
+    action: "permissions_listed",
+    outcome: "succeeded",
+    resource: "permissions",
+  });
+  await first.close();
+  await assert.rejects(fs.access(`${filename}.lock`));
+  assert.equal((await fs.stat(filename)).mode & 0o777, 0o600);
+
+  const reopened = await FileHubAuditStore.open(filename, {
+    now: () => new Date("2026-07-14T10:01:00.000Z"),
+  });
+  t.after(() => reopened.close());
+  await reopened.record({
+    project_id: PROJECT_ID,
+    principal_id: "audit-test",
+    role: "admin",
+    action: "audit_listed",
+    outcome: "succeeded",
+    resource: "audit-events",
+  });
+  const page = await reopened.list({ project_id: PROJECT_ID });
+  assert.deepEqual(page.items.map((event) => event.sequence), [1, 2]);
+  assert.deepEqual(page.items.map((event) => event.occurred_at), [
+    "2026-07-14T10:00:00.000Z",
+    "2026-07-14T10:01:00.000Z",
+  ]);
+  const afterFirst = await reopened.list({ project_id: PROJECT_ID, after_sequence: 1 });
+  assert.deepEqual(afterFirst.items.map((event) => event.sequence), [2]);
+  const otherProject = await reopened.list({
+    project_id: "project_019f0000-0000-7000-8000-000000000002",
+  });
+  assert.deepEqual(otherProject.items.map((event) => event.sequence), [1]);
 });
 
 test("the Hub serves TLS when configured and refuses non-loopback plain HTTP", async (t) => {

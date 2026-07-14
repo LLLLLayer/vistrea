@@ -351,6 +351,13 @@ Merge behavior depends on data type:
 - Design Baselines and Tuning Patches require explicit review;
 - binary objects are referenced by hash and never content-merged.
 
+Hub operational audit is intentionally outside this versioned content model.
+The server records authenticated access decisions and mutation intent in an
+append-only audit store, while Review Issues, Design Baselines, Knowledge
+Collections, and other collaboration resources remain Commit/Ref truth. The
+project activity feed is a safe projection of successful audit events, not a
+second repository. See ADR-0011.
+
 ## 10. Security and lifecycle
 
 - Redact sensitive text before publication according to project policy.

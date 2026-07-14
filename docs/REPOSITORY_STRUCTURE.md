@@ -140,7 +140,9 @@ vistrea/
 │   ├── README.md
 │   └── hub/
 │       ├── README.md
-│       ├── hub-server.ts        # optional loopback pack relay
+│       ├── audit-store.ts       # operational append-only audit port and JSONL store
+│       ├── hub-server.ts        # optional RBAC pack relay and activity feed
+│       ├── index.ts
 │       └── main.ts
 ├── integrations/
 │   ├── README.md
@@ -247,7 +249,8 @@ vistrea/
     │   ├── 0007-screen-state-identity-and-device-automation.md
     │   ├── 0008-cli-only-agent-adapter.md
     │   ├── 0009-direct-macos-distribution.md
-    │   └── 0010-physical-runtime-tls.md
+    │   ├── 0010-physical-runtime-tls.md
+    │   └── 0011-hub-rbac-and-operational-audit.md
     ├── release/
     │   └── STUDIO_MACOS_RELEASE.md
     └── roadmap/

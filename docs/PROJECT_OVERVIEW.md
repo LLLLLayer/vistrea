@@ -518,7 +518,15 @@ The basic real-input automation, dangerous-action confirmation, and raised Store
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
 
-The Agent adapters cover all 65 implemented Host operations through one strict JSON CLI, with a machine-readable operation manifest enforcing Host/CLI/catalog parity. An optional multi-project Hub pack relay serves fast-forward push and fetch over loopback or TLS with per-project read-write and read-only tokens; user-facing sync, team spaces, auditing, richer permissions, discovery, and collaboration remain future Hub work.
+The Agent adapters cover all 65 implemented Host operations through one strict
+JSON CLI, with a machine-readable operation manifest enforcing Host/CLI/catalog
+parity. The optional multi-project Hub pack relay serves fast-forward push and
+fetch over loopback or TLS 1.3 with project-scoped viewer, contributor,
+reviewer, maintainer, and admin grants. It persists an append-only operational
+audit log and exposes admin audit/permission views plus a project-safe pollable
+activity feed. Permission mutation and rotation, organization/team inheritance,
+searchable discovery, versioned collaboration mutations, subscriptions, and a
+user-facing Studio sync experience remain future Hub work.
 
 ## 12. First complete demonstration
 
