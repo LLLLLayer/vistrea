@@ -524,14 +524,17 @@ The Agent adapters cover all 65 implemented Host operations through one strict
 JSON CLI, with a machine-readable operation manifest enforcing Host/CLI/catalog
 parity. The optional multi-project Hub pack relay serves fast-forward push and
 fetch over loopback or TLS 1.3 with project-scoped viewer, contributor,
-reviewer, maintainer, and admin grants. It persists an append-only operational
-audit log and exposes admin audit/permission views plus a project-safe pollable
-activity feed. Admins can grant, re-role, revoke, and rotate named-principal
-access; roles persist in a private atomic service document while plaintext
-tokens remain one-time or descriptor-only values and rotate at restart.
-Organization/team inheritance, searchable discovery, versioned collaboration
-mutations, subscriptions, and a user-facing Studio sync experience remain
-future Hub work.
+reviewer, maintainer, and admin grants plus organization-scoped team grants
+that inherit into associated projects. Direct and inherited roles combine by
+effective maximum while preserving their source. It persists an append-only
+operational audit log and exposes admin audit/permission views plus a
+project-safe pollable activity feed; team permission evidence fans out to every
+affected project. Admins can grant, re-role, revoke, and rotate named-principal
+access. Project roles and team directory state persist in separate private
+atomic service documents while plaintext tokens remain one-time or
+descriptor-only values and rotate at restart. Searchable discovery,
+organization-wide roles, versioned collaboration mutations, subscriptions,
+and a user-facing Studio sync experience remain future Hub work.
 
 ## 12. First complete demonstration
 

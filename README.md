@@ -80,9 +80,9 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 1. Add dedicated Studio controls for source suggestions and Knowledge Collection management; Difference promotion and fresh-build recapture verification are implemented.
 2. Run the remaining Android adb physical vertical lane, extend the verified iOS pinned-TLS lane across the broader native tuning matrix, and strengthen the iOS Release artifact boundary.
 3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
-4. Add Hub organization/team inheritance, discovery, subscriptions, versioned
-   collaboration mutations, and user-facing Studio sync on top of the verified
-   project permission and audit Beta.
+4. Add Hub discovery, subscriptions, versioned collaboration mutations, and
+   user-facing Studio sync on top of the verified project and organization-
+   scoped team permission/audit Beta.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
@@ -100,14 +100,17 @@ The Android physical lane reuses the one-shot-token and `adb reverse` path and
 remains implemented but hardware-unverified. Both lanes stay opt-in and fail
 closed unless a specific physical device is supplied.
 
-The optional Hub Beta now adds five project roles, named-principal rotating
-tokens, a private append-only audit log, administrator permission/audit views,
-and a safe cursor-paginated activity feed to the existing multi-project pack
-relay. Administrators can grant, re-role, revoke, and rotate principals online;
-private atomic role state survives restart while all plaintext tokens rotate.
-The focused Hub suite and full Host gate verify these boundaries. Organization
-and team inheritance, discovery, subscriptions, versioned collaboration
-endpoints, and Studio sync remain follow-up work.
+The optional Hub Beta now adds five roles, named-principal rotating tokens,
+direct project grants, organization-scoped team inheritance, a private
+append-only audit log, administrator permission/audit views, and a safe
+cursor-paginated activity feed to the existing multi-project pack relay.
+Administrators can grant, re-role, revoke, and rotate project or team
+principals online. Direct and inherited roles preserve their source and combine
+by effective maximum; team mutations are visible in every child project's
+audit/activity stream. Private atomic role and directory state survive restart
+while all plaintext tokens rotate. Search, subscriptions, organization-wide
+roles, versioned collaboration endpoints, and Studio sync remain follow-up
+work.
 
 Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes, owns a default Application Support Workspace, and can switch Workspaces from its File menu, so a packaged app no longer depends on shell-provided Host credentials. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
 

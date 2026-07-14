@@ -42,6 +42,7 @@ export const HUB_AUDIT_ACTIONS = [
   "permission_revoked",
   "permission_token_rotated",
   "audit_listed",
+  "team_projects_listed",
   "refs_listed",
   "ref_resolved",
   "ref_updated",

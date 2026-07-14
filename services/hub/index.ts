@@ -4,6 +4,8 @@ export {
   type HubAccessGrant,
   type HubBindAddress,
   type HubIssuedAccessGrant,
+  type HubTeam,
+  type HubTeamTokens,
   type HubProjectTokens,
   type HubServerHandle,
   type StartHubServerOptions,
@@ -30,3 +32,10 @@ export {
   type HubPermissionStore,
   type HubStoredAccessGrant,
 } from "./permission-store.js";
+export {
+  FileHubDirectoryStore,
+  MemoryHubDirectoryStore,
+  type HubDirectoryStore,
+  type HubDirectoryTeam,
+  type HubStoredTeamGrant,
+} from "./directory-store.js";

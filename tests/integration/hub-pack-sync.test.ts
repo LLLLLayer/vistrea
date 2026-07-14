@@ -16,6 +16,7 @@ import { FileObjectStore } from "../../data/objects/index.js";
 import { HubPackSync, type HubRemote } from "../../data/sync/index.js";
 import {
   FileHubAuditStore,
+  FileHubDirectoryStore,
   FileHubPermissionStore,
   startHubServer,
 } from "../../services/hub/index.js";
@@ -23,6 +24,10 @@ import {
 const repositoryRoot = process.cwd();
 const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
 const PROJECT_ID = "project_019f0000-0000-7000-8000-000000000001";
+const PROJECT_ID_TWO = "project_019f0000-0000-7000-8000-000000000002";
+const PROJECT_ID_OUTSIDE = "project_019f0000-0000-7000-8000-000000000003";
+const ORGANIZATION_ID = "vistrea";
+const TEAM_ID = "design";
 const REF_NAME = "teams/sync/main";
 const ACTOR = { kind: "agent", id: "vistrea-sync-test", extensions: {} };
 
@@ -72,6 +77,48 @@ function grantTokenFor(
   return grant.bearerToken;
 }
 
+function teamTokenFor(
+  hub: {
+    readonly teams: readonly {
+      organization_id: string;
+      team_id: string;
+      bearerToken: string;
+      readOnlyToken: string;
+      accessGrants: readonly { principal_id: string; role: string; bearerToken: string }[];
+    }[];
+  },
+  organizationId: string,
+  teamId: string,
+): {
+  readonly bearerToken: string;
+  readonly readOnlyToken: string;
+  readonly accessGrants: readonly { principal_id: string; role: string; bearerToken: string }[];
+} {
+  const team = hub.teams.find(
+    (candidate) =>
+      candidate.organization_id === organizationId && candidate.team_id === teamId,
+  );
+  if (team === undefined) {
+    throw new Error(`The Hub does not serve ${organizationId}/${teamId}.`);
+  }
+  return team;
+}
+
+function teamGrantTokenFor(
+  hub: Parameters<typeof teamTokenFor>[0],
+  organizationId: string,
+  teamId: string,
+  principalId: string,
+): string {
+  const grant = teamTokenFor(hub, organizationId, teamId).accessGrants.find(
+    (candidate) => candidate.principal_id === principalId,
+  );
+  if (grant === undefined) {
+    throw new Error(`The Hub did not issue a team token for ${principalId}.`);
+  }
+  return grant.bearerToken;
+}
+
 interface Party {
   readonly root: string;
   readonly workspace: MemoryDataStore;
@@ -104,6 +151,32 @@ async function hubJson(
     },
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
+  const value = (await response.json()) as unknown;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The Hub returned a non-object JSON response.");
+  }
+  return { status: response.status, body: value as JsonObject };
+}
+
+async function teamJson(
+  baseUrl: string,
+  organizationId: string,
+  teamId: string,
+  resource: string,
+  token: string,
+  options: { readonly method?: string; readonly body?: JsonObject } = {},
+): Promise<{ readonly status: number; readonly body: JsonObject }> {
+  const response = await fetch(
+    `${baseUrl}/v1/organizations/${organizationId}/teams/${teamId}/${resource}`,
+    {
+      method: options.method ?? "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    },
+  );
   const value = (await response.json()) as unknown;
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("The Hub returned a non-object JSON response.");
@@ -652,6 +725,243 @@ test("Hub administrators manage roles and rotate revocable one-time tokens", asy
   assert.equal(JSON.stringify(audit.body).includes(rotatedToken as string), false);
 });
 
+test("team roles inherit across associated projects with effective-role and audit isolation", async (t) => {
+  const validator = await validatorPromise;
+  const first = await makeParty(t, "team-first");
+  const second = await makeParty(t, "team-second");
+  const outside = await makeParty(t, "team-outside");
+  const hub = await startHubServer({
+    host: "127.0.0.1",
+    teams: [
+      {
+        organization_id: ORGANIZATION_ID,
+        team_id: TEAM_ID,
+        access: [{ principal_id: "alice", role: "reviewer" }],
+      },
+    ],
+    projects: [
+      {
+        project_id: PROJECT_ID,
+        organization_id: ORGANIZATION_ID,
+        team_id: TEAM_ID,
+        workspace: first.workspace,
+        objects: first.objects,
+        access: [{ principal_id: "alice", role: "maintainer" }],
+      },
+      {
+        project_id: PROJECT_ID_TWO,
+        organization_id: ORGANIZATION_ID,
+        team_id: TEAM_ID,
+        workspace: second.workspace,
+        objects: second.objects,
+      },
+      {
+        project_id: PROJECT_ID_OUTSIDE,
+        workspace: outside.workspace,
+        objects: outside.objects,
+      },
+    ],
+    validator,
+  });
+  t.after(() => hub.close());
+
+  const team = teamTokenFor(hub, ORGANIZATION_ID, TEAM_ID);
+  const teamAlice = teamGrantTokenFor(hub, ORGANIZATION_ID, TEAM_ID, "alice");
+  const directAlice = grantTokenFor(hub, PROJECT_ID, "alice");
+  const firstIdentity = await hubJson(hub.baseUrl, PROJECT_ID, "me", teamAlice);
+  assert.equal(firstIdentity.status, 200);
+  assert.equal(firstIdentity.body["role"], "maintainer");
+  assert.equal(firstIdentity.body["credential_scope"], "team");
+  assert.deepEqual(
+    (firstIdentity.body["permission_sources"] as readonly JsonObject[]).map((source) => [
+      source["scope"],
+      source["role"],
+    ]),
+    [["project", "maintainer"], ["team", "reviewer"]],
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", directAlice)).body["credential_scope"],
+    "project",
+  );
+
+  const secondIdentity = await hubJson(hub.baseUrl, PROJECT_ID_TWO, "me", teamAlice);
+  assert.equal(secondIdentity.body["role"], "reviewer");
+  assert.deepEqual(
+    (secondIdentity.body["permission_sources"] as readonly JsonObject[]).map(
+      (source) => source["scope"],
+    ),
+    ["team"],
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID_OUTSIDE, "me", teamAlice)).status,
+    401,
+  );
+
+  const projects = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "projects",
+    teamAlice,
+  );
+  assert.deepEqual(
+    (projects.body["items"] as readonly JsonObject[]).map((item) => [
+      item["project_id"],
+      item["role"],
+    ]),
+    [[PROJECT_ID, "maintainer"], [PROJECT_ID_TWO, "reviewer"]],
+  );
+
+  const denied = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions:grant",
+    team.readOnlyToken,
+    { method: "POST", body: { principal_id: "bob", role: "contributor" } },
+  );
+  assert.equal(denied.status, 403);
+
+  const granted = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions:grant",
+    team.bearerToken,
+    { method: "POST", body: { principal_id: "bob", role: "contributor" } },
+  );
+  assert.equal(granted.status, 201);
+  const originalBobToken = granted.body["bearer_token"];
+  assert.equal(typeof originalBobToken, "string");
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", originalBobToken as string)).body["role"],
+    "contributor",
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID_TWO, "me", originalBobToken as string)).body["role"],
+    "contributor",
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID_OUTSIDE, "me", originalBobToken as string)).status,
+    401,
+  );
+
+  const updated = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions/bob",
+    team.bearerToken,
+    { method: "PATCH", body: { role: "reviewer" } },
+  );
+  assert.equal(updated.status, 200);
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID_TWO, "me", originalBobToken as string)).body["role"],
+    "reviewer",
+  );
+
+  const permissions = await hubJson(
+    hub.baseUrl,
+    PROJECT_ID,
+    "permissions",
+    team.bearerToken,
+  );
+  const permissionItems = permissions.body["items"] as readonly JsonObject[];
+  const alicePermission = permissionItems.find((item) => item["principal_id"] === "alice");
+  const bobPermission = permissionItems.find((item) => item["principal_id"] === "bob");
+  assert.equal(alicePermission?.["role"], "maintainer");
+  assert.equal(
+    (alicePermission?.["permission_sources"] as readonly JsonObject[]).length,
+    2,
+  );
+  assert.equal(bobPermission?.["role"], "reviewer");
+  assert.equal(
+    (bobPermission?.["permission_sources"] as readonly JsonObject[])[0]?.["scope"],
+    "team",
+  );
+
+  const rotated = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions/bob:rotate-token",
+    team.bearerToken,
+    { method: "POST" },
+  );
+  const rotatedBobToken = rotated.body["bearer_token"];
+  assert.equal(rotated.status, 200);
+  assert.equal(typeof rotatedBobToken, "string");
+  assert.notEqual(rotatedBobToken, originalBobToken);
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", originalBobToken as string)).status,
+    401,
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID_TWO, "me", rotatedBobToken as string)).body["role"],
+    "reviewer",
+  );
+
+  const revoked = await fetch(
+    `${hub.baseUrl}/v1/organizations/${ORGANIZATION_ID}/teams/${TEAM_ID}/permissions/bob`,
+    { method: "DELETE", headers: { authorization: `Bearer ${team.bearerToken}` } },
+  );
+  assert.equal(revoked.status, 204);
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", rotatedBobToken as string)).status,
+    401,
+  );
+
+  for (const projectId of [PROJECT_ID, PROJECT_ID_TWO]) {
+    const audit = await hubJson(
+      hub.baseUrl,
+      projectId,
+      "audit-events?limit=100",
+      team.bearerToken,
+    );
+    const auditItems = audit.body["items"] as readonly JsonObject[];
+    assert.equal(
+      auditItems.some(
+        (event) =>
+          event["action"] === "access_denied" &&
+          event["outcome"] === "denied" &&
+          (event["details"] as JsonObject)["permission_scope"] === "team",
+      ),
+      true,
+    );
+    for (const action of [
+      "permission_granted",
+      "permission_role_updated",
+      "permission_token_rotated",
+      "permission_revoked",
+    ]) {
+      assert.equal(
+        auditItems.some(
+          (event) =>
+            event["action"] === action &&
+            event["outcome"] === "succeeded" &&
+            (event["details"] as JsonObject)["permission_scope"] === "team",
+        ),
+        true,
+      );
+    }
+    const activity = await hubJson(
+      hub.baseUrl,
+      projectId,
+      "events?limit=100",
+      tokenFor(hub, projectId).readOnlyToken,
+    );
+    assert.equal(
+      (activity.body["items"] as readonly JsonObject[]).filter(
+        (event) => event["kind"] === "PermissionChanged",
+      ).length,
+      4,
+    );
+    const safePayload = JSON.stringify({ audit: audit.body, activity: activity.body });
+    assert.equal(safePayload.includes(originalBobToken as string), false);
+    assert.equal(safePayload.includes(rotatedBobToken as string), false);
+  }
+});
+
 test("the private Hub permission store survives restart while tokens do not", async (t) => {
   const validator = await validatorPromise;
   const party = await makeParty(t, "permission-store");
@@ -710,6 +1020,93 @@ test("the private Hub permission store survives restart while tokens do not", as
     (await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/me`, {
       headers: { authorization: `Bearer ${firstZoe}` },
     })).status,
+    401,
+  );
+});
+
+test("the private Hub directory preserves team roles while rotating credentials", async (t) => {
+  const validator = await validatorPromise;
+  const party = await makeParty(t, "team-directory");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-directory-"));
+  t.after(async () => fs.rm(root, { recursive: true, force: true }));
+  const filename = path.join(root, "directory.json");
+  const configured = [
+    {
+      organization_id: ORGANIZATION_ID,
+      team_id: TEAM_ID,
+      grants: [{ principal_id: "zoe", role: "contributor" as const }],
+    },
+  ];
+  const project = {
+    project_id: PROJECT_ID,
+    organization_id: ORGANIZATION_ID,
+    team_id: TEAM_ID,
+    workspace: party.workspace,
+    objects: party.objects,
+  };
+  const teams = [
+    {
+      organization_id: ORGANIZATION_ID,
+      team_id: TEAM_ID,
+      access: [{ principal_id: "zoe", role: "contributor" as const }],
+    },
+  ];
+
+  let directory = await FileHubDirectoryStore.open(filename, configured);
+  let hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [project],
+    teams,
+    validator,
+    directory,
+  });
+  const firstAdmin = teamTokenFor(hub, ORGANIZATION_ID, TEAM_ID).bearerToken;
+  const firstZoe = teamGrantTokenFor(hub, ORGANIZATION_ID, TEAM_ID, "zoe");
+  const updated = await teamJson(
+    hub.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions/zoe",
+    firstAdmin,
+    { method: "PATCH", body: { role: "reviewer" } },
+  );
+  assert.equal(updated.status, 200);
+  await hub.close();
+  await directory.close();
+
+  assert.equal((await fs.stat(filename)).mode & 0o777, 0o600);
+  const persisted = await fs.readFile(filename, "utf8");
+  assert.match(persisted, /"principal_id":"zoe","role":"reviewer"/);
+  assert.equal(persisted.includes(firstAdmin), false);
+  assert.equal(persisted.includes(firstZoe), false);
+  await assert.rejects(fs.access(`${filename}.lock`));
+
+  directory = await FileHubDirectoryStore.open(filename, configured);
+  await assert.rejects(
+    FileHubDirectoryStore.open(filename, configured),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  hub = await startHubServer({
+    host: "127.0.0.1",
+    projects: [project],
+    teams,
+    validator,
+    directory,
+  });
+  t.after(async () => {
+    await hub.close();
+    await directory.close();
+  });
+  const secondAdmin = teamTokenFor(hub, ORGANIZATION_ID, TEAM_ID).bearerToken;
+  const secondZoe = teamGrantTokenFor(hub, ORGANIZATION_ID, TEAM_ID, "zoe");
+  assert.notEqual(secondAdmin, firstAdmin);
+  assert.notEqual(secondZoe, firstZoe);
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", secondZoe)).body["role"],
+    "reviewer",
+  );
+  assert.equal(
+    (await hubJson(hub.baseUrl, PROJECT_ID, "me", firstZoe)).status,
     401,
   );
 });
@@ -869,6 +1266,133 @@ test("the standalone Hub composes durable permissions and private token handoff"
   assert.equal(persisted.includes(first.zoe), false);
   assert.equal(persisted.includes(second.admin), false);
   assert.equal(persisted.includes(second.zoe), false);
+  await stop();
+});
+
+test("the standalone Hub composes a durable team directory and private team handoff", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-hub-team-standalone-"));
+  const firstWorkspace = path.join(root, "first-workspace");
+  const secondWorkspace = path.join(root, "second-workspace");
+  const connectionFile = path.join(root, "connection.json");
+  const permissionFile = path.join(root, "permissions.json");
+  const directoryFile = path.join(root, "directory.json");
+  const auditLog = path.join(root, "audit.jsonl");
+  let active: ChildProcessWithoutNullStreams | undefined;
+
+  const stop = async (): Promise<void> => {
+    const child = active;
+    active = undefined;
+    if (child === undefined || child.exitCode !== null) {
+      return;
+    }
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    child.kill("SIGTERM");
+    await exited;
+  };
+  t.after(async () => {
+    await stop();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const start = async (): Promise<{
+    readonly admin: string;
+    readonly zoe: string;
+    readonly baseUrl: string;
+  }> => {
+    let stderr = "";
+    const child = spawn(
+      process.execPath,
+      [
+        path.join(repositoryRoot, ".build", "typescript", "services", "hub", "main.js"),
+        "--project", PROJECT_ID,
+        "--workspace", firstWorkspace,
+        "--organization", ORGANIZATION_ID,
+        "--team", TEAM_ID,
+        "--team-grant", "zoe:viewer",
+        "--project", PROJECT_ID_TWO,
+        "--workspace", secondWorkspace,
+        "--organization", ORGANIZATION_ID,
+        "--team", TEAM_ID,
+        "--connection-file", connectionFile,
+        "--permission-file", permissionFile,
+        "--directory-file", directoryFile,
+        "--audit-log", auditLog,
+      ],
+      { cwd: repositoryRoot, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    active = child;
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    const ready = await readReadyLine(child, () => stderr);
+    assert.equal(ready["status"], "ready");
+    const descriptor = JSON.parse(await fs.readFile(connectionFile, "utf8")) as {
+      readonly hub_url: string;
+      readonly directory_file: string;
+      readonly teams: readonly {
+        readonly organization_id: string;
+        readonly team_id: string;
+        readonly hub_token: string;
+        readonly access_grants: readonly {
+          readonly principal_id: string;
+          readonly hub_token: string;
+        }[];
+      }[];
+    };
+    assert.equal(descriptor.directory_file, directoryFile);
+    const team = descriptor.teams.find(
+      (candidate) =>
+        candidate.organization_id === ORGANIZATION_ID && candidate.team_id === TEAM_ID,
+    );
+    const zoe = team?.access_grants.find(
+      (grant) => grant.principal_id === "zoe",
+    )?.hub_token;
+    assert.equal(typeof team?.hub_token, "string");
+    assert.equal(typeof zoe, "string");
+    return {
+      admin: team?.hub_token as string,
+      zoe: zoe as string,
+      baseUrl: descriptor.hub_url,
+    };
+  };
+
+  const first = await start();
+  for (const projectId of [PROJECT_ID, PROJECT_ID_TWO]) {
+    assert.equal(
+      (await hubJson(first.baseUrl, projectId, "me", first.zoe)).body["role"],
+      "viewer",
+    );
+  }
+  const updated = await teamJson(
+    first.baseUrl,
+    ORGANIZATION_ID,
+    TEAM_ID,
+    "permissions/zoe",
+    first.admin,
+    { method: "PATCH", body: { role: "reviewer" } },
+  );
+  assert.equal(updated.status, 200);
+  await stop();
+  await assert.rejects(fs.access(connectionFile));
+  assert.equal((await fs.stat(directoryFile)).mode & 0o777, 0o600);
+
+  const second = await start();
+  assert.notEqual(second.admin, first.admin);
+  assert.notEqual(second.zoe, first.zoe);
+  for (const projectId of [PROJECT_ID, PROJECT_ID_TWO]) {
+    assert.equal(
+      (await hubJson(second.baseUrl, projectId, "me", second.zoe)).body["role"],
+      "reviewer",
+    );
+    assert.equal(
+      (await hubJson(second.baseUrl, projectId, "me", first.zoe)).status,
+      401,
+    );
+  }
+  const persisted = await fs.readFile(directoryFile, "utf8");
+  for (const token of [first.admin, first.zoe, second.admin, second.zoe]) {
+    assert.equal(persisted.includes(token), false);
+  }
   await stop();
 });
 

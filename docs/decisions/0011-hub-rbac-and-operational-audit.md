@@ -60,9 +60,10 @@ even when a content mutation fails or a user later moves a Ref.
    single-writer JSON document. Admins may grant, re-role, revoke, and rotate
    tokens online. Role changes are serialized per project and atomically
    persisted before live authorization changes. Bootstrap roles cannot be
-   changed or revoked, preserving the existing client contract. Organization
-   and team inheritance, external identity providers, retention automation,
-   and deployment-grade audit export remain later work.
+   changed or revoked, preserving the existing client contract.
+   Organization-scoped team inheritance is added by ADR-0012. External
+   identity providers, retention automation, and deployment-grade audit export
+   remain later work.
 
 ## Alternatives considered
 

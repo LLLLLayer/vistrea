@@ -19,6 +19,7 @@ import {
   MemoryHubAuditStore,
   type HubAuditAction,
   type HubAuditEvent,
+  type HubAuditOutcome,
   type HubAuditStore,
   type RecordHubAuditEvent,
   type HubRole,
@@ -28,16 +29,25 @@ import {
   type HubPermissionStore,
   type HubStoredAccessGrant,
 } from "./permission-store.js";
+import {
+  MemoryHubDirectoryStore,
+  type HubDirectoryStore,
+  type HubDirectoryTeam,
+  type HubStoredTeamGrant,
+} from "./directory-store.js";
 
 const TOKEN_BYTES = 32;
 const MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_PACK_BYTES = 256 * 1024 * 1024;
 export const HUB_SERVER_LIMITS = {
   projects: 128,
+  teams: 128,
   principalsPerProject: 256,
+  principalsPerTeam: 256,
 } as const;
 const PROJECT_ID_PATTERN =
   /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SCOPE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export type HubBindAddress = string;
 
@@ -48,9 +58,18 @@ export interface HubAccessGrant {
 
 export interface HubProject {
   readonly project_id: string;
+  readonly organization_id?: string;
+  readonly team_id?: string;
   readonly workspace: WorkspaceDataSource;
   readonly objects: ObjectStore;
   /** Additional startup-managed principals. Bootstrap admin/viewer always exist. */
+  readonly access?: readonly HubAccessGrant[];
+}
+
+export interface HubTeam {
+  readonly organization_id: string;
+  readonly team_id: string;
+  /** Team grants inherit into every configured child project. */
   readonly access?: readonly HubAccessGrant[];
 }
 
@@ -71,12 +90,16 @@ export interface StartHubServerOptions {
   readonly port?: number;
   /** Every served namespace; unknown projects are indistinguishable from invalid credentials. */
   readonly projects: readonly HubProject[];
+  /** Optional team scopes whose grants inherit into associated projects. */
+  readonly teams?: readonly HubTeam[];
   readonly validator: ProtocolValidator;
   readonly tls?: HubTlsConfig;
   /** Defaults to an in-memory store; standalone Hub composition supplies a durable store. */
   readonly audit?: HubAuditStore;
   /** Defaults to process-local roles; standalone Hub composition supplies a durable store. */
   readonly permissions?: HubPermissionStore;
+  /** Defaults to process-local team membership; standalone composition supplies a durable store. */
+  readonly directory?: HubDirectoryStore;
 }
 
 export interface HubIssuedAccessGrant extends HubAccessGrant {
@@ -94,12 +117,22 @@ export interface HubProjectTokens {
   readonly accessGrants: readonly HubIssuedAccessGrant[];
 }
 
+export interface HubTeamTokens {
+  readonly organization_id: string;
+  readonly team_id: string;
+  readonly bearerToken: string;
+  readonly readOnlyToken: string;
+  readonly accessGrants: readonly HubIssuedAccessGrant[];
+}
+
 export interface HubServerHandle {
   readonly host: HubBindAddress;
   readonly port: number;
   readonly baseUrl: string;
   /** Project-scoped bootstrap and named-principal grants; never persisted by the server. */
   readonly projects: readonly HubProjectTokens[];
+  /** Team-scoped grants accepted by every associated project; never persisted as plaintext. */
+  readonly teams: readonly HubTeamTokens[];
   close(): Promise<void>;
 }
 
@@ -107,6 +140,18 @@ interface HubPrincipalRuntime {
   readonly principalId: string;
   readonly role: HubRole;
   readonly bearerDigest: Buffer;
+}
+
+interface HubPermissionSource extends JsonObject {
+  readonly scope: "project" | "team";
+  readonly role: HubRole;
+  readonly organization_id?: string;
+  readonly team_id?: string;
+}
+
+interface HubAuthorizedPrincipal extends HubPrincipalRuntime {
+  readonly credentialScope: "project" | "team";
+  readonly permissionSources: readonly HubPermissionSource[];
 }
 
 interface PublicHubPermission extends JsonObject {
@@ -120,6 +165,15 @@ interface HubProjectRuntime {
   readonly exchange: PackExchangeService;
   readonly principals: Map<string, HubPrincipalRuntime>;
   readonly permissions: HubPermissionStore;
+  readonly team?: HubTeamRuntime;
+  permissionMutation: Promise<void>;
+}
+
+interface HubTeamRuntime {
+  readonly team: HubTeam;
+  readonly principals: Map<string, HubPrincipalRuntime>;
+  readonly directory: HubDirectoryStore;
+  readonly projectIds: Set<string>;
   permissionMutation: Promise<void>;
 }
 
@@ -163,51 +217,48 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
     }
     projectIds.add(project.project_id);
   }
-  const permissions =
-    options.permissions ??
-    new MemoryHubPermissionStore(
-      options.projects.map((project) => ({
-        project_id: project.project_id,
-        grants: project.access ?? [],
-      })),
+  const configuredTeams = options.teams ?? [];
+  if (configuredTeams.length > HUB_SERVER_LIMITS.teams) {
+    throw new DataError(
+      "invalid_argument",
+      `The Hub serves at most ${HUB_SERVER_LIMITS.teams} teams per process.`,
     );
-  const projects = new Map<string, HubProjectRuntime>();
-  const projectTokens: HubProjectTokens[] = [];
-  for (const project of options.projects) {
-    const configuredProject = {
-      ...project,
-      access: permissions.listProjectGrants(project.project_id),
-    };
-    const issued = issueProjectAccess(configuredProject);
-    projects.set(project.project_id, {
-      project: configuredProject,
-      exchange: new PackExchangeService({
-        data: project.workspace,
-        objects: project.objects,
-        validator: options.validator,
-      }),
-      principals: new Map(
-        issued.accessGrants.map((grant) => [
-          grant.principal_id,
-          {
-            principalId: grant.principal_id,
-            role: grant.role,
-            bearerDigest: digestToken(grant.bearerToken),
-          },
-        ]),
-      ),
-      permissions,
-      permissionMutation: Promise.resolve(),
-    });
-    projectTokens.push({
-      project_id: project.project_id,
-      bearerToken: issued.bootstrapAdminToken,
-      readOnlyToken: issued.bootstrapViewerToken,
-      accessGrants: issued.accessGrants,
-    });
   }
-  // A plain-HTTP bearer token must never leave the machine; TLS unlocks
-  // other interfaces because the token then travels encrypted.
+  const teamDefinitions = new Map<string, HubTeam>();
+  for (const team of configuredTeams) {
+    const key = hubTeamKey(team.organization_id, team.team_id);
+    if (
+      !SCOPE_ID_PATTERN.test(team.organization_id) ||
+      !SCOPE_ID_PATTERN.test(team.team_id) ||
+      teamDefinitions.has(key)
+    ) {
+      throw new DataError("invalid_argument", "Hub teams must have unique bounded identities.");
+    }
+    teamDefinitions.set(key, team);
+  }
+  const teamProjectCounts = new Map<string, number>(
+    [...teamDefinitions.keys()].map((key) => [key, 0]),
+  );
+  for (const project of options.projects) {
+    if ((project.organization_id === undefined) !== (project.team_id === undefined)) {
+      throw new DataError(
+        "invalid_argument",
+        "A Hub project must name both organization and team or neither.",
+      );
+    }
+    if (project.organization_id !== undefined) {
+      const key = hubTeamKey(project.organization_id, project.team_id as string);
+      const count = teamProjectCounts.get(key);
+      if (count === undefined) {
+        throw new DataError("invalid_argument", "A Hub project references an unknown team.");
+      }
+      teamProjectCounts.set(key, count + 1);
+    }
+  }
+  if ([...teamProjectCounts.values()].some((count) => count === 0)) {
+    throw new DataError("invalid_argument", "Every configured Hub team must own a project.");
+  }
+  // Validate the network boundary before issuing any plaintext credentials.
   const loopback = options.host === "127.0.0.1" || options.host === "::1";
   if (options.tls === undefined && !loopback) {
     throw new DataError(
@@ -224,10 +275,82 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
   ) {
     throw new DataError("invalid_argument", "The Hub port must be an integer from 0 through 65535.");
   }
+  const directory =
+    options.directory ??
+    new MemoryHubDirectoryStore(
+      configuredTeams.map((team) => ({
+        organization_id: team.organization_id,
+        team_id: team.team_id,
+        grants: team.access ?? [],
+      } satisfies HubDirectoryTeam)),
+    );
+  const teams = new Map<string, HubTeamRuntime>();
+  const teamTokens: HubTeamTokens[] = [];
+  for (const team of configuredTeams) {
+    const configuredTeam = {
+      ...team,
+      access: directory.listTeamGrants(team.organization_id, team.team_id),
+    };
+    const issued = issueTeamAccess(configuredTeam);
+    teams.set(hubTeamKey(team.organization_id, team.team_id), {
+      team: configuredTeam,
+      principals: runtimePrincipals(issued.accessGrants),
+      directory,
+      projectIds: new Set(),
+      permissionMutation: Promise.resolve(),
+    });
+    teamTokens.push({
+      organization_id: team.organization_id,
+      team_id: team.team_id,
+      bearerToken: issued.bootstrapAdminToken,
+      readOnlyToken: issued.bootstrapViewerToken,
+      accessGrants: issued.accessGrants,
+    });
+  }
+  const permissions =
+    options.permissions ??
+    new MemoryHubPermissionStore(
+      options.projects.map((project) => ({
+        project_id: project.project_id,
+        grants: project.access ?? [],
+      })),
+    );
+  const projects = new Map<string, HubProjectRuntime>();
+  const projectTokens: HubProjectTokens[] = [];
+  for (const project of options.projects) {
+    const team =
+      project.organization_id === undefined
+        ? undefined
+        : teams.get(hubTeamKey(project.organization_id, project.team_id as string));
+    const configuredProject = {
+      ...project,
+      access: permissions.listProjectGrants(project.project_id),
+    };
+    const issued = issueProjectAccess(configuredProject);
+    projects.set(project.project_id, {
+      project: configuredProject,
+      exchange: new PackExchangeService({
+        data: project.workspace,
+        objects: project.objects,
+        validator: options.validator,
+      }),
+      principals: runtimePrincipals(issued.accessGrants),
+      permissions,
+      ...(team === undefined ? {} : { team }),
+      permissionMutation: Promise.resolve(),
+    });
+    team?.projectIds.add(project.project_id);
+    projectTokens.push({
+      project_id: project.project_id,
+      bearerToken: issued.bootstrapAdminToken,
+      readOnlyToken: issued.bootstrapViewerToken,
+      accessGrants: issued.accessGrants,
+    });
+  }
   const audit = options.audit ?? new MemoryHubAuditStore();
 
   const handler = (request: IncomingMessage, response: ServerResponse): void => {
-    void handleRequest(request, response, projects, audit).catch((error: unknown) =>
+    void handleRequest(request, response, projects, teams, audit).catch((error: unknown) =>
       sendError(response, error),
     );
   };
@@ -262,6 +385,7 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
     port: address.port,
     baseUrl: `${scheme}://${options.host === "::1" ? `[${options.host}]` : options.host}:${address.port}`,
     projects: projectTokens,
+    teams: teamTokens,
     async close(): Promise<void> {
       if (!closed) {
         closed = true;
@@ -274,21 +398,291 @@ export async function startHubServer(options: StartHubServerOptions): Promise<Hu
               principal.bearerDigest.fill(0);
             }
           }
+          for (const runtime of teams.values()) {
+            await runtime.permissionMutation;
+            for (const principal of runtime.principals.values()) {
+              principal.bearerDigest.fill(0);
+            }
+          }
         }
       }
     },
   };
 }
 
+async function handleTeamRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  resource: string,
+  runtime: HubTeamRuntime,
+  principal: HubPrincipalRuntime,
+  projects: ReadonlyMap<string, HubProjectRuntime>,
+  audit: HubAuditStore,
+): Promise<void> {
+  const organizationId = runtime.team.organization_id;
+  const teamId = runtime.team.team_id;
+  const auditDetails: JsonObject = {
+    permission_scope: "team",
+    organization_id: organizationId,
+    team_id: teamId,
+  };
+
+  if (resource === "projects" && request.method === "GET") {
+    assertNoSearchParameters(url);
+    await assertEmptyBody(request);
+    await requireTeamRole(audit, runtime, principal, "viewer", resource);
+    const items = [...runtime.projectIds]
+      .sort()
+      .map((projectId) => {
+        const project = projects.get(projectId);
+        if (project === undefined) {
+          throw new DataError("integrity_error", "A Hub team references a missing project.");
+        }
+        const role = effectiveRoleForPrincipal(project, principal.principalId);
+        return {
+          project_id: projectId,
+          organization_id: organizationId,
+          team_id: teamId,
+          role,
+          capabilities: capabilitiesForRole(role),
+        };
+      });
+    await recordTeamAudit(audit, runtime, principal, "team_projects_listed", resource, {
+      ...auditDetails,
+      project_count: items.length,
+    });
+    writeJson(response, 200, { items });
+    return;
+  }
+
+  if (resource === "permissions" && request.method === "GET") {
+    assertNoSearchParameters(url);
+    await assertEmptyBody(request);
+    await requireTeamRole(audit, runtime, principal, "admin", resource);
+    const items = [...runtime.principals.values()]
+      .map((candidate) => ({
+        ...publicPermission(candidate),
+        permission_scope: "team",
+        organization_id: organizationId,
+        team_id: teamId,
+      }))
+      .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
+    await recordTeamAudit(audit, runtime, principal, "permissions_listed", resource, auditDetails);
+    writeJson(response, 200, { items });
+    return;
+  }
+
+  if (resource === "permissions:grant" && request.method === "POST") {
+    assertNoSearchParameters(url);
+    await requireTeamRole(audit, runtime, principal, "admin", resource);
+    const body = await readJsonBody(request);
+    assertExactBodyKeys(body, ["principal_id", "role"]);
+    const targetPrincipalId = parseMutableTeamPrincipalId(body["principal_id"]);
+    const role = parseRole(body["role"]);
+    const result = await auditedTeamOperation(
+      audit,
+      runtime,
+      principal,
+      "permission_granted",
+      resource,
+      {
+        ...auditDetails,
+        target_principal_id: targetPrincipalId,
+        target_role: role,
+      },
+      async () =>
+        mutateTeamPermissions(runtime, async () => {
+          if (runtime.principals.has(targetPrincipalId)) {
+            throw new HubRequestError({
+              status: 409,
+              code: "already_exists",
+              message: "The Hub principal already has team access.",
+            });
+          }
+          if (runtime.principals.size >= HUB_SERVER_LIMITS.principalsPerTeam) {
+            throw new DataError(
+              "resource_exhausted",
+              `A Hub team supports at most ${HUB_SERVER_LIMITS.principalsPerTeam} principals.`,
+            );
+          }
+          const bearerToken = issueBearerToken();
+          const created: HubPrincipalRuntime = {
+            principalId: targetPrincipalId,
+            role,
+            bearerDigest: digestToken(bearerToken),
+          };
+          const next = new Map(runtime.principals);
+          next.set(targetPrincipalId, created);
+          try {
+            await runtime.directory.replaceTeamGrants(
+              organizationId,
+              teamId,
+              storedTeamGrants(next),
+            );
+          } catch (error) {
+            created.bearerDigest.fill(0);
+            throw error;
+          }
+          runtime.principals.set(targetPrincipalId, created);
+          return { ...publicPermission(created), bearer_token: bearerToken };
+        }),
+    );
+    writeJson(response, 201, result);
+    return;
+  }
+
+  const rotateMatch = /^permissions\/([^/]+):rotate-token$/.exec(resource);
+  if (rotateMatch !== null && request.method === "POST") {
+    assertNoSearchParameters(url);
+    await requireTeamRole(audit, runtime, principal, "admin", "permissions");
+    await assertEmptyBody(request);
+    const targetPrincipalId = parsePrincipalId(decodePathComponent(rotateMatch[1] as string));
+    const result = await auditedTeamOperation(
+      audit,
+      runtime,
+      principal,
+      "permission_token_rotated",
+      "permissions",
+      { ...auditDetails, target_principal_id: targetPrincipalId },
+      async () =>
+        mutateTeamPermissions(runtime, async () => {
+          const existing = requiredTeamPrincipal(runtime, targetPrincipalId);
+          const bearerToken = issueBearerToken();
+          const rotated: HubPrincipalRuntime = {
+            principalId: existing.principalId,
+            role: existing.role,
+            bearerDigest: digestToken(bearerToken),
+          };
+          runtime.principals.set(targetPrincipalId, rotated);
+          existing.bearerDigest.fill(0);
+          return { ...publicPermission(rotated), bearer_token: bearerToken };
+        }),
+    );
+    writeJson(response, 200, result);
+    return;
+  }
+
+  const permissionMatch = /^permissions\/([^/]+)$/.exec(resource);
+  if (permissionMatch !== null && request.method === "PATCH") {
+    assertNoSearchParameters(url);
+    await requireTeamRole(audit, runtime, principal, "admin", "permissions");
+    const targetPrincipalId = parseMutableTeamPrincipalId(
+      decodePathComponent(permissionMatch[1] as string),
+    );
+    const body = await readJsonBody(request);
+    assertExactBodyKeys(body, ["role"]);
+    const role = parseRole(body["role"]);
+    const result = await auditedTeamOperation(
+      audit,
+      runtime,
+      principal,
+      "permission_role_updated",
+      "permissions",
+      {
+        ...auditDetails,
+        target_principal_id: targetPrincipalId,
+        target_role: role,
+      },
+      async () =>
+        mutateTeamPermissions(runtime, async () => {
+          const existing = requiredTeamPrincipal(runtime, targetPrincipalId);
+          const updated: HubPrincipalRuntime = {
+            principalId: existing.principalId,
+            role,
+            bearerDigest: existing.bearerDigest,
+          };
+          const next = new Map(runtime.principals);
+          next.set(targetPrincipalId, updated);
+          await runtime.directory.replaceTeamGrants(
+            organizationId,
+            teamId,
+            storedTeamGrants(next),
+          );
+          runtime.principals.set(targetPrincipalId, updated);
+          return publicPermission(updated);
+        }),
+    );
+    writeJson(response, 200, result);
+    return;
+  }
+
+  if (permissionMatch !== null && request.method === "DELETE") {
+    assertNoSearchParameters(url);
+    await requireTeamRole(audit, runtime, principal, "admin", "permissions");
+    await assertEmptyBody(request);
+    const targetPrincipalId = parseMutableTeamPrincipalId(
+      decodePathComponent(permissionMatch[1] as string),
+    );
+    await auditedTeamOperation(
+      audit,
+      runtime,
+      principal,
+      "permission_revoked",
+      "permissions",
+      { ...auditDetails, target_principal_id: targetPrincipalId },
+      async () =>
+        mutateTeamPermissions(runtime, async () => {
+          const existing = requiredTeamPrincipal(runtime, targetPrincipalId);
+          const next = new Map(runtime.principals);
+          next.delete(targetPrincipalId);
+          await runtime.directory.replaceTeamGrants(
+            organizationId,
+            teamId,
+            storedTeamGrants(next),
+          );
+          runtime.principals.delete(targetPrincipalId);
+          existing.bearerDigest.fill(0);
+        }),
+    );
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+
+  throw new HubRequestError({
+    status: 404,
+    code: "not_found",
+    message: "The requested Hub team route does not exist.",
+  });
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   projects: ReadonlyMap<string, HubProjectRuntime>,
+  teams: ReadonlyMap<string, HubTeamRuntime>,
   audit: HubAuditStore,
 ): Promise<void> {
   response.setHeader("cache-control", "no-store");
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const pathname = url.pathname;
+
+  const teamMatch = /^\/v1\/organizations\/([^/]+)\/teams\/([^/]+)\/(.+)$/.exec(pathname);
+  if (teamMatch !== null) {
+    const organizationId = decodePathComponent(teamMatch[1] as string);
+    const teamId = decodePathComponent(teamMatch[2] as string);
+    const team = teams.get(hubTeamKey(organizationId, teamId));
+    const principal = team === undefined ? undefined : authorize(request, team.principals.values());
+    if (team === undefined || principal === undefined) {
+      throw new HubRequestError({
+        status: 401,
+        code: "unauthenticated",
+        message: "A valid Hub bearer token for this team is required.",
+      });
+    }
+    await handleTeamRequest(
+      request,
+      response,
+      url,
+      teamMatch[3] as string,
+      team,
+      principal,
+      projects,
+      audit,
+    );
+    return;
+  }
 
   const projectMatch = /^\/v1\/projects\/([^/]+)\/(.+)$/.exec(pathname);
   if (projectMatch === null) {
@@ -302,8 +696,7 @@ async function handleRequest(
   const runtime = projects.get(projectId);
   // The token is checked against THIS project, so a token for another
   // namespace is indistinguishable from no token at all.
-  const principal =
-    runtime === undefined ? undefined : authorize(request, runtime.principals.values());
+  const principal = runtime === undefined ? undefined : authorizeProject(request, runtime);
   if (runtime === undefined || principal === undefined) {
     throw new HubRequestError({
       status: 401,
@@ -322,15 +715,21 @@ async function handleRequest(
       principal_id: principal.principalId,
       role: principal.role,
       capabilities: capabilitiesForRole(principal.role),
+      credential_scope: principal.credentialScope,
+      permission_sources: principal.permissionSources,
+      ...(runtime.team === undefined
+        ? {}
+        : {
+            organization_id: runtime.team.team.organization_id,
+            team_id: runtime.team.team.team_id,
+          }),
     });
     return;
   }
 
   if (resource === "permissions" && request.method === "GET") {
     await requireRole(audit, projectId, principal, "admin", resource);
-    const items = [...runtime.principals.values()]
-      .map(publicPermission)
-      .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
+    const items = publicProjectPermissions(runtime);
     await audit.record({
       project_id: projectId,
       principal_id: principal.principalId,
@@ -745,6 +1144,58 @@ function authorize(
   return authorized;
 }
 
+function authorizeProject(
+  request: IncomingMessage,
+  runtime: HubProjectRuntime,
+): HubAuthorizedPrincipal | undefined {
+  const directCredential = authorize(request, runtime.principals.values());
+  const teamCredential =
+    runtime.team === undefined ? undefined : authorize(request, runtime.team.principals.values());
+  const credential = directCredential ?? teamCredential;
+  if (credential === undefined) {
+    return undefined;
+  }
+  const direct = runtime.principals.get(credential.principalId);
+  const inherited = runtime.team?.principals.get(credential.principalId);
+  const permissionSources: HubPermissionSource[] = [];
+  if (direct !== undefined) {
+    permissionSources.push({ scope: "project", role: direct.role });
+  }
+  if (inherited !== undefined && runtime.team !== undefined) {
+    permissionSources.push({
+      scope: "team",
+      role: inherited.role,
+      organization_id: runtime.team.team.organization_id,
+      team_id: runtime.team.team.team_id,
+    });
+  }
+  return {
+    principalId: credential.principalId,
+    role: permissionSources.reduce(
+      (role, source) => higherRole(role, source.role),
+      "viewer" as HubRole,
+    ),
+    bearerDigest: credential.bearerDigest,
+    credentialScope: directCredential === undefined ? "team" : "project",
+    permissionSources,
+  };
+}
+
+function runtimePrincipals(
+  grants: readonly HubIssuedAccessGrant[],
+): Map<string, HubPrincipalRuntime> {
+  return new Map(
+    grants.map((grant) => [
+      grant.principal_id,
+      {
+        principalId: grant.principal_id,
+        role: grant.role,
+        bearerDigest: digestToken(grant.bearerToken),
+      },
+    ]),
+  );
+}
+
 function issueProjectAccess(project: HubProject): {
   readonly bootstrapAdminToken: string;
   readonly bootstrapViewerToken: string;
@@ -792,8 +1243,67 @@ function issueProjectAccess(project: HubProject): {
   return { bootstrapAdminToken, bootstrapViewerToken, accessGrants };
 }
 
+function issueTeamAccess(team: HubTeam): {
+  readonly bootstrapAdminToken: string;
+  readonly bootstrapViewerToken: string;
+  readonly accessGrants: readonly HubIssuedAccessGrant[];
+} {
+  if ((team.access?.length ?? 0) > HUB_SERVER_LIMITS.principalsPerTeam - 2) {
+    throw new DataError(
+      "resource_exhausted",
+      `A Hub team supports at most ${HUB_SERVER_LIMITS.principalsPerTeam} principals.`,
+    );
+  }
+  const bootstrapAdminToken = issueBearerToken();
+  const bootstrapViewerToken = issueBearerToken();
+  const accessGrants: HubIssuedAccessGrant[] = [
+    {
+      principal_id: "hub-team-bootstrap-admin",
+      role: "admin",
+      bearerToken: bootstrapAdminToken,
+    },
+    {
+      principal_id: "hub-team-bootstrap-viewer",
+      role: "viewer",
+      bearerToken: bootstrapViewerToken,
+    },
+  ];
+  const principals = new Set(accessGrants.map((grant) => grant.principal_id));
+  for (const grant of team.access ?? []) {
+    if (
+      !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(grant.principal_id) ||
+      !HUB_ROLES.includes(grant.role) ||
+      principals.has(grant.principal_id)
+    ) {
+      throw new DataError(
+        "invalid_argument",
+        "Hub team grants require unique bounded principals and supported roles.",
+      );
+    }
+    principals.add(grant.principal_id);
+    accessGrants.push({
+      principal_id: grant.principal_id,
+      role: grant.role,
+      bearerToken: issueBearerToken(),
+    });
+  }
+  return { bootstrapAdminToken, bootstrapViewerToken, accessGrants };
+}
+
 async function mutateProjectPermissions<T>(
   runtime: HubProjectRuntime,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const result = runtime.permissionMutation.then(operation);
+  runtime.permissionMutation = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function mutateTeamPermissions<T>(
+  runtime: HubTeamRuntime,
   operation: () => Promise<T>,
 ): Promise<T> {
   const result = runtime.permissionMutation.then(operation);
@@ -819,6 +1329,21 @@ function requiredPrincipal(
   return principal;
 }
 
+function requiredTeamPrincipal(
+  runtime: HubTeamRuntime,
+  principalId: string,
+): HubPrincipalRuntime {
+  const principal = runtime.principals.get(principalId);
+  if (principal === undefined) {
+    throw new HubRequestError({
+      status: 404,
+      code: "not_found",
+      message: "The Hub principal does not have team access.",
+    });
+  }
+  return principal;
+}
+
 function storedGrants(
   principals: ReadonlyMap<string, HubPrincipalRuntime>,
 ): readonly HubStoredAccessGrant[] {
@@ -835,12 +1360,60 @@ function storedGrants(
     .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
 }
 
+function storedTeamGrants(
+  principals: ReadonlyMap<string, HubPrincipalRuntime>,
+): readonly HubStoredTeamGrant[] {
+  return [...principals.values()]
+    .filter(
+      (principal) =>
+        principal.principalId !== "hub-team-bootstrap-admin" &&
+        principal.principalId !== "hub-team-bootstrap-viewer",
+    )
+    .map((principal) => ({
+      principal_id: principal.principalId,
+      role: principal.role,
+    }))
+    .sort((left, right) => left.principal_id.localeCompare(right.principal_id));
+}
+
 function publicPermission(principal: HubPrincipalRuntime): PublicHubPermission {
   return {
     principal_id: principal.principalId,
     role: principal.role,
     capabilities: capabilitiesForRole(principal.role),
   };
+}
+
+function publicProjectPermissions(runtime: HubProjectRuntime): readonly JsonObject[] {
+  const principalIds = new Set(runtime.principals.keys());
+  for (const principalId of runtime.team?.principals.keys() ?? []) {
+    principalIds.add(principalId);
+  }
+  return [...principalIds]
+    .sort()
+    .map((principalId) => {
+      const direct = runtime.principals.get(principalId);
+      const inherited = runtime.team?.principals.get(principalId);
+      const role = effectiveRoleForPrincipal(runtime, principalId);
+      const sources: HubPermissionSource[] = [];
+      if (direct !== undefined) {
+        sources.push({ scope: "project", role: direct.role });
+      }
+      if (inherited !== undefined && runtime.team !== undefined) {
+        sources.push({
+          scope: "team",
+          role: inherited.role,
+          organization_id: runtime.team.team.organization_id,
+          team_id: runtime.team.team.team_id,
+        });
+      }
+      return {
+        principal_id: principalId,
+        role,
+        capabilities: capabilitiesForRole(role),
+        permission_sources: sources,
+      };
+    });
 }
 
 function parseMutablePrincipalId(value: unknown): string {
@@ -850,6 +1423,21 @@ function parseMutablePrincipalId(value: unknown): string {
       status: 409,
       code: "conflict",
       message: "Bootstrap Hub grants cannot be added, changed, or revoked.",
+    });
+  }
+  return principalId;
+}
+
+function parseMutableTeamPrincipalId(value: unknown): string {
+  const principalId = parsePrincipalId(value);
+  if (
+    principalId === "hub-team-bootstrap-admin" ||
+    principalId === "hub-team-bootstrap-viewer"
+  ) {
+    throw new HubRequestError({
+      status: 409,
+      code: "conflict",
+      message: "Bootstrap Hub team grants cannot be added, changed, or revoked.",
     });
   }
   return principalId;
@@ -904,6 +1492,23 @@ const HUB_ROLE_ORDER: Readonly<Record<HubRole, number>> = {
   admin: 4,
 };
 
+function higherRole(left: HubRole, right: HubRole): HubRole {
+  return HUB_ROLE_ORDER[left] >= HUB_ROLE_ORDER[right] ? left : right;
+}
+
+function hubTeamKey(organizationId: string, teamId: string): string {
+  return `${organizationId}\u0000${teamId}`;
+}
+
+function effectiveRoleForPrincipal(runtime: HubProjectRuntime, principalId: string): HubRole {
+  const direct = runtime.principals.get(principalId)?.role;
+  const inherited = runtime.team?.principals.get(principalId)?.role;
+  if (direct === undefined) {
+    return inherited ?? "viewer";
+  }
+  return inherited === undefined ? direct : higherRole(direct, inherited);
+}
+
 async function requireRole(
   audit: HubAuditStore,
   projectId: string,
@@ -927,6 +1532,37 @@ async function requireRole(
     status: 403,
     code: "forbidden",
     message: "The Hub principal does not have permission for this operation.",
+  });
+}
+
+async function requireTeamRole(
+  audit: HubAuditStore,
+  runtime: HubTeamRuntime,
+  principal: HubPrincipalRuntime,
+  required: HubRole,
+  resource: string,
+): Promise<void> {
+  if (HUB_ROLE_ORDER[principal.role] >= HUB_ROLE_ORDER[required]) {
+    return;
+  }
+  await recordTeamAudit(
+    audit,
+    runtime,
+    principal,
+    "access_denied",
+    resource,
+    {
+      permission_scope: "team",
+      organization_id: runtime.team.organization_id,
+      team_id: runtime.team.team_id,
+      required_role: required,
+    },
+    "denied",
+  );
+  throw new HubRequestError({
+    status: 403,
+    code: "forbidden",
+    message: "The Hub principal does not have permission for this team operation.",
   });
 }
 
@@ -986,6 +1622,56 @@ async function auditedOperation<T>(
       details: { ...(context.details ?? {}), error_code: publicErrorCode(error) },
     });
     throw error;
+  }
+}
+
+async function auditedTeamOperation<T>(
+  audit: HubAuditStore,
+  runtime: HubTeamRuntime,
+  principal: HubPrincipalRuntime,
+  action: HubAuditAction,
+  resource: string,
+  details: JsonObject,
+  operation: () => Promise<T>,
+): Promise<T> {
+  await recordTeamAudit(audit, runtime, principal, action, resource, details, "attempted");
+  try {
+    const result = await operation();
+    await recordTeamAudit(audit, runtime, principal, action, resource, details, "succeeded");
+    return result;
+  } catch (error) {
+    await recordTeamAudit(
+      audit,
+      runtime,
+      principal,
+      action,
+      resource,
+      { ...details, error_code: publicErrorCode(error) },
+      "failed",
+    );
+    throw error;
+  }
+}
+
+async function recordTeamAudit(
+  audit: HubAuditStore,
+  runtime: HubTeamRuntime,
+  principal: HubPrincipalRuntime,
+  action: HubAuditAction,
+  resource: string,
+  details: JsonObject,
+  outcome: HubAuditOutcome = "succeeded",
+): Promise<void> {
+  for (const projectId of [...runtime.projectIds].sort()) {
+    await audit.record({
+      project_id: projectId,
+      principal_id: principal.principalId,
+      role: principal.role,
+      action,
+      outcome,
+      resource,
+      details,
+    });
   }
 }
 
@@ -1064,6 +1750,16 @@ function collaborationEvent(event: HubAuditEvent): JsonObject {
     resource: event.resource,
     details: event.details,
   };
+}
+
+function assertNoSearchParameters(url: URL): void {
+  if ([...url.searchParams.keys()].length !== 0) {
+    throw new HubRequestError({
+      status: 400,
+      code: "invalid_argument",
+      message: "This Hub operation does not accept search parameters.",
+    });
+  }
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<JsonObject> {

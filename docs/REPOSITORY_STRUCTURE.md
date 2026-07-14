@@ -141,8 +141,9 @@ vistrea/
 │   └── hub/
 │       ├── README.md
 │       ├── audit-store.ts       # operational append-only audit port and JSONL store
+│       ├── directory-store.ts   # private organization/team roles; never bearer tokens
 │       ├── permission-store.ts  # private durable project roles; never bearer tokens
-│       ├── hub-server.ts        # optional RBAC pack relay and activity feed
+│       ├── hub-server.ts        # RBAC pack relay, team inheritance, audit, activity
 │       ├── index.ts
 │       └── main.ts
 ├── integrations/
@@ -251,7 +252,8 @@ vistrea/
     │   ├── 0008-cli-only-agent-adapter.md
     │   ├── 0009-direct-macos-distribution.md
     │   ├── 0010-physical-runtime-tls.md
-    │   └── 0011-hub-rbac-and-operational-audit.md
+    │   ├── 0011-hub-rbac-and-operational-audit.md
+    │   └── 0012-hub-team-inheritance.md
     ├── release/
     │   └── STUDIO_MACOS_RELEASE.md
     └── roadmap/

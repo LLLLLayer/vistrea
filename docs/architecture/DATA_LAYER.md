@@ -358,6 +358,14 @@ Collections, and other collaboration resources remain Commit/Ref truth. The
 project activity feed is a safe projection of successful audit events, not a
 second repository. See ADR-0011.
 
+Hub organization/team authorization is also operational state outside every
+Workspace. A private directory stores bounded team identities and named roles,
+never bearer tokens. Team roles inherit into associated projects, direct and
+inherited roles retain their provenance, and successful team mutations project
+into each affected project's audit/activity view. This directory is a
+replaceable Hub service port, not a Data API repository or portable pack
+member. See ADR-0012.
+
 ## 10. Security and lifecycle
 
 - Redact sensitive text before publication according to project policy.
