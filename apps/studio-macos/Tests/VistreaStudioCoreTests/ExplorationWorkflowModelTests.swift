@@ -263,6 +263,59 @@ final class ExplorationWorkflowModelTests: XCTestCase {
         // back into a loading phase.
         XCTAssertEqual(model.canvasPhase, .content)
     }
+
+    /// A build-scoped Canvas can lose the selected state when another writer
+    /// changes the materialized view. The Inspector and its state-scoped
+    /// issue pane must not keep presenting evidence from the old scope.
+    func testCanvasWatchClearsSelectionRemovedByExternalWriter() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let client = FixtureHostClient(snapshots: [snapshot], canvasGraph: Self.fixtureGraph())
+        let model = SnapshotWorkspaceModel(client: client)
+        await model.refresh()
+        await model.selectCanvasState(
+            id: "screenstate_019f0000-0000-7000-8000-000000000001"
+        )
+        XCTAssertNotNil(model.selectedCanvasStateID)
+        XCTAssertEqual(model.canvasStatePhase, .content)
+
+        await client.replaceCanvasGraph(
+            CanvasGraph(
+                screenGraphID: "graph_019f0000-0000-7000-8000-000000000001",
+                revision: 6,
+                entryStateIDs: ["screenstate_019f0000-0000-7000-8000-000000000002"],
+                states: [
+                    CanvasStateSummary(
+                        screenStateID: "screenstate_019f0000-0000-7000-8000-000000000002",
+                        title: "Detail",
+                        kind: "screen",
+                        status: "active"
+                    ),
+                ],
+                transitions: []
+            )
+        )
+
+        let ticks = TickCounter()
+        model.canvasWatchSleep = {
+            let tick = await ticks.next()
+            if tick > 2 {
+                throw CancellationError()
+            }
+        }
+        model.startCanvasWatch()
+        for _ in 0..<200 {
+            if model.selectedCanvasStateID == nil {
+                break
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        model.stopCanvasWatch()
+
+        XCTAssertNil(model.selectedCanvasStateID)
+        XCTAssertEqual(model.canvasStatePhase, .idle)
+        XCTAssertEqual(model.issuesPhase, .empty)
+        XCTAssertTrue(model.reviewIssues.isEmpty)
+    }
 }
 
 /// Records what the workspace exposed on each exploration poll.

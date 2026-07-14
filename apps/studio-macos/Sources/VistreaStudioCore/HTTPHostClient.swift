@@ -195,6 +195,13 @@ public struct HTTPHostClient: HostClient, Sendable {
     }
 
     public func listReviewIssues(states: [String]? = nil) async throws -> ReviewIssuePage {
+        try await listReviewIssues(states: states, screenStateID: nil)
+    }
+
+    public func listReviewIssues(
+        states: [String]?,
+        screenStateID: String?
+    ) async throws -> ReviewIssuePage {
         if let states {
             guard !states.isEmpty,
                   states.count <= 8,
@@ -203,10 +210,19 @@ public struct HTTPHostClient: HostClient, Sendable {
                 throw HostClientError.invalidIdentifier(states.joined(separator: ","))
             }
         }
+        if let screenStateID, !Self.isTypedIdentifier(screenStateID, prefix: "screenstate") {
+            throw HostClientError.invalidIdentifier(screenStateID)
+        }
+        var query = states.map {
+            [URLQueryItem(name: "states", value: $0.joined(separator: ","))]
+        } ?? []
+        if let screenStateID {
+            query.append(URLQueryItem(name: "screen_state_id", value: screenStateID))
+        }
         let response = try await request(
             method: "GET",
             path: ["v1", "review-issues"],
-            query: states.map { [URLQueryItem(name: "states", value: $0.joined(separator: ","))] } ?? []
+            query: query
         )
         try requireStatus(response, expected: [200])
         try requireJSONSize(response.body)
@@ -218,18 +234,56 @@ public struct HTTPHostClient: HostClient, Sendable {
     }
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        try await getScreenGraph(
+            projectID: projectID,
+            applicationID: applicationID,
+            scope: nil
+        )
+    }
+
+    public func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        guard Self.isTypedIdentifier(buildID, prefix: "build"),
+              !applicationVersion.isEmpty,
+              applicationVersion.count <= 128
+        else {
+            throw HostClientError.invalidIdentifier("\(applicationVersion)/\(buildID)")
+        }
+        return try await getScreenGraph(
+            projectID: projectID,
+            applicationID: applicationID,
+            scope: (applicationVersion, buildID)
+        )
+    }
+
+    private func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        scope: (applicationVersion: String, buildID: String)?
+    ) async throws -> CanvasGraph {
         guard projectID.range(of: "^project_[0-9a-f-]{36}$", options: .regularExpression) != nil,
               applicationID.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$", options: .regularExpression) != nil
         else {
             throw HostClientError.invalidIdentifier("\(projectID)/\(applicationID)")
         }
+        var query = [
+            URLQueryItem(name: "project_id", value: projectID),
+            URLQueryItem(name: "application_id", value: applicationID),
+        ]
+        if let scope {
+            query.append(URLQueryItem(name: "build_id", value: scope.buildID))
+            query.append(
+                URLQueryItem(name: "application_version", value: scope.applicationVersion)
+            )
+        }
         let response = try await request(
             method: "GET",
             path: ["v1", "screen-graph"],
-            query: [
-                URLQueryItem(name: "project_id", value: projectID),
-                URLQueryItem(name: "application_id", value: applicationID),
-            ]
+            query: query
         )
         try requireStatus(response, expected: [200])
         try requireJSONSize(response.body)
@@ -386,6 +440,29 @@ public struct HTTPHostClient: HostClient, Sendable {
             ScreenStateDetail.self,
             method: "GET",
             path: ["v1", "screen-states", id]
+        )
+    }
+
+    public func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail {
+        guard Self.isTypedIdentifier(id, prefix: "screenstate"),
+              Self.isTypedIdentifier(buildID, prefix: "build"),
+              !applicationVersion.isEmpty,
+              applicationVersion.count <= 128
+        else {
+            throw HostClientError.invalidIdentifier("\(id)/\(applicationVersion)/\(buildID)")
+        }
+        return try await requestJSON(
+            ScreenStateDetail.self,
+            method: "GET",
+            path: ["v1", "screen-states", id],
+            query: [
+                URLQueryItem(name: "build_id", value: buildID),
+                URLQueryItem(name: "application_version", value: applicationVersion),
+            ]
         )
     }
 

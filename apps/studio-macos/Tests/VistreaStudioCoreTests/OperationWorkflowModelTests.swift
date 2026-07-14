@@ -29,7 +29,8 @@ final class OperationWorkflowModelTests: XCTestCase {
             category: "alpha",
             severity: "major",
             state: "open",
-            updatedAt: "2026-07-12T00:00:00Z"
+            updatedAt: "2026-07-12T00:00:00Z",
+            targetSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000002"
         )
     }
 
@@ -139,9 +140,16 @@ final class OperationWorkflowModelTests: XCTestCase {
         let snapshot = try StudioTestFixtures.snapshot()
         let issue = Self.openIssue()
         let model = SnapshotWorkspaceModel(
-            client: FixtureHostClient(snapshots: [snapshot], reviewIssues: [issue])
+            client: FixtureHostClient(
+                snapshots: [snapshot],
+                reviewIssues: [issue],
+                canvasGraph: Self.fixtureGraph()
+            )
         )
         await model.refresh()
+        await model.selectCanvasState(id: Self.fixtureGraph().states[0].id)
+
+        XCTAssertEqual(model.reviewIssues.map(\.id), [issue.id])
 
         await model.selectReviewIssue(id: issue.issueID)
         XCTAssertEqual(model.issueDetailPhase, .content)
@@ -167,9 +175,14 @@ final class OperationWorkflowModelTests: XCTestCase {
     func testIssueTransitionConflictReloadsIssueAndLeavesNote() async throws {
         let snapshot = try StudioTestFixtures.snapshot()
         let issue = Self.openIssue()
-        let client = FixtureHostClient(snapshots: [snapshot], reviewIssues: [issue])
+        let client = FixtureHostClient(
+            snapshots: [snapshot],
+            reviewIssues: [issue],
+            canvasGraph: Self.fixtureGraph()
+        )
         let model = SnapshotWorkspaceModel(client: client)
         await model.refresh()
+        await model.selectCanvasState(id: Self.fixtureGraph().states[0].id)
         await model.selectReviewIssue(id: issue.issueID)
         XCTAssertEqual(model.selectedIssue?.revision, 1)
 

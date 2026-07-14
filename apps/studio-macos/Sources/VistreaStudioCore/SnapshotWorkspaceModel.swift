@@ -173,6 +173,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     // exploration can refresh the same graph.
     private var lastCanvasProjectID: String?
     private var lastCanvasApplicationID: String?
+    private var lastCanvasApplicationVersion: String?
+    private var lastCanvasBuildID: String?
 
     /// Sleeps between exploration polls. Production always waits the fixed
     /// one-second interval — the pane never polls faster — while tests
@@ -204,7 +206,6 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
 
         await loadEventTimeline()
-        await loadReviewIssues()
         await loadWiki(text: nil)
         await loadActiveTuning()
 
@@ -215,12 +216,18 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             if let scope = selectedScope {
                 // The Canvas is the landing surface for the selected scope:
                 // it loads with the scope, before any Snapshot is selected.
-                await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
+                await loadCanvas(
+                    projectID: scope.projectID,
+                    applicationID: scope.applicationID,
+                    applicationVersion: scope.applicationVersion,
+                    buildID: scope.buildID
+                )
             } else {
                 canvasPhase = .empty
                 canvasGraph = nil
                 canvasStates = []
             }
+            await loadReviewIssues()
             guard !snapshots.isEmpty else {
                 clearSelection()
                 contentPhase = .empty
@@ -256,7 +263,12 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         selectedScope = scope
         await selectCanvasState(id: nil)
-        await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
+        await loadCanvas(
+            projectID: scope.projectID,
+            applicationID: scope.applicationID,
+            applicationVersion: scope.applicationVersion,
+            buildID: scope.buildID
+        )
     }
 
     /// Re-derives the scopes from the current Snapshot list. A still-available
@@ -343,21 +355,42 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     }
 
     /// Reloads the materialized Screen Graph for the Canvas.
-    public func loadCanvas(projectID: String, applicationID: String) async {
+    public func loadCanvas(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String? = nil,
+        buildID: String? = nil
+    ) async {
         lastCanvasProjectID = projectID
         lastCanvasApplicationID = applicationID
+        lastCanvasApplicationVersion = applicationVersion
+        lastCanvasBuildID = buildID
         canvasGeneration += 1
         let generation = canvasGeneration
         canvasPhase = .loading
         do {
-            let graph = try await client.getScreenGraph(
-                projectID: projectID,
-                applicationID: applicationID
-            )
+            let graph: CanvasGraph
+            if let applicationVersion, let buildID {
+                graph = try await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    applicationVersion: applicationVersion,
+                    buildID: buildID
+                )
+            } else {
+                graph = try await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID
+                )
+            }
             guard generation == canvasGeneration else {
                 return
             }
             applyCanvasGraph(graph)
+            if let stateID = selectedCanvasStateID,
+               !graph.states.contains(where: { $0.id == stateID }) {
+                await selectCanvasState(id: nil)
+            }
         } catch {
             guard generation == canvasGeneration else {
                 return
@@ -373,6 +406,20 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 canvasPhase = .failure(Self.message(for: error))
             }
         }
+    }
+
+    private func reloadCanvasForLastScope() async {
+        guard let projectID = lastCanvasProjectID,
+              let applicationID = lastCanvasApplicationID
+        else {
+            return
+        }
+        await loadCanvas(
+            projectID: projectID,
+            applicationID: applicationID,
+            applicationVersion: lastCanvasApplicationVersion,
+            buildID: lastCanvasBuildID
+        )
     }
 
     private func applyCanvasGraph(_ graph: CanvasGraph) {
@@ -423,10 +470,22 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                   let applicationID = lastCanvasApplicationID else {
                 continue
             }
-            guard let current = try? await client.getScreenGraph(
-                projectID: projectID,
-                applicationID: applicationID
-            ) else {
+            let current: CanvasGraph?
+            if let applicationVersion = lastCanvasApplicationVersion,
+               let buildID = lastCanvasBuildID {
+                current = try? await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    applicationVersion: applicationVersion,
+                    buildID: buildID
+                )
+            } else {
+                current = try? await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID
+                )
+            }
+            guard let current else {
                 // A transient read failure must not tear the visible pane down.
                 continue
             }
@@ -435,6 +494,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             }
             if current.revision != canvasGraph?.revision {
                 applyCanvasGraph(current)
+                if let stateID = selectedCanvasStateID,
+                   !current.states.contains(where: { $0.id == stateID }) {
+                    await selectCanvasState(id: nil)
+                }
             }
         }
     }
@@ -460,13 +523,26 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
-    /// Reloads the persisted Review Issues, most recently updated first.
+    /// Reloads Review Issues for the selected Screen State, most recently
+    /// updated first. With no selected state the pane is deliberately empty;
+    /// Studio never falls back to an application-wide issue list.
     public func loadReviewIssues() async {
         issuesGeneration += 1
         let generation = issuesGeneration
+        guard let screenStateID = selectedCanvasStateID else {
+            reviewIssues = []
+            issuesPhase = .empty
+            selectedIssueID = nil
+            selectedIssue = nil
+            issueDetailPhase = .idle
+            return
+        }
         issuesPhase = .loading
         do {
-            let page = try await client.listReviewIssues(states: nil)
+            let page = try await client.listReviewIssues(
+                states: nil,
+                screenStateID: screenStateID
+            )
             guard generation == issuesGeneration else {
                 return
             }
@@ -534,9 +610,26 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
-    /// Creates a single-change alpha Tuning Patch bound to the selected node
-    /// and applies it with the selected Snapshot as the expected Snapshot.
+    /// Creates a single-change alpha Tuning Patch bound to the selected node.
     public func previewAlpha(_ value: Double) async {
+        guard let node = selectedNode else {
+            tuningError = "Select a node with a stable ID to preview tuning."
+            return
+        }
+        await previewTuning(
+            property: "alpha",
+            originalValue: .number(value: node.alpha ?? 1, unit: "ratio"),
+            previewValue: .number(value: value, unit: "ratio")
+        )
+    }
+
+    /// Creates and applies one reversible visual-property preview. The Runtime
+    /// re-reads the original value and rejects stale or unsupported targets.
+    public func previewTuning(
+        property: String,
+        originalValue: TuningPropertyValueDraft,
+        previewValue: TuningPropertyValueDraft
+    ) async {
         guard !isApplyingTuning else {
             return
         }
@@ -551,7 +644,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         tuningError = nil
         defer { isApplyingTuning = false }
         let draft = TuningPatchDraft(
-            title: "Studio alpha preview for \(stableID)",
+            title: "Studio \(property) preview for \(stableID)",
             targetSnapshotID: snapshot.id,
             changes: [
                 TuningChangeDraft(
@@ -561,9 +654,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                         nodeID: node.id,
                         stableID: stableID
                     ),
-                    property: "alpha",
-                    originalValue: TuningNumberValueDraft(value: node.alpha ?? 1),
-                    previewValue: TuningNumberValueDraft(value: value)
+                    property: property,
+                    originalValue: originalValue,
+                    previewValue: previewValue
                 ),
             ],
             createdBy: .studio
@@ -798,12 +891,21 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         canvasStateDetail = nil
         guard let id else {
             canvasStatePhase = .idle
+            await loadReviewIssues()
             return
         }
         canvasStatePhase = .loading
         let detail: ScreenStateDetail
         do {
-            detail = try await client.getScreenState(id: id)
+            if let scope = selectedScope {
+                detail = try await client.getScreenState(
+                    id: id,
+                    applicationVersion: scope.applicationVersion,
+                    buildID: scope.buildID
+                )
+            } else {
+                detail = try await client.getScreenState(id: id)
+            }
             guard generation == canvasStateGeneration else {
                 return
             }
@@ -814,8 +916,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 return
             }
             canvasStatePhase = .failure(Self.message(for: error))
+            await loadReviewIssues()
             return
         }
+        await loadReviewIssues()
         // The single-screen Inspector follows the STATE: its canonical
         // observation Snapshot drives the screenshot, the 2D tree, the node
         // properties, and the 3D layers — not whichever capture the Evidence
@@ -992,7 +1096,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         mergeSelectionStateIDs = []
         mergeDecisionRevision = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         return true
     }
 
@@ -1074,7 +1178,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         splitDecisionRevision = nil
         splitDecisionStateID = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         await selectCanvasState(id: stateID)
         return true
     }
@@ -1182,7 +1286,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         annotationDecisionRevision = nil
         annotationDecisionStateID = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         await selectCanvasState(id: stateID)
         return true
     }
@@ -1199,7 +1303,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     ) async {
         if Self.isConflict(error) {
             noteGraphChangedElsewhere()
-            await loadCanvas(projectID: projectID, applicationID: applicationID)
+            await reloadCanvasForLastScope()
             rearmOpenCurationDecisions()
         } else {
             curationError = Self.message(for: error)
@@ -1587,10 +1691,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     /// after every executed action, and once more when the run settles — so
     /// this reloads the same Screen Graph the Canvas last showed.
     private func refreshCanvasAfterExploration() async {
-        guard let projectID = lastCanvasProjectID, let applicationID = lastCanvasApplicationID else {
+        guard lastCanvasProjectID != nil, lastCanvasApplicationID != nil else {
             return
         }
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
     }
 
     /// Surfaces the canonical error code and message verbatim.

@@ -56,18 +56,20 @@ public struct TuningNodeTargetDraft: Encodable, Equatable, Sendable {
     }
 }
 
-/// A canonical number PropertyValue, the shape the tuning allowlist uses for
-/// `alpha`.
+/// A canonical number PropertyValue used by ratio and logical-point tuning.
 public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
     public let value: Double
+    public let unit: String
 
-    public init(value: Double) {
+    public init(value: Double, unit: String = "ratio") {
         self.value = value
+        self.unit = unit
     }
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case value
+        case unit
         case extensions
     }
 
@@ -75,7 +77,62 @@ public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode("number", forKey: .kind)
         try container.encode(value, forKey: .value)
+        try container.encode(unit, forKey: .unit)
         try container.encode([String: String](), forKey: .extensions)
+    }
+}
+
+/// The reversible PropertyValue vocabulary Studio can submit to the protected
+/// Runtime tuning boundary.
+public enum TuningPropertyValueDraft: Encodable, Equatable, Sendable {
+    case number(value: Double, unit: String)
+    case color(red: Double, green: Double, blue: Double, alpha: Double)
+    case font(family: String, size: Double, weight: Int, style: String)
+    case insets(top: Double, leading: Double, bottom: Double, trailing: Double)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case value
+        case unit
+        case colorSpace = "color_space"
+        case extensions
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .number(value, unit):
+            try container.encode("number", forKey: .kind)
+            try container.encode(value, forKey: .value)
+            try container.encode(unit, forKey: .unit)
+        case let .color(red, green, blue, alpha):
+            try container.encode("color_rgba", forKey: .kind)
+            try container.encode(
+                ["red": red, "green": green, "blue": blue, "alpha": alpha],
+                forKey: .value
+            )
+            try container.encode("srgb", forKey: .colorSpace)
+        case let .font(family, size, weight, style):
+            try container.encode("font", forKey: .kind)
+            try container.encode(
+                FontPayload(family: family, size: size, weight: weight, style: style),
+                forKey: .value
+            )
+        case let .insets(top, leading, bottom, trailing):
+            try container.encode("insets", forKey: .kind)
+            try container.encode(
+                ["top": top, "leading": leading, "bottom": bottom, "trailing": trailing],
+                forKey: .value
+            )
+        }
+        try container.encode([String: String](), forKey: .extensions)
+    }
+
+    private struct FontPayload: Encodable {
+        let family: String
+        let size: Double
+        let weight: Int
+        let style: String
     }
 }
 
@@ -83,8 +140,20 @@ public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
 public struct TuningChangeDraft: Encodable, Equatable, Sendable {
     public let target: TuningNodeTargetDraft
     public let property: String
-    public let originalValue: TuningNumberValueDraft
-    public let previewValue: TuningNumberValueDraft
+    public let originalValue: TuningPropertyValueDraft
+    public let previewValue: TuningPropertyValueDraft
+
+    public init(
+        target: TuningNodeTargetDraft,
+        property: String,
+        originalValue: TuningPropertyValueDraft,
+        previewValue: TuningPropertyValueDraft
+    ) {
+        self.target = target
+        self.property = property
+        self.originalValue = originalValue
+        self.previewValue = previewValue
+    }
 
     public init(
         target: TuningNodeTargetDraft,
@@ -92,10 +161,12 @@ public struct TuningChangeDraft: Encodable, Equatable, Sendable {
         originalValue: TuningNumberValueDraft,
         previewValue: TuningNumberValueDraft
     ) {
-        self.target = target
-        self.property = property
-        self.originalValue = originalValue
-        self.previewValue = previewValue
+        self.init(
+            target: target,
+            property: property,
+            originalValue: .number(value: originalValue.value, unit: originalValue.unit),
+            previewValue: .number(value: previewValue.value, unit: previewValue.unit)
+        )
     }
 
     private enum CodingKeys: String, CodingKey {

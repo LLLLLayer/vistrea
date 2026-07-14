@@ -268,6 +268,10 @@ public struct ReviewIssueSummary: Decodable, Equatable, Sendable, Identifiable {
     public let severity: String
     public let state: String
     public let updatedAt: String
+    /// Snapshot named by the canonical runtime target. Studio does not render
+    /// the rest of the node target here, but fixture mode uses this identity
+    /// to preserve Screen State-scoped list semantics.
+    public let targetSnapshotID: String?
 
     public var id: String { issueID }
 
@@ -278,7 +282,8 @@ public struct ReviewIssueSummary: Decodable, Equatable, Sendable, Identifiable {
         category: String,
         severity: String,
         state: String,
-        updatedAt: String
+        updatedAt: String,
+        targetSnapshotID: String? = nil
     ) {
         self.issueID = issueID
         self.revision = revision
@@ -287,6 +292,7 @@ public struct ReviewIssueSummary: Decodable, Equatable, Sendable, Identifiable {
         self.severity = severity
         self.state = state
         self.updatedAt = updatedAt
+        self.targetSnapshotID = targetSnapshotID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -297,6 +303,31 @@ public struct ReviewIssueSummary: Decodable, Equatable, Sendable, Identifiable {
         case severity
         case state
         case updatedAt = "updated_at"
+        case runtimeTarget = "runtime_target"
+    }
+
+    private enum RuntimeTargetCodingKeys: String, CodingKey {
+        case snapshotID = "snapshot_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        issueID = try container.decode(String.self, forKey: .issueID)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        title = try container.decode(String.self, forKey: .title)
+        category = try container.decode(String.self, forKey: .category)
+        severity = try container.decode(String.self, forKey: .severity)
+        state = try container.decode(String.self, forKey: .state)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        if container.contains(.runtimeTarget) {
+            let target = try container.nestedContainer(
+                keyedBy: RuntimeTargetCodingKeys.self,
+                forKey: .runtimeTarget
+            )
+            targetSnapshotID = try target.decodeIfPresent(String.self, forKey: .snapshotID)
+        } else {
+            targetSnapshotID = nil
+        }
     }
 }
 
@@ -406,6 +437,22 @@ public struct CanvasTransitionSummary: Decodable, Equatable, Sendable, Identifia
     }
 }
 
+/// The exact Application Version + Build projection attached by the Host to
+/// an otherwise application-level materialized Screen Graph.
+public struct CanvasBuildScope: Decodable, Equatable, Sendable {
+    public let buildID: String
+    public let applicationVersion: String
+    public let screenStateIDs: [String]
+    public let transitionIDs: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case buildID = "build_id"
+        case applicationVersion = "application_version"
+        case screenStateIDs = "screen_state_ids"
+        case transitionIDs = "transition_ids"
+    }
+}
+
 /// The materialized Screen Graph reduced to what the Canvas renders.
 public struct CanvasGraph: Decodable, Equatable, Sendable {
     public let screenGraphID: String
@@ -415,19 +462,22 @@ public struct CanvasGraph: Decodable, Equatable, Sendable {
     public let entryStateIDs: [String]
     public let states: [CanvasStateSummary]
     public let transitions: [CanvasTransitionSummary]
+    public let buildScope: CanvasBuildScope?
 
     public init(
         screenGraphID: String,
         revision: UInt64 = 1,
         entryStateIDs: [String],
         states: [CanvasStateSummary],
-        transitions: [CanvasTransitionSummary]
+        transitions: [CanvasTransitionSummary],
+        buildScope: CanvasBuildScope? = nil
     ) {
         self.screenGraphID = screenGraphID
         self.revision = revision
         self.entryStateIDs = entryStateIDs
         self.states = states
         self.transitions = transitions
+        self.buildScope = buildScope
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -436,6 +486,37 @@ public struct CanvasGraph: Decodable, Equatable, Sendable {
         case entryStateIDs = "entry_state_ids"
         case states
         case transitions
+        case extensions
+    }
+
+    private struct Extensions: Decodable {
+        let buildScope: CanvasBuildScope?
+
+        private enum CodingKeys: String, CodingKey {
+            case buildScope = "vistrea.build_scope"
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        screenGraphID = try container.decode(String.self, forKey: .screenGraphID)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        entryStateIDs = try container.decode([String].self, forKey: .entryStateIDs)
+        let allStates = try container.decode([CanvasStateSummary].self, forKey: .states)
+        let allTransitions = try container.decode(
+            [CanvasTransitionSummary].self,
+            forKey: .transitions
+        )
+        buildScope = try container.decodeIfPresent(Extensions.self, forKey: .extensions)?.buildScope
+        if let buildScope {
+            let stateIDs = Set(buildScope.screenStateIDs)
+            let transitionIDs = Set(buildScope.transitionIDs)
+            states = allStates.filter { stateIDs.contains($0.id) }
+            transitions = allTransitions.filter { transitionIDs.contains($0.id) }
+        } else {
+            states = allStates
+            transitions = allTransitions
+        }
     }
 }
 
@@ -499,7 +580,14 @@ public protocol HostClient: Sendable {
     func capture(_ request: CaptureRequest) async throws -> RuntimeSnapshot
     func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline
     func listReviewIssues(states: [String]?) async throws -> ReviewIssuePage
+    func listReviewIssues(states: [String]?, screenStateID: String?) async throws -> ReviewIssuePage
     func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph
+    func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph
     func searchWikiNodes(text: String?) async throws -> WikiNodePage
 
     // Tuning preview writes (Debug-only Host capability).
@@ -522,6 +610,11 @@ public protocol HostClient: Sendable {
 
     // Canvas Screen State details and knowledge links.
     func getScreenState(id: String) async throws -> ScreenStateDetail
+    func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail
     func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary
     func relatedWikiNodes(kind: String, id: String) async throws -> WikiNodePage
 
@@ -549,6 +642,32 @@ public protocol HostClient: Sendable {
     func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef
     func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord
     func cancelExploration(id: String) async throws -> ExplorationOperationRef
+}
+
+public extension HostClient {
+    func listReviewIssues(
+        states: [String]?,
+        screenStateID: String?
+    ) async throws -> ReviewIssuePage {
+        try await listReviewIssues(states: states)
+    }
+
+    func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        try await getScreenGraph(projectID: projectID, applicationID: applicationID)
+    }
+
+    func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail {
+        try await getScreenState(id: id)
+    }
 }
 
 public enum HostClientError: Error, Equatable, Sendable {

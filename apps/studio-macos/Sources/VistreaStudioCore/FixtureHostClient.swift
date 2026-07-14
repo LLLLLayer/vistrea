@@ -150,6 +150,28 @@ public actor FixtureHostClient: HostClient {
         return canvasGraph
     }
 
+    public func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        let graph = try await getScreenGraph(projectID: projectID, applicationID: applicationID)
+        return CanvasGraph(
+            screenGraphID: graph.screenGraphID,
+            revision: graph.revision,
+            entryStateIDs: graph.entryStateIDs,
+            states: graph.states,
+            transitions: graph.transitions,
+            buildScope: CanvasBuildScope(
+                buildID: buildID,
+                applicationVersion: applicationVersion,
+                screenStateIDs: graph.states.map(\.id),
+                transitionIDs: graph.transitions.map(\.id)
+            )
+        )
+    }
+
     public func searchWikiNodes(text: String?) async throws -> WikiNodePage {
         let summaries = wikiDetails.map(\.summaryProjection)
         guard let text, !text.isEmpty else {
@@ -170,6 +192,25 @@ public actor FixtureHostClient: HostClient {
             return ReviewIssuePage(items: reviewIssues)
         }
         return ReviewIssuePage(items: reviewIssues.filter { states.contains($0.state) })
+    }
+
+    public func listReviewIssues(
+        states: [String]?,
+        screenStateID: String?
+    ) async throws -> ReviewIssuePage {
+        let stateFiltered: [ReviewIssueSummary]
+        if let screenStateID {
+            let detail = try await getScreenState(id: screenStateID)
+            stateFiltered = reviewIssues.filter {
+                $0.targetSnapshotID == detail.canonicalSnapshotID
+            }
+        } else {
+            stateFiltered = reviewIssues
+        }
+        guard let states else {
+            return ReviewIssuePage(items: stateFiltered)
+        }
+        return ReviewIssuePage(items: stateFiltered.filter { states.contains($0.state) })
     }
 
     public func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
@@ -243,7 +284,16 @@ public actor FixtureHostClient: HostClient {
         guard !draft.title.isEmpty, !draft.changes.isEmpty else {
             throw Self.serverError(400, code: "invalid_argument", message: "The request was rejected as invalid.")
         }
-        for change in draft.changes where change.property != "alpha" {
+        let tuningAllowlist: Set<String> = [
+            "content_insets",
+            "spacing",
+            "font",
+            "foreground_color",
+            "background_color",
+            "alpha",
+            "corner_radius",
+        ]
+        for change in draft.changes where !tuningAllowlist.contains(change.property) {
             throw Self.serverError(
                 422,
                 code: "unsupported",
@@ -386,7 +436,8 @@ public actor FixtureHostClient: HostClient {
             category: current.category,
             severity: current.severity,
             state: request.toState,
-            updatedAt: mintTimestamp()
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: current.targetSnapshotID
         )
         reviewIssues[index] = updated
         return updated
@@ -486,6 +537,41 @@ public actor FixtureHostClient: HostClient {
         )
         screenStatesByID[id] = detail
         return detail
+    }
+
+    public func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail {
+        let detail = try await getScreenState(id: id)
+        guard let snapshot = snapshotsByID.values
+            .filter({
+                $0.runtimeContext.applicationVersion == applicationVersion
+                    && $0.runtimeContext.buildID.rawValue == buildID
+            })
+            .max(by: {
+                $0.capturedAt.wallTime.rawValue < $1.capturedAt.wallTime.rawValue
+            })
+        else {
+            throw Self.serverError(
+                404,
+                code: "not_found",
+                message: "The Screen State was not observed in the requested build scope."
+            )
+        }
+        return ScreenStateDetail(
+            screenStateID: detail.screenStateID,
+            revision: detail.revision,
+            title: detail.title,
+            kind: detail.kind,
+            status: detail.status,
+            canonicalSnapshotID: snapshot.snapshotID.rawValue,
+            firstSeen: detail.firstSeen,
+            lastSeen: detail.lastSeen,
+            labels: detail.labels,
+            summary: detail.summary
+        )
     }
 
     public func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary {
@@ -1304,7 +1390,8 @@ public enum FixtureWorkspace {
                 category: "layout",
                 severity: "minor",
                 state: "open",
-                updatedAt: "2026-07-12T00:00:00Z"
+                updatedAt: "2026-07-12T00:00:00Z",
+                targetSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000002"
             ),
         ]
     }

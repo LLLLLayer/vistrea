@@ -216,6 +216,88 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(transitionBody["reason"] as? String, "Taking this for triage")
     }
 
+    func testBuildScopedCanvasStateAndReviewIssueRoutes() async throws {
+        let projectID = "project_019f0000-0000-7000-8000-000000000001"
+        let buildID = "build_019f0000-0000-7000-8000-000000000002"
+        let applicationVersion = "2.0.0"
+        let hiddenStateID = "screenstate_019f0000-0000-7000-8000-000000000002"
+        let graphJSON = #"""
+        {"screen_graph_id":"graph_019f0000-0000-7000-8000-000000000001","revision":7,
+         "entry_state_ids":["\#(screenStateID)"],
+         "states":[
+           {"screen_state_id":"\#(screenStateID)","title":"Current","kind":"screen","status":"active"},
+           {"screen_state_id":"\#(hiddenStateID)","title":"Other build","kind":"screen","status":"active"}],
+         "transitions":[],
+         "extensions":{"vistrea.build_scope":{"build_id":"\#(buildID)",
+           "application_version":"\#(applicationVersion)",
+           "screen_state_ids":["\#(screenStateID)"],"transition_ids":[]}}}
+        """#
+        let stateJSON = #"""
+        {"screen_state_id":"\#(screenStateID)","revision":3,"title":"Current","kind":"screen",
+         "status":"active","canonical_snapshot_id":"\#(snapshotID)",
+         "first_seen":"2026-07-12T00:00:00Z","last_seen":"2026-07-12T00:00:05Z"}
+        """#
+        let issuesJSON = #"""
+        {"items":[{"issue_id":"\#(issueID)","revision":1,"title":"Scoped issue",
+          "category":"frame","severity":"major","state":"open",
+          "updated_at":"2026-07-12T00:00:05Z",
+          "runtime_target":{"snapshot_id":"\#(snapshotID)"}}]}
+        """#
+        let transport = WriteRecordingTransport(responses: [
+            HostHTTPResponse(statusCode: 200, body: Data(graphJSON.utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(stateJSON.utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(issuesJSON.utf8)),
+        ])
+        let client = try makeClient(transport)
+
+        let graph = try await client.getScreenGraph(
+            projectID: projectID,
+            applicationID: "dev.vistrea.demo",
+            applicationVersion: applicationVersion,
+            buildID: buildID
+        )
+        XCTAssertEqual(graph.states.map(\.id), [screenStateID])
+        XCTAssertEqual(graph.buildScope?.buildID, buildID)
+
+        let state = try await client.getScreenState(
+            id: screenStateID,
+            applicationVersion: applicationVersion,
+            buildID: buildID
+        )
+        XCTAssertEqual(state.canonicalSnapshotID, snapshotID)
+
+        let issues = try await client.listReviewIssues(
+            states: nil,
+            screenStateID: screenStateID
+        )
+        XCTAssertEqual(issues.items.map(\.id), [issueID])
+        XCTAssertEqual(issues.items.first?.targetSnapshotID, snapshotID)
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/v1/screen-graph",
+            "/v1/screen-states/\(screenStateID)",
+            "/v1/review-issues",
+        ])
+        let queries = requests.map { request in
+            Set(
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                    .queryItems?.map { "\($0.name)=\($0.value ?? "")" } ?? []
+            )
+        }
+        XCTAssertEqual(queries[0], [
+            "project_id=\(projectID)",
+            "application_id=dev.vistrea.demo",
+            "application_version=\(applicationVersion)",
+            "build_id=\(buildID)",
+        ])
+        XCTAssertEqual(queries[1], [
+            "application_version=\(applicationVersion)",
+            "build_id=\(buildID)",
+        ])
+        XCTAssertEqual(queries[2], ["screen_state_id=\(screenStateID)"])
+    }
+
     func testWikiWriteRoutesEncodeAndDecodeInlineMarkdown() async throws {
         let nodeJSON = { (revision: Int, status: String) in
             #"""

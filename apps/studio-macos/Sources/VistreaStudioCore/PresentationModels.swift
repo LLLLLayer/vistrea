@@ -155,6 +155,10 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
     public let actions: [String]
     /// The captured visual alpha, when the Runtime reported one.
     public let alpha: Double?
+    public let foregroundColor: ColorRGBAValueSummary?
+    public let backgroundColor: ColorRGBAValueSummary?
+    public let font: NodeFontPresentation?
+    public let cornerRadius: Double?
     public let fields: [DetailField]
 
     init(node: UiNode) {
@@ -170,6 +174,10 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         accessibilityLabel = node.accessibility?.label
         actions = node.actions.map(\.rawValue)
         alpha = node.visual?.alpha
+        foregroundColor = node.visual?.foregroundColor.map(ColorRGBAValueSummary.init)
+        backgroundColor = node.visual?.backgroundColor.map(ColorRGBAValueSummary.init)
+        font = node.visual?.font.map(NodeFontPresentation.init)
+        cornerRadius = node.visual?.cornerRadius
 
         var result = [
             DetailField(label: "Node ID", value: node.nodeID.rawValue),
@@ -191,6 +199,23 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         if let alpha = node.visual?.alpha {
             result.append(
                 DetailField(label: "Alpha", value: alpha.formatted(.number.precision(.fractionLength(0...2))))
+            )
+        }
+        if let color = foregroundColor {
+            result.append(DetailField(label: "Foreground", value: color.summaryText))
+        }
+        if let color = backgroundColor {
+            result.append(DetailField(label: "Background", value: color.summaryText))
+        }
+        if let font {
+            result.append(DetailField(label: "Font", value: font.summaryText))
+        }
+        if let cornerRadius {
+            result.append(
+                DetailField(
+                    label: "Corner radius",
+                    value: cornerRadius.formatted(.number.precision(.fractionLength(0...2)))
+                )
             )
         }
         if let visible = node.state.visible {
@@ -216,6 +241,32 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
 
     public var outlineTitle: String {
         stableID ?? contentSummary ?? nativeType
+    }
+}
+
+public extension ColorRGBAValueSummary {
+    init(_ color: VistreaRuntimeModels.Color) {
+        self.init(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    }
+}
+
+public struct NodeFontPresentation: Equatable, Sendable {
+    public let family: String
+    public let size: Double
+    public let weight: Int
+    public let style: String
+
+    init(_ font: VistreaRuntimeModels.Font) {
+        family = font.family
+        size = font.size
+        weight = Int(((max(-1, min(1, font.weight)) + 1) * 499.5 + 1).rounded())
+        style = font.postscriptName?.localizedCaseInsensitiveContains("italic") == true
+            ? "italic"
+            : "normal"
+    }
+
+    public var summaryText: String {
+        "\(family) · \(size.formatted(.number.precision(.fractionLength(0...1)))) pt · \(weight) · \(style)"
     }
 }
 

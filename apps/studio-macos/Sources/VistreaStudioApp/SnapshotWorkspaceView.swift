@@ -2993,33 +2993,31 @@ private struct NodeDetailsPane: View {
     }
 }
 
-/// The alpha preview controls for one selected node. The Host, not this
-/// package, is what protects the capability: a Host without an authorized
-/// Debug Runtime rejects the routes and the failure is shown inline.
+/// Reversible visual-property controls for one selected node. The Host and
+/// Debug Runtime remain the security boundary; Studio only creates canonical
+/// Tuning Patches and renders explicit applied/rejected outcomes.
 private struct TuningPreviewControls: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     let node: NodePresentation
+    @State private var property: TunableProperty = .alpha
     @State private var alphaValue: Double = 1
+    @State private var cornerRadiusValue: Double = 0
+    @State private var foregroundColor = Color.primary
+    @State private var backgroundColor = Color.clear
+    @State private var fontFamily = "System"
+    @State private var fontSize: Double = 17
+    @State private var fontWeight: Double = 400
+    @State private var spacingOriginal: Double = 0
+    @State private var spacingValue: Double = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            LabeledContent(
-                "Source alpha",
-                value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
-            )
-            Slider(value: $alphaValue, in: 0...1) {
-                Text("Alpha")
-            }
-            HStack {
-                Text(alphaValue.formatted(.number.precision(.fractionLength(2))))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Preview alpha") {
-                    Task { await model.previewAlpha(alphaValue) }
+            Picker("Property", selection: $property) {
+                ForEach(TunableProperty.allCases) { value in
+                    Text(value.label).tag(value)
                 }
-                .disabled(model.isApplyingTuning)
             }
+            propertyEditor
             if model.isApplyingTuning {
                 ProgressView("Applying preview…")
                     .controlSize(.small)
@@ -3034,9 +3032,202 @@ private struct TuningPreviewControls: View {
                 TuningOutcomeView(application: outcome)
             }
         }
-        .onAppear { alphaValue = node.alpha ?? 1 }
+        .onAppear { resetValues() }
         .onChange(of: node.id) {
-            alphaValue = node.alpha ?? 1
+            resetValues()
+        }
+    }
+
+    @ViewBuilder
+    private var propertyEditor: some View {
+        switch property {
+        case .alpha:
+            LabeledContent(
+                "Source alpha",
+                value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
+            )
+            Slider(value: $alphaValue, in: 0...1)
+            previewButton("Preview alpha") { await model.previewAlpha(alphaValue) }
+        case .foregroundColor:
+            colorEditor(
+                label: "Foreground",
+                source: node.foregroundColor,
+                selection: $foregroundColor,
+                property: "foreground_color"
+            )
+        case .backgroundColor:
+            colorEditor(
+                label: "Background",
+                source: node.backgroundColor,
+                selection: $backgroundColor,
+                property: "background_color"
+            )
+        case .font:
+            if let source = node.font {
+                LabeledContent("Source font", value: source.summaryText)
+                TextField("Family", text: $fontFamily)
+                LabeledContent("Size", value: fontSize.formatted(.number.precision(.fractionLength(1))))
+                Slider(value: $fontSize, in: 6...96, step: 0.5)
+                LabeledContent("Weight", value: Int(fontWeight).description)
+                Slider(value: $fontWeight, in: 100...900, step: 100)
+                previewButton("Preview font") {
+                    await model.previewTuning(
+                        property: "font",
+                        originalValue: .font(
+                            family: source.family,
+                            size: source.size,
+                            weight: source.weight,
+                            style: source.style
+                        ),
+                        previewValue: .font(
+                            family: fontFamily,
+                            size: fontSize,
+                            weight: Int(fontWeight),
+                            style: source.style
+                        )
+                    )
+                }
+            } else {
+                unavailable("This node did not report a font.")
+            }
+        case .spacing:
+            Text("Enter the observed source spacing. The Runtime re-reads it and rejects a mismatch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                TextField("Source", value: $spacingOriginal, format: .number)
+                TextField("Preview", value: $spacingValue, format: .number)
+            }
+            previewButton("Preview spacing") {
+                await model.previewTuning(
+                    property: "spacing",
+                    originalValue: .number(value: spacingOriginal, unit: "logical_point"),
+                    previewValue: .number(value: spacingValue, unit: "logical_point")
+                )
+            }
+        case .cornerRadius:
+            if let source = node.cornerRadius {
+                LabeledContent(
+                    "Source radius",
+                    value: source.formatted(.number.precision(.fractionLength(0...2)))
+                )
+                Slider(value: $cornerRadiusValue, in: 0...64, step: 0.5)
+                previewButton("Preview corner radius") {
+                    await model.previewTuning(
+                        property: "corner_radius",
+                        originalValue: .number(value: source, unit: "logical_point"),
+                        previewValue: .number(value: cornerRadiusValue, unit: "logical_point")
+                    )
+                }
+            } else {
+                unavailable("This node did not report a corner radius.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func colorEditor(
+        label: String,
+        source: ColorRGBAValueSummary?,
+        selection: Binding<Color>,
+        property: String
+    ) -> some View {
+        if let source {
+            LabeledContent("Source \(label.lowercased())", value: source.summaryText)
+            ColorPicker(label, selection: selection, supportsOpacity: true)
+            previewButton("Preview \(label.lowercased())") {
+                guard let preview = rgba(selection.wrappedValue) else { return }
+                await model.previewTuning(
+                    property: property,
+                    originalValue: .color(
+                        red: source.red,
+                        green: source.green,
+                        blue: source.blue,
+                        alpha: source.alpha
+                    ),
+                    previewValue: .color(
+                        red: preview.red,
+                        green: preview.green,
+                        blue: preview.blue,
+                        alpha: preview.alpha
+                    )
+                )
+            }
+        } else {
+            unavailable("This node did not report a \(label.lowercased()).")
+        }
+    }
+
+    private func previewButton(
+        _ title: String,
+        operation: @escaping () async -> Void
+    ) -> some View {
+        HStack {
+            Spacer()
+            Button(title) { Task { await operation() } }
+                .disabled(model.isApplyingTuning)
+        }
+    }
+
+    private func unavailable(_ message: String) -> some View {
+        Text(message).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private func resetValues() {
+        alphaValue = node.alpha ?? 1
+        cornerRadiusValue = node.cornerRadius ?? 0
+        if let color = node.foregroundColor {
+            foregroundColor = Color(
+                red: color.red,
+                green: color.green,
+                blue: color.blue,
+                opacity: color.alpha
+            )
+        }
+        if let color = node.backgroundColor {
+            backgroundColor = Color(
+                red: color.red,
+                green: color.green,
+                blue: color.blue,
+                opacity: color.alpha
+            )
+        }
+        if let font = node.font {
+            fontFamily = font.family
+            fontSize = font.size
+            fontWeight = Double(font.weight)
+        }
+    }
+
+    private func rgba(_ color: Color) -> ColorRGBAValueSummary? {
+        guard let converted = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        return ColorRGBAValueSummary(
+            red: Double(converted.redComponent),
+            green: Double(converted.greenComponent),
+            blue: Double(converted.blueComponent),
+            alpha: Double(converted.alphaComponent)
+        )
+    }
+
+    private enum TunableProperty: String, CaseIterable, Identifiable {
+        case alpha
+        case foregroundColor
+        case backgroundColor
+        case font
+        case spacing
+        case cornerRadius
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .alpha: "Alpha"
+            case .foregroundColor: "Foreground color"
+            case .backgroundColor: "Background color"
+            case .font: "Font"
+            case .spacing: "Spacing"
+            case .cornerRadius: "Corner radius"
+            }
         }
     }
 }
