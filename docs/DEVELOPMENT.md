@@ -129,3 +129,24 @@ A module task is complete when:
 - documentation accurately distinguishes implemented behavior from planned behavior.
 
 A cross-module feature additionally requires an integration test or a documented, repeatable end-to-end verification path.
+
+## 10. Pull request CI matrix
+
+Every pull request and push to `main` runs six independent required jobs from
+`.github/workflows/pull-request-ci.yml`:
+
+| Job | Runner | Required gate |
+|---|---|---|
+| Node and Host | Ubuntu 24.04 | Locked install and `pnpm check` |
+| Vistrea Studio | macOS 15 | Managed Host build, Swift tests, Node/Swift Runtime interoperability, and Release build |
+| iOS SDK | macOS 15 | Swift tests and Release build |
+| iOS Demo App | macOS 15 | Checksum-verified XcodeGen regeneration, generated-project diff, Simulator tests, and Release Simulator build |
+| Android SDK | Ubuntu 24.04 with Node, JDK 17, and API 36 | Unit tests, Debug/Release builds, Android Lint, Compose gates, Node/Kotlin Runtime interoperability, and the Release artifact boundary |
+| Android Demo App | Ubuntu 24.04 with JDK 17 and API 36 | Debug/Release builds, unit tests, and Android Lint |
+
+All referenced GitHub Actions use immutable commit SHAs. Tool versions that are
+not supplied by an Action are installed from a pinned release with a checked
+digest. These jobs intentionally exclude connected Android tests, dedicated
+temporary-device loops, WebDriverAgent, and physical-device acceptance; those
+belong to explicit opt-in end-to-end lanes and must not be inferred from a green
+pull request matrix.

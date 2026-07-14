@@ -92,6 +92,10 @@ The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android 
 
 Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes, owns a default Application Support Workspace, and can switch Workspaces from its File menu, so a packaged app no longer depends on shell-provided Host credentials. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
 
+Pull requests run six independent, immutable-revision CI jobs for Node/Host,
+Studio, the iOS SDK, the iOS Demo App, the Android SDK, and the Android Demo
+App. Device-backed end-to-end acceptance remains an explicit opt-in lane.
+
 Run the current executable checks with:
 
 ```bash

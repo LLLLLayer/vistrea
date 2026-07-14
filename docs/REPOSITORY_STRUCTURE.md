@@ -21,7 +21,7 @@ The repository structure must ensure:
 vistrea/
 ├── .github/
 │   └── workflows/
-│       ├── protocol-contracts.yml
+│       ├── pull-request-ci.yml  # six independent Node and native PR gates
 │       └── studio-macos-release.yml # tag packaging, notarization, Release, and update feed
 ├── .gitignore
 ├── .node-version
@@ -202,6 +202,7 @@ vistrea/
 │       └── android-real-automation-loop.test.ts
 ├── tools/
 │   ├── README.md
+│   ├── ci/                      # pinned CI-only tool bootstrap
 │   ├── protocol/
 │   │   ├── phase0a2-semantic-checks.mjs
 │   │   ├── semantic-checks.mjs
