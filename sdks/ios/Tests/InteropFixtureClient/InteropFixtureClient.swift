@@ -63,16 +63,29 @@ private struct InteropFixtureClient {
                 throw RuntimeConnectionError.invalidConfiguration
             }
             let payload = try loadPayload(fixturePath: fixturePath)
-            let endpoint = try LoopbackRuntimeEndpoint(
-                host: arguments.host,
-                port: arguments.port
-            )
-            let configuration = try LoopbackRuntimeClientConfiguration(
-                endpoint: endpoint,
-                authorizationToken: Data(token.utf8),
-                runtimeInstanceID: "runtime.swift.interop",
-                buildConfiguration: .debug
-            )
+            let configuration: LoopbackRuntimeClientConfiguration
+            if let certificateSHA256 = environment["VISTREA_RUNTIME_TLS_CERT_SHA256"] {
+                configuration = try LoopbackRuntimeClientConfiguration(
+                    endpoint: TlsRuntimeEndpoint(
+                        host: arguments.host,
+                        port: arguments.port,
+                        pinnedCertificateSHA256Hex: certificateSHA256
+                    ),
+                    authorizationToken: Data(token.utf8),
+                    runtimeInstanceID: "runtime.swift.interop",
+                    buildConfiguration: .debug
+                )
+            } else {
+                configuration = try LoopbackRuntimeClientConfiguration(
+                    endpoint: LoopbackRuntimeEndpoint(
+                        host: arguments.host,
+                        port: arguments.port
+                    ),
+                    authorizationToken: Data(token.utf8),
+                    runtimeInstanceID: "runtime.swift.interop",
+                    buildConfiguration: .debug
+                )
+            }
             var recorder: RuntimeEventRecorder?
             var scriptTask: Task<Void, Never>?
             if environment["VISTREA_RUNTIME_EVENTS"] == "scripted" {

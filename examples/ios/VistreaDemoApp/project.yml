@@ -93,6 +93,9 @@ schemes:
         - variable: VISTREA_RUNTIME_TOKEN
           value: ""
           isEnabled: false
+        - variable: VISTREA_RUNTIME_TLS_CERT_SHA256
+          value: ""
+          isEnabled: false
     test:
       config: Debug
       targets:

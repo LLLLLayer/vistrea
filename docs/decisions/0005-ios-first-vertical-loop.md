@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-12
+- Extended by: ADR-0010 for the physical-device transport profile
 
 ## Context
 

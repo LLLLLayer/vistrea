@@ -96,6 +96,30 @@ await host.waitForRuntime();
 await host.close();
 ```
 
+For a physical-device Runtime, composition selects a separate exact-IP TLS
+listener while the Local API remains on `host` loopback:
+
+```ts
+const host = await startLocalHost({
+  workspaceRoot: "/absolute/path/to/workspace",
+  validator,
+  host: "127.0.0.1",
+  runtimeTls: {
+    host: "fd00::2",
+    certificate: certificatePEM,
+    privateKey: privateKeyPEM,
+  },
+});
+
+// host.runtime.transport === "tls"
+// Deliver host.runtime.certificateSha256 and authorizationToken only through
+// protected Debug/Internal launch configuration.
+```
+
+TLS requires one literal non-wildcard IP and TLS 1.3. The native Runtime pins
+the exact leaf certificate and then completes the normal HMAC handshake. This
+mode does not make the Host Local API remotely reachable.
+
 Before a Runtime is authenticated, `/v1/status` reports
 `runtime_connected: false` and capture returns a sanitized retryable
 `unavailable` response. Reconnecting a Runtime does not reopen storage or
@@ -110,10 +134,24 @@ node .build/typescript/apps/host/serve.js \
   --connection-file /private/tmp/vistrea-host.json
 ```
 
+An operator-managed physical-device listener adds all three TLS arguments as
+one unit; certificate and key paths must be absolute:
+
+```bash
+node .build/typescript/apps/host/serve.js \
+  --workspace /absolute/path/to/workspace \
+  --connection-file /private/tmp/vistrea-host.json \
+  --runtime-host fd00::2 \
+  --runtime-tls-cert /private/tmp/vistrea-runtime-cert.pem \
+  --runtime-tls-key /private/tmp/vistrea-runtime-key.pem
+```
+
 Stdout contains only the process ID, Workspace path, and descriptor path. A
 clean `SIGINT` or `SIGTERM` closes API, Runtime, and storage ownership in order,
 then removes the descriptor. The descriptor contains live secrets and must
-never be committed or shared.
+never be committed or shared. Its `runtime.transport` is `loopback` or `tls`;
+the TLS form also carries `runtime.certificate_sha256` for the authorized
+launcher.
 
 For focused adapter tests, `startHostLocalApi` can still be composed directly
 over explicit ports:

@@ -2,24 +2,6 @@ import Darwin
 import Foundation
 import VistreaStudioCore
 
-private struct AcceptanceResult: Encodable {
-    let snapshotID: String
-    let scenarioID: String?
-    let nodeCount: Int
-    let screenshotHash: String?
-    let screenshotByteCount: Int?
-    let runtimeConnected: Bool
-
-    private enum CodingKeys: String, CodingKey {
-        case snapshotID = "snapshot_id"
-        case scenarioID = "scenario_id"
-        case nodeCount = "node_count"
-        case screenshotHash = "screenshot_hash"
-        case screenshotByteCount = "screenshot_byte_count"
-        case runtimeConnected = "runtime_connected"
-    }
-}
-
 @main
 private enum VistreaStudioAcceptanceProbe {
     static func main() async {
@@ -35,23 +17,9 @@ private enum VistreaStudioAcceptanceProbe {
                 )
             }
             let client = try HTTPHostClient(baseURL: url, bearerToken: token)
-            async let statusValue = client.getStatus()
-            async let snapshotValue = client.getSnapshot(id: expectedSnapshotID)
-            let (status, snapshot) = try await (statusValue, snapshotValue)
-            let presentation = try SnapshotPresentation(snapshot: snapshot)
-            let screenshotBytes: Data?
-            if let screenshot = snapshot.screenshot {
-                screenshotBytes = try await client.getObject(hash: screenshot.object.hash, range: nil)
-            } else {
-                screenshotBytes = nil
-            }
-            let result = AcceptanceResult(
-                snapshotID: presentation.id,
-                scenarioID: presentation.scenarioID,
-                nodeCount: presentation.tree.nodesByID.count,
-                screenshotHash: presentation.screenshot?.hash,
-                screenshotByteCount: screenshotBytes?.count,
-                runtimeConnected: status.runtimeConnected
+            let result = try await StudioCoreAcceptanceWorkflow.run(
+                client: client,
+                request: StudioCoreAcceptanceRequest(expectedSnapshotID: expectedSnapshotID)
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]

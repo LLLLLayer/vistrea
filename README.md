@@ -78,7 +78,7 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 ## Recommended implementation sequence
 
 1. Add dedicated Studio controls for Difference promotion, source suggestions, fresh-build recapture verification, and Knowledge Collection management.
-2. Exercise the broader native tuning matrix on physical devices, form the physical-iPhone Runtime-to-Host vertical, and strengthen the iOS Release artifact boundary.
+2. Run the implemented iOS pinned-TLS and Android adb physical vertical lanes on dedicated hardware, exercise the broader native tuning matrix there, and strengthen the iOS Release artifact boundary.
 3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
 4. Grow Vistrea Hub beyond the secure pack relay: user-facing sync, auditing, discovery, permissions, and collaboration.
 
@@ -89,6 +89,12 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 89 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, portable full/thin `.vistrea-pack` exchange, and immutable Knowledge Collection publication with readable Markdown/HTML exports over the same Commit and ObjectRef identity.
 
 The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 65 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+
+The physical-device vertical code is ready but not yet accepted on hardware:
+Android reuses the one-shot-token and `adb reverse` path, while iOS adds a
+TLS 1.3 Runtime listener with exact leaf-certificate pinning over an explicit
+CoreDevice or operator-provided IP. Both remain opt-in and fail closed unless a
+specific physical device is supplied.
 
 Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes, owns a default Application Support Workspace, and can switch Workspaces from its File menu, so a packaged app no longer depends on shell-provided Host credentials. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
 

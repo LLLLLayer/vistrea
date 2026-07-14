@@ -3,6 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import { isIP } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -17,6 +18,11 @@ import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
 
 const repositoryRoot = process.cwd();
 const optInEnvironment = "VISTREA_RUN_IOS_REAL_VERTICAL";
+const physicalOptInEnvironment = "VISTREA_RUN_IOS_PHYSICAL_VERTICAL";
+const physicalDeviceEnvironment = "VISTREA_IOS_DEVICE";
+const physicalTeamEnvironment = "VISTREA_IOS_DEVELOPMENT_TEAM";
+const physicalRuntimeHostEnvironment = "VISTREA_IOS_RUNTIME_HOST";
+const physicalPrebuiltAppEnvironment = "VISTREA_IOS_PREBUILT_APP";
 const scenarioId = "demo.navigation.basic";
 const requiredStableId = "demo.home.open_catalog";
 const demoBundleId = "dev.vistrea.demo";
@@ -52,13 +58,39 @@ interface SnapshotEvidence {
   readonly screenshotByteSize: number;
 }
 
+interface PhysicalDeviceSelection {
+  readonly identifier: string;
+  readonly udid: string;
+  readonly name: string;
+  readonly model: string;
+  readonly osVersion: string;
+  readonly runtimeHost: string;
+}
+
 interface AcceptanceResources {
   simulatorId: string | undefined;
+  physicalDeviceId: string | undefined;
+  physicalAppInstalled: boolean;
   host: LocalHostHandle | undefined;
   studio: ChildProcess | undefined;
 }
 
-const skipReason = realVerticalSkipReason();
+const physicalDevice = process.env[physicalOptInEnvironment] === "1";
+const requestedPhysicalDevice = physicalDevice
+  ? process.env[physicalDeviceEnvironment]
+  : undefined;
+const physicalDevelopmentTeam = physicalDevice
+  ? process.env[physicalTeamEnvironment]
+  : undefined;
+const physicalPrebuiltApp = physicalDevice
+  ? process.env[physicalPrebuiltAppEnvironment]
+  : undefined;
+const skipReason = realVerticalSkipReason(
+  physicalDevice,
+  requestedPhysicalDevice,
+  physicalDevelopmentTeam,
+  physicalPrebuiltApp,
+);
 
 test(
   "the real iOS Demo persists one Snapshot for Studio, CLI, and Host reopen",
@@ -73,6 +105,8 @@ test(
     const studioScratch = path.join(testRoot, "studio-build");
     const resources: AcceptanceResources = {
       simulatorId: undefined,
+      physicalDeviceId: undefined,
+      physicalAppInstalled: false,
       host: undefined,
       studio: undefined,
     };
@@ -83,94 +117,180 @@ test(
     });
 
     const validator = await createRepositoryProtocolValidator({ repositoryRoot });
-    const simulator = await selectSimulator();
-    const simulatorName = `Vistrea Vertical ${process.pid} ${Date.now()}`;
-    resources.simulatorId = (
+    const simulator = physicalDevice ? undefined : await selectSimulator();
+    const physical = physicalDevice
+      ? await selectPhysicalDevice(testRoot, requestedPhysicalDevice as string)
+      : undefined;
+    if (physical === undefined) {
+      assert.ok(simulator !== undefined);
+      const simulatorName = `Vistrea Vertical ${process.pid} ${Date.now()}`;
+      resources.simulatorId = (
+        await runCommand(
+          "xcrun",
+          [
+            "simctl",
+            "create",
+            simulatorName,
+            simulator.deviceTypeIdentifier,
+            simulator.runtimeIdentifier,
+          ],
+          { label: "Simulator creation" },
+        )
+      ).stdout.trim();
+      assert.match(resources.simulatorId, /^[0-9A-Fa-f-]{36}$/);
+
+      await runCommand("xcrun", ["simctl", "boot", resources.simulatorId], {
+        label: "Simulator boot",
+      });
+      await runCommand("xcrun", ["simctl", "bootstatus", resources.simulatorId, "-b"], {
+        label: "Simulator boot readiness",
+        timeoutMilliseconds: 120_000,
+      });
+    } else {
+      resources.physicalDeviceId = physical.identifier;
       await runCommand(
         "xcrun",
+        ["devicectl", "device", "uninstall", "app", "--device", physical.identifier, demoBundleId],
+        { allowFailure: true, label: "stale physical iOS Demo removal" },
+      );
+    }
+
+    let demoApp: string;
+    if (physical !== undefined && physicalPrebuiltApp !== undefined) {
+      demoApp = path.resolve(physicalPrebuiltApp);
+      await runCommand("codesign", ["--verify", "--deep", "--strict", demoApp], {
+        label: "prebuilt physical iOS Demo signature verification",
+      });
+      const signature = await runCommand("codesign", ["-dv", "--verbose=2", demoApp], {
+        label: "prebuilt physical iOS Demo identity verification",
+      });
+      assert.match(signature.stderr, /^Identifier=dev\.vistrea\.demo$/mu);
+      const signedTeam = signature.stderr.match(/^TeamIdentifier=([A-Z0-9]{10})$/mu)?.[1];
+      assert.ok(signedTeam !== undefined, "The prebuilt app has no Apple Team identifier.");
+      if (physicalDevelopmentTeam !== undefined) {
+        assert.equal(
+          signedTeam,
+          physicalDevelopmentTeam,
+          "The prebuilt app was not signed by the requested Apple Development team.",
+        );
+      }
+    } else {
+      await runCommand(
+        "xcodebuild",
         [
-          "simctl",
-          "create",
-          simulatorName,
-          simulator.deviceTypeIdentifier,
-          simulator.runtimeIdentifier,
+          "-quiet",
+          "-project",
+          path.join(repositoryRoot, "examples/ios/VistreaDemoApp/VistreaDemoApp.xcodeproj"),
+          "-scheme",
+          "VistreaDemoApp",
+          "-configuration",
+          "Debug",
+          "-destination",
+          `id=${physical?.udid ?? resources.simulatorId}`,
+          "-derivedDataPath",
+          derivedData,
+          "ONLY_ACTIVE_ARCH=YES",
+          ...(physical === undefined
+            ? []
+            : [
+                "-allowProvisioningUpdates",
+                `DEVELOPMENT_TEAM=${physicalDevelopmentTeam as string}`,
+                "CODE_SIGN_STYLE=Automatic",
+              ]),
+          "build",
         ],
-        { label: "Simulator creation" },
-      )
-    ).stdout.trim();
-    assert.match(resources.simulatorId, /^[0-9A-Fa-f-]{36}$/);
-
-    await runCommand("xcrun", ["simctl", "boot", resources.simulatorId], {
-      label: "Simulator boot",
-    });
-    await runCommand("xcrun", ["simctl", "bootstatus", resources.simulatorId, "-b"], {
-      label: "Simulator boot readiness",
-      timeoutMilliseconds: 120_000,
-    });
-
-    await runCommand(
-      "xcodebuild",
-      [
-        "-quiet",
-        "-project",
-        path.join(repositoryRoot, "examples/ios/VistreaDemoApp/VistreaDemoApp.xcodeproj"),
-        "-scheme",
-        "VistreaDemoApp",
-        "-configuration",
-        "Debug",
-        "-destination",
-        `id=${resources.simulatorId}`,
-        "-derivedDataPath",
+        {
+          label: physical === undefined ? "iOS Demo Simulator build" : "iOS Demo device build",
+          timeoutMilliseconds: 5 * 60 * 1_000,
+        },
+      );
+      demoApp = path.join(
         derivedData,
-        "ONLY_ACTIVE_ARCH=YES",
-        "build",
-      ],
-      {
-        label: "iOS Demo Debug build",
-        timeoutMilliseconds: 5 * 60 * 1_000,
-      },
-    );
-    const demoApp = path.join(
-      derivedData,
-      "Build/Products/Debug-iphonesimulator/VistreaDemoApp.app",
-    );
+        `Build/Products/Debug-${physical === undefined ? "iphonesimulator" : "iphoneos"}/VistreaDemoApp.app`,
+      );
+    }
     assert.equal((await fs.stat(demoApp)).isDirectory(), true);
-    await runCommand("xcrun", ["simctl", "install", resources.simulatorId, demoApp], {
-      label: "iOS Demo installation",
-    });
+    if (physical === undefined) {
+      await runCommand("xcrun", ["simctl", "install", resources.simulatorId as string, demoApp], {
+        label: "iOS Demo Simulator installation",
+      });
+    } else {
+      await runCommand(
+        "xcrun",
+        ["devicectl", "device", "install", "app", "--device", physical.identifier, demoApp],
+        { label: "iOS Demo physical-device installation", timeoutMilliseconds: 120_000 },
+      );
+      resources.physicalAppInstalled = true;
+    }
 
+    const runtimeTls =
+      physical === undefined
+        ? undefined
+        : await createPhysicalRuntimeTls(testRoot, physical.runtimeHost);
     resources.host = await startLocalHost({
       workspaceRoot,
       validator,
       applicationVersion: "0.0.0",
+      ...(runtimeTls === undefined ? {} : { runtimeTls }),
     });
     rememberHostSecrets(resources.host, knownSecrets);
     const firstApiToken = resources.host.api.bearerToken;
     const firstRuntimeToken = resources.host.runtime.authorizationToken;
 
-    const launchEnvironment = cleanEnvironment({
-      SIMCTL_CHILD_VISTREA_SCENARIO_ID: scenarioId,
-      SIMCTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
-      SIMCTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
-      SIMCTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
-      SIMCTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
-    });
+    if (physical !== undefined) {
+      assert.equal(resources.host.runtime.transport, "tls");
+    }
+    const runtimeCertificateSHA256 =
+      resources.host.runtime.transport === "tls"
+        ? resources.host.runtime.certificateSha256
+        : undefined;
+    const launchEnvironment =
+      physical === undefined
+        ? cleanEnvironment({
+            SIMCTL_CHILD_VISTREA_SCENARIO_ID: scenarioId,
+            SIMCTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
+            SIMCTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
+            SIMCTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
+            SIMCTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
+          })
+        : cleanEnvironment({
+            DEVICECTL_CHILD_VISTREA_SCENARIO_ID: scenarioId,
+            DEVICECTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
+            DEVICECTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
+            DEVICECTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
+            DEVICECTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
+            DEVICECTL_CHILD_VISTREA_RUNTIME_TLS_CERT_SHA256:
+              runtimeCertificateSHA256 as string,
+          });
     const launchResult = await runCommand(
       "xcrun",
-      [
-        "simctl",
-        "launch",
-        "--terminate-running-process",
-        resources.simulatorId,
-        demoBundleId,
-      ],
+      physical === undefined
+        ? [
+            "simctl",
+            "launch",
+            "--terminate-running-process",
+            resources.simulatorId as string,
+            demoBundleId,
+          ]
+        : [
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            physical.identifier,
+            "--terminate-existing",
+            demoBundleId,
+          ],
       {
         environment: launchEnvironment,
         secrets: knownSecrets,
-        label: "iOS Demo launch",
+        label: physical === undefined ? "iOS Demo Simulator launch" : "iOS Demo device launch",
       },
     );
-    assert.match(launchResult.stdout.trim(), /^dev\.vistrea\.demo: [1-9][0-9]*$/);
+    if (physical === undefined) {
+      assert.match(launchResult.stdout.trim(), /^dev\.vistrea\.demo: [1-9][0-9]*$/);
+    }
     assertSecretsAbsentFromText(launchResult.stdout, knownSecrets);
     assertSecretsAbsentFromText(launchResult.stderr, knownSecrets);
 
@@ -188,6 +308,12 @@ test(
       knownSecrets,
     );
     validatePngObject(screenshotBytes, evidence);
+    const observedState = await recordEntryScreenState(
+      resources.host,
+      evidence.snapshotId,
+      knownSecrets,
+    );
+    assert.equal(typeof observedState["observation_id"], "string");
 
     await runCommand(
       "swift",
@@ -250,6 +376,12 @@ test(
     assert.equal(studioEvidence["screenshot_hash"], evidence.screenshotHash);
     assert.equal(studioEvidence["screenshot_byte_count"], evidence.screenshotByteSize);
     assert.equal(studioEvidence["runtime_connected"], true);
+    assert.equal(studioEvidence["core_workflow_completed"], true);
+    assert.equal(
+      requireSafeInteger(studioEvidence["canvas_state_count"], "Studio Canvas state count") >= 1,
+      true,
+    );
+    assert.equal(typeof studioEvidence["selected_screen_state_id"], "string");
 
     resources.studio = spawn(studioExecutable, [], {
       cwd: repositoryRoot,
@@ -330,14 +462,20 @@ test(
     t.diagnostic(
       JSON.stringify({
         scenario_id: scenarioId,
-        simulator_runtime: simulator.runtimeVersion,
-        simulator_device: simulator.deviceTypeName,
+        device_kind: physical === undefined ? "simulator" : "physical",
+        device_os: physical?.osVersion ?? simulator?.runtimeVersion,
+        device_model: physical?.model ?? simulator?.deviceTypeName,
+        device_app_source:
+          physical !== undefined && physicalPrebuiltApp !== undefined
+            ? "verified_prebuilt"
+            : "xcodebuild",
         snapshot_id: evidence.snapshotId,
         node_count: evidence.nodeCount,
         required_stable_id: requiredStableId,
         screenshot_hash: evidence.screenshotHash,
         screenshot_byte_size: evidence.screenshotByteSize,
         canonical_snapshot: "passed",
+        canvas_entry_state: "passed",
         studio_production_probe: "passed",
         studio_windowserver_window: "visible",
         cli_identical_snapshot: "passed",
@@ -349,9 +487,14 @@ test(
   },
 );
 
-function realVerticalSkipReason(): string | undefined {
-  if (process.env[optInEnvironment] !== "1") {
-    return `Set ${optInEnvironment}=1 or use the dedicated package script to run this acceptance.`;
+function realVerticalSkipReason(
+  isPhysicalDevice: boolean,
+  device: string | undefined,
+  team: string | undefined,
+  prebuiltApp: string | undefined,
+): string | undefined {
+  if (process.env[optInEnvironment] !== "1" && !isPhysicalDevice) {
+    return `Set ${optInEnvironment}=1 or use a dedicated package script to run this acceptance.`;
   }
   if (process.platform !== "darwin") {
     return "The real iOS vertical acceptance requires macOS.";
@@ -363,6 +506,34 @@ function realVerticalSkipReason(): string | undefined {
   if (xcodebuild.status !== 0 || xcodebuild.stdout.trim().length === 0) {
     return "The real iOS vertical acceptance requires an active Xcode developer directory.";
   }
+  if (isPhysicalDevice) {
+    if (device === undefined || device.length === 0) {
+      return `Set ${physicalDeviceEnvironment} to one connected physical iPhone.`;
+    }
+    if (team !== undefined && !/^[A-Z0-9]{10}$/u.test(team)) {
+      return `${physicalTeamEnvironment} must be a ten-character Apple Development team ID.`;
+    }
+    if (prebuiltApp === undefined && team === undefined) {
+      return `Set ${physicalTeamEnvironment} to the ten-character Apple Development team ID.`;
+    }
+    if (
+      prebuiltApp !== undefined &&
+      (!path.isAbsolute(prebuiltApp) || !prebuiltApp.endsWith(".app"))
+    ) {
+      return `${physicalPrebuiltAppEnvironment} must be an absolute signed .app path.`;
+    }
+    const devicectl = spawnSync("xcrun", ["--find", "devicectl"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (devicectl.status !== 0 || devicectl.stdout.trim().length === 0) {
+      return "Physical iPhone acceptance requires CoreDevice devicectl.";
+    }
+    if (spawnSync("openssl", ["version"], { stdio: "ignore" }).status !== 0) {
+      return "Physical iPhone acceptance requires OpenSSL for an ephemeral pinned certificate.";
+    }
+    return undefined;
+  }
   const simulator = spawnSync("xcrun", ["--find", "simctl"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
@@ -371,6 +542,110 @@ function realVerticalSkipReason(): string | undefined {
     return "The real iOS vertical acceptance requires CoreSimulator.";
   }
   return undefined;
+}
+
+async function selectPhysicalDevice(
+  testRoot: string,
+  requestedDevice: string,
+): Promise<PhysicalDeviceSelection> {
+  const output = path.join(testRoot, "physical-device.json");
+  await runCommand(
+    "xcrun",
+    [
+      "devicectl",
+      "device",
+      "info",
+      "details",
+      "--device",
+      requestedDevice,
+      "--json-output",
+      output,
+      "--quiet",
+    ],
+    { label: "physical iPhone discovery", timeoutMilliseconds: 60_000 },
+  );
+  const payload = asRecord(
+    JSON.parse(await fs.readFile(output, "utf8")) as unknown,
+    "CoreDevice response",
+  );
+  const result = asRecord(payload["result"], "CoreDevice result");
+  const hardware = asRecord(result["hardwareProperties"], "physical iPhone hardware");
+  const device = asRecord(result["deviceProperties"], "physical iPhone properties");
+  const connection = asRecord(result["connectionProperties"], "physical iPhone connection");
+  assert.equal(hardware["reality"], "physical");
+  assert.equal(hardware["platform"], "iOS");
+  assert.equal(device["developerModeStatus"], "enabled");
+  assert.equal(connection["pairingState"], "paired");
+
+  const explicitHost = process.env[physicalRuntimeHostEnvironment];
+  let runtimeHost: string;
+  if (explicitHost !== undefined) {
+    if (isIP(explicitHost) === 0) {
+      throw new Error(`${physicalRuntimeHostEnvironment} must be one explicit IP address.`);
+    }
+    runtimeHost = explicitHost;
+  } else {
+    const tunnelAddress = requireString(
+      connection["tunnelIPAddress"],
+      "physical iPhone tunnel IP address",
+    );
+    if (!tunnelAddress.endsWith("::1")) {
+      throw new Error(
+        `Cannot derive the Mac tunnel address; set ${physicalRuntimeHostEnvironment} explicitly.`,
+      );
+    }
+    runtimeHost = `${tunnelAddress.slice(0, -1)}2`;
+  }
+  const localAddresses = Object.values(os.networkInterfaces())
+    .flatMap((entries) => entries ?? [])
+    .map((entry) => entry.address.split("%")[0]);
+  if (!localAddresses.includes(runtimeHost)) {
+    throw new Error(
+      `The selected Runtime Host IP is not active on this Mac: ${runtimeHost}. Unlock and reconnect the iPhone.`,
+    );
+  }
+
+  return {
+    identifier: requireString(result["identifier"], "physical iPhone identifier"),
+    udid: requireString(hardware["udid"], "physical iPhone UDID"),
+    name: requireString(device["name"], "physical iPhone name"),
+    model: requireString(hardware["marketingName"], "physical iPhone model"),
+    osVersion: requireString(device["osVersionNumber"], "physical iPhone OS version"),
+    runtimeHost,
+  };
+}
+
+async function createPhysicalRuntimeTls(
+  testRoot: string,
+  runtimeHost: string,
+): Promise<{ readonly host: string; readonly certificate: Buffer; readonly privateKey: Buffer }> {
+  const certificatePath = path.join(testRoot, "runtime-certificate.pem");
+  const privateKeyPath = path.join(testRoot, "runtime-private-key.pem");
+  await runCommand(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-sha256",
+      "-days",
+      "1",
+      "-nodes",
+      "-subj",
+      "/CN=Vistrea Runtime Host",
+      "-keyout",
+      privateKeyPath,
+      "-out",
+      certificatePath,
+    ],
+    { label: "physical Runtime TLS certificate generation" },
+  );
+  return {
+    host: runtimeHost,
+    certificate: await fs.readFile(certificatePath),
+    privateKey: await fs.readFile(privateKeyPath),
+  };
 }
 
 async function selectSimulator(): Promise<SimulatorSelection> {
@@ -441,6 +716,22 @@ async function captureSnapshotThroughApi(
     body: "{}",
   });
   return await readJsonResponse(response, 201, "Snapshot capture", secrets);
+}
+
+async function recordEntryScreenState(
+  host: LocalHostHandle,
+  snapshotId: string,
+  secrets: readonly string[],
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${host.api.baseUrl}/v1/screen-graph/state-observations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${host.api.bearerToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ snapshot_id: snapshotId, title: "Home", entry: true }),
+  });
+  return await readJsonResponse(response, 201, "Screen State observation", secrets);
 }
 
 async function getSnapshotThroughApi(
@@ -620,6 +911,26 @@ async function terminateAndDeleteSimulator(
   resources: AcceptanceResources,
   secrets: readonly string[],
 ): Promise<void> {
+  if (resources.physicalDeviceId !== undefined) {
+    if (resources.physicalAppInstalled) {
+      await runCommand(
+        "xcrun",
+        [
+          "devicectl",
+          "device",
+          "uninstall",
+          "app",
+          "--device",
+          resources.physicalDeviceId,
+          demoBundleId,
+        ],
+        { allowFailure: true, secrets, label: "physical iOS Demo cleanup" },
+      );
+    }
+    resources.physicalDeviceId = undefined;
+    resources.physicalAppInstalled = false;
+    return;
+  }
   const simulatorId = resources.simulatorId;
   if (simulatorId === undefined) {
     return;
@@ -653,6 +964,25 @@ async function cleanupResources(
     // The primary assertion retains its failure; cleanup still releases the Simulator.
   }
   resources.host = undefined;
+  if (resources.physicalDeviceId !== undefined) {
+    if (resources.physicalAppInstalled) {
+      await runCommand(
+        "xcrun",
+        [
+          "devicectl",
+          "device",
+          "uninstall",
+          "app",
+          "--device",
+          resources.physicalDeviceId,
+          demoBundleId,
+        ],
+        { allowFailure: true, secrets, label: "cleanup physical iOS Demo" },
+      );
+    }
+    resources.physicalDeviceId = undefined;
+    resources.physicalAppInstalled = false;
+  }
   const simulatorId = resources.simulatorId;
   if (simulatorId !== undefined) {
     await runCommand("xcrun", ["simctl", "terminate", simulatorId, demoBundleId], {
@@ -684,7 +1014,8 @@ function cleanEnvironment(additions: Readonly<Record<string, string>> = {}): Nod
     if (
       key.startsWith("VISTREA_HOST_") ||
       key.startsWith("VISTREA_RUNTIME_") ||
-      key.startsWith("SIMCTL_CHILD_VISTREA_")
+      key.startsWith("SIMCTL_CHILD_VISTREA_") ||
+      key.startsWith("DEVICECTL_CHILD_VISTREA_")
     ) {
       delete environment[key];
     }

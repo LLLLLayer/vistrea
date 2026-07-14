@@ -262,6 +262,7 @@ test("loopback Host authenticates Debug Runtime and transfers a strict chunked c
   });
   assert.equal(host.endpoint.host, "127.0.0.1");
   assert.ok(host.endpoint.port > 0);
+  assert.equal(host.endpoint.transport, "loopback");
 
   const ready = await authenticateRuntime(host);
   peer = ready.peer;
@@ -384,6 +385,22 @@ test("listener is loopback-only and ClientHello must precede ready-state message
       host: "0.0.0.0" as never,
     }),
     transportError("forbidden"),
+  );
+  await assert.rejects(
+    LoopbackRuntimeHost.listen({
+      token: authorizationToken,
+      host: "0.0.0.0",
+      tls: { certificate: "invalid", privateKey: "invalid" },
+    }),
+    transportError("forbidden"),
+  );
+  await assert.rejects(
+    LoopbackRuntimeHost.listen({
+      token: authorizationToken,
+      host: "127.0.0.1",
+      tls: { certificate: "invalid", privateKey: "invalid" },
+    }),
+    transportError("protocol_error"),
   );
 
   const host = await LoopbackRuntimeHost.listen({ token: authorizationToken });

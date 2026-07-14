@@ -135,7 +135,20 @@ It manages:
 
 Device automation performs real tap, type, swipe, back, launch, and system UI interaction. SDK-reported nodes may guide targeting, but the action still occurs through the real automation layer.
 
-The implemented Host slice owns authenticated loopback Runtime sessions, canonical Snapshot capture/get/list use cases, ordered Object-before-metadata persistence, the loopback Local API, and production local Workspace composition. Device automation (`adb` and WebDriverAgent providers), deterministic exploration with Screen State identity, bounded crash recovery and state restoration, design review and reversible tuning, Deep Wiki knowledge, core validation and build diff, and optional Hub pack sync are implemented behind the same Data ports. The basic real-input, dangerous-action, and raised Storefront acceptances are verified on both platforms; iOS also proves real clear and dismiss actions. Dedicated versioning and generic long-running operation use cases above the Data ports remain future Engine slices.
+The implemented Host slice owns authenticated Runtime sessions (plaintext only
+on literal loopback, or exact-IP TLS 1.3 with leaf-certificate pinning for the
+physical-device profile), canonical Snapshot capture/get/list use cases,
+ordered Object-before-metadata persistence, the independent loopback Local API,
+and production local Workspace composition. Device automation (`adb` and
+WebDriverAgent providers), deterministic exploration with Screen State
+identity, bounded crash recovery and state restoration, design review and
+reversible tuning, Deep Wiki knowledge, core validation and build diff, and
+optional Hub pack sync are implemented behind the same Data ports. The basic
+real-input, dangerous-action, and raised Storefront acceptances are verified on
+both platforms; iOS also proves real clear and dismiss actions. The physical
+vertical runners are implemented but await complete operator-owned hardware
+acceptance. Dedicated versioning and generic long-running operation use cases
+above the Data ports remain future Engine slices.
 
 ### 2.5 Vistrea Studio for macOS
 
@@ -530,7 +543,8 @@ A meaningful first complete demonstration should:
 - initial design source: image, local file, Figma, or approved build;
 - design-to-runtime node mapping strategy;
 - physical-device acceptance for every broader tuning adapter/property combination;
-- physical-iPhone Runtime forwarding, discovery, and authorization;
+- automatic physical-iPhone discovery/forwarding beyond the accepted explicit
+  CoreDevice/operator IP and pinned-TLS authorization profile;
 - hierarchy-depth 3D versus native View/Layer tree inspection;
 - packaging and distribution for the macOS Studio and native SDK artifacts;
 - Hub deployment, identity, permissions, and storage providers.

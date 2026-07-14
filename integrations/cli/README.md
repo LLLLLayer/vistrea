@@ -115,7 +115,9 @@ the operation catalog. `prepare` clones the pinned release
 refused). `up` boots a Simulator by default or signs for a real device with
 `--device <udid>` — the team comes from `--team`/`VISTREA_WDA_TEAM_ID`, the
 `--app-project`'s `DEVELOPMENT_TEAM`, or a single Keychain development
-identity; private keys never leave the Keychain. It refuses a port that is
+identity whose matching certificate `OU` supplies the Apple Team ID (the
+certificate-name suffix is only its UID); private keys never leave the
+Keychain. It refuses a port that is
 already serving, prints the ready `--wda-url` envelope, and runs until
 Ctrl+C. They belong to the `exploration` toolset.
 

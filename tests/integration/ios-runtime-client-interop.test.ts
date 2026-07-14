@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import fs from "node:fs/promises";
 import net, { type Server, type Socket } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -25,6 +27,109 @@ const wrongAuthorizationToken = "vistrea-loopback-integration-token-9999";
 const swiftAvailable =
   process.platform === "darwin" &&
   spawnSync("swift", ["--version"], { stdio: "ignore" }).status === 0;
+const opensslAvailable = spawnSync("openssl", ["version"], { stdio: "ignore" }).status === 0;
+
+test(
+  "Swift Runtime pins the TLS Runtime Host before protocol authentication",
+  {
+    skip:
+      swiftAvailable && opensslAvailable
+        ? false
+        : "Swift or OpenSSL is unavailable on this host.",
+  },
+  async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-runtime-tls-"));
+    const certificatePath = path.join(directory, "certificate.pem");
+    const privateKeyPath = path.join(directory, "private-key.pem");
+    const generated = spawnSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-sha256",
+        "-days",
+        "1",
+        "-nodes",
+        "-subj",
+        "/CN=127.0.0.1",
+        "-addext",
+        "subjectAltName=IP:127.0.0.1",
+        "-keyout",
+        privateKeyPath,
+        "-out",
+        certificatePath,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    assert.equal(generated.status, 0, generated.stderr);
+    const host = await LoopbackRuntimeHost.listen({
+      token: authorizationToken,
+      host: "127.0.0.1",
+      tls: {
+        certificate: await fs.readFile(certificatePath),
+        privateKey: await fs.readFile(privateKeyPath),
+      },
+    });
+    t.after(async () => {
+      await host.close();
+      await fs.rm(directory, { recursive: true, force: true });
+    });
+    assert.equal(host.endpoint.transport, "tls");
+    if (host.endpoint.transport !== "tls") {
+      throw new Error("Expected a TLS Runtime endpoint.");
+    }
+
+    const rejected = spawnSwiftClient(host.endpoint.host, host.endpoint.port, authorizationToken, {
+      VISTREA_RUNTIME_TLS_CERT_SHA256: "0".repeat(64),
+    });
+    const rejectedExit = await withTimeout(
+      collectChildOutput(rejected),
+      60_000,
+      "wrong TLS pin rejection",
+    );
+    assert.notEqual(rejectedExit.code, 0);
+    assert.equal(rejectedExit.stderr.includes(authorizationToken), false);
+
+    const child = spawnSwiftClient(host.endpoint.host, host.endpoint.port, authorizationToken, {
+      VISTREA_RUNTIME_TLS_CERT_SHA256: host.endpoint.certificateSha256,
+    });
+    const childOutput = collectChildOutput(child);
+    const session = await withTimeout(
+      Promise.race([
+        host.acceptSession(),
+        childOutput.then((exit) => {
+          throw new Error(`Pinned TLS Runtime exited before handshake: ${exit.stderr}`);
+        }),
+      ]),
+      60_000,
+      "pinned TLS Runtime handshake",
+    );
+    t.after(() => {
+      session.close();
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+      }
+    });
+    const capture = await withTimeout(
+      session.captureSnapshot({
+        include: { paths: ["trees", "screenshot"] },
+        screenshot: "reference",
+        reason: "manual",
+      }),
+      10_000,
+      "pinned TLS Runtime capture",
+    );
+    assert.equal(
+      record(capture.snapshot)["snapshot_id"],
+      "snapshot_019f0000-0000-7000-8000-000000000001",
+    );
+    session.close();
+    const exit = await withTimeout(childOutput, 10_000, "pinned TLS Runtime close");
+    assert.equal(exit.code, 0, exit.stderr);
+  },
+);
 
 test(
   "Swift Runtime dispatches coalesced welcome and capture lines, then stops at disconnect",

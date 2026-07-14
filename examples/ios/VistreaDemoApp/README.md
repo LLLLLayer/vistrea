@@ -22,13 +22,21 @@ The automation provider remains a separate implementation slice. User and automa
 
 The checked-in Debug scheme contains disabled placeholders for these launch variables:
 
-- `VISTREA_RUNTIME_HOST`: `127.0.0.1` or `::1`;
+- `VISTREA_RUNTIME_HOST`: one explicit IPv4 or IPv6 address (loopback unless
+  the TLS pin below is also present);
 - `VISTREA_RUNTIME_PORT`: the ephemeral Node Host port;
 - `VISTREA_RUNTIME_TOKEN`: a per-run token of at least 32 bytes.
+- `VISTREA_RUNTIME_TLS_CERT_SHA256`: an optional exact 64-character
+  hexadecimal leaf-certificate pin for the physical-device TLS profile.
 
 Enable and populate all three only for the active Host run. The token is never committed, placed in command-line arguments, included in a Snapshot, or reflected in transport errors. The bootstrap source is compiled under `#if DEBUG`; Release has no launch-variable lookup and the SDK configuration also fails closed outside Debug or an explicitly compiled Internal build.
 
-The current direct path targets the iOS Simulator. Physical-device discovery and trusted Host forwarding remain separate follow-up work.
+Without a certificate pin, the app accepts only literal loopback. With the pin,
+it uses TLS 1.3 to the explicit Host IP and still requires the normal HMAC
+token. The opt-in physical-device runner obtains the CoreDevice tunnel path,
+creates an ephemeral certificate, passes the exact pin through protected launch
+configuration, and removes its temporary resources. That runner is implemented
+but has not completed hardware acceptance yet.
 
 ## Generate and verify
 

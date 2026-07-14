@@ -246,7 +246,8 @@ vistrea/
     │   ├── 0006-vistrea-pack-container.md
     │   ├── 0007-screen-state-identity-and-device-automation.md
     │   ├── 0008-cli-only-agent-adapter.md
-    │   └── 0009-direct-macos-distribution.md
+    │   ├── 0009-direct-macos-distribution.md
+    │   └── 0010-physical-runtime-tls.md
     ├── release/
     │   └── STUDIO_MACOS_RELEASE.md
     └── roadmap/
@@ -364,11 +365,17 @@ The first implementation keeps the language-neutral contracts while using toolch
 - Swift Package Manager for iOS Runtime modules and native SwiftUI Studio;
 - Gradle/Kotlin Android libraries with Debug/Internal Runtime transport excluded from Release artifacts;
 - UIKit and Android View as the verified initial native adapters, plus SwiftUI and Compose semantics annotation bridges feeding the same capture;
-- authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API;
+- authenticated, bounded JSON-lines Runtime transport over literal loopback or
+  exact-IP pinned TLS for physical iOS, plus an independently authenticated
+  loopback HTTP Local API;
 - `adb` and WebDriverAgent device automation providers behind one Engine port;
 - a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
-Future SwiftUI-native capture, Compose rendering-side visual adapters, physical-device tunneling, credentialed release acceptance, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future SwiftUI-native capture, Compose rendering-side visual adapters,
+automatic physical-device discovery and hardware acceptance, credentialed
+release acceptance, and Hub deployment projects must preserve the documented
+public boundaries. Toolchain-specific layouts must not create competing
+protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { X509Certificate } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -173,21 +174,71 @@ async function prepare(): Promise<JsonObject> {
 
 // --- Signing ------------------------------------------------------------------
 
+function subjectField(subject: string, name: string): string | undefined {
+  const prefix = `${name}=`;
+  return subject
+    .split("\n")
+    .find((line) => line.startsWith(prefix))
+    ?.slice(prefix.length);
+}
+
+/**
+ * Resolves signing team IDs from identities that have both a private key and
+ * a matching development certificate. The suffix in an identity's display
+ * name is the certificate UID, not necessarily the Apple Team ID; the latter
+ * is the certificate subject's organizational unit (OU).
+ */
+export function developmentTeamsFromIdentitySubjects(
+  identityOutput: string,
+  certificateSubjects: readonly string[],
+): string[] {
+  const availableNames = new Set<string>();
+  for (const line of identityOutput.split("\n")) {
+    const displayName = line.match(/"([^"]+)"/)?.[1];
+    if (
+      displayName?.startsWith("Apple Development:") === true ||
+      displayName?.startsWith("iPhone Developer:") === true
+    ) {
+      availableNames.add(displayName);
+    }
+  }
+
+  const teams = new Set<string>();
+  for (const subject of certificateSubjects) {
+    const commonName = subjectField(subject, "CN");
+    const organizationalUnit = subjectField(subject, "OU");
+    if (
+      commonName !== undefined &&
+      availableNames.has(commonName) &&
+      organizationalUnit !== undefined &&
+      TEAM_ID_PATTERN.test(organizationalUnit)
+    ) {
+      teams.add(organizationalUnit);
+    }
+  }
+  return [...teams].sort();
+}
+
 function keychainTeams(): string[] {
   const identities = run("security", ["find-identity", "-v", "-p", "codesigning"]);
   if (!identities.ok) {
     return [];
   }
-  const teams = new Set<string>();
-  for (const line of identities.stdout.split("\n")) {
-    // Only development identities can sign an XCUITest runner onto a device;
-    // "Developer ID Application" is Mac distribution and must not match.
-    const match = line.match(/"(?:Apple Development|iPhone Developer)[^"]*\(([A-Z0-9]{10})\)"/);
-    if (match) {
-      teams.add(match[1] as string);
-    }
+  const certificates = run("security", ["find-certificate", "-a", "-p"]);
+  if (!certificates.ok) {
+    return [];
   }
-  return [...teams];
+  const certificateSubjects =
+    certificates.stdout
+      .match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)
+      ?.flatMap((certificate) => {
+        try {
+          return [new X509Certificate(certificate).subject];
+        } catch {
+          return [];
+        }
+      }) ?? [];
+  return developmentTeamsFromIdentitySubjects(identities.stdout, certificateSubjects);
 }
 
 async function teamFromProject(projectPath: string): Promise<string | undefined> {

@@ -8,7 +8,7 @@ import {
   RuntimeEventPump,
   type ApplyTuningWireCommand,
   type CaptureSnapshotCommand,
-  type LoopbackRuntimeEndpoint,
+  type RuntimeEndpoint,
   type LoopbackRuntimeSession,
   type RuntimeCaptureOptions,
   type RuntimeCapturePort,
@@ -37,14 +37,23 @@ export interface StartLocalHostOptions {
   readonly runtimePort?: number;
   readonly apiPort?: number;
   readonly applicationVersion?: string;
+  /**
+   * Optional physical-device Runtime listener. The Local API remains on the
+   * independent loopback `host`; this exact IP listener is TLS-only.
+   */
+  readonly runtimeTls?: {
+    readonly host: string;
+    readonly certificate: string | Buffer;
+    readonly privateKey: string | Buffer;
+  };
   /** Absent means exploration operations fail closed as unsupported. */
   readonly automation?: HostAutomationConfig;
 }
 
-export interface LocalRuntimeEndpoint extends LoopbackRuntimeEndpoint {
+export type LocalRuntimeEndpoint = RuntimeEndpoint & {
   /** Generated for this Host lifetime and never persisted in the Workspace. */
   readonly authorizationToken: string;
-}
+};
 
 export interface LocalHostHandle {
   readonly workspaceRoot: string;
@@ -75,11 +84,23 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
   let api: HostLocalApiHandle | undefined;
   try {
     const authorizationToken = randomBytes(RUNTIME_TOKEN_BYTES).toString("base64url");
-    runtimeHost = await LoopbackRuntimeHost.listen({
-      token: authorizationToken,
-      host,
-      ...(options.runtimePort === undefined ? {} : { port: options.runtimePort }),
-    });
+    runtimeHost = await LoopbackRuntimeHost.listen(
+      options.runtimeTls === undefined
+        ? {
+            token: authorizationToken,
+            host,
+            ...(options.runtimePort === undefined ? {} : { port: options.runtimePort }),
+          }
+        : {
+            token: authorizationToken,
+            host: options.runtimeTls.host,
+            tls: {
+              certificate: options.runtimeTls.certificate,
+              privateKey: options.runtimeTls.privateKey,
+            },
+            ...(options.runtimePort === undefined ? {} : { port: options.runtimePort }),
+          },
+    );
     const runtime = new ActiveRuntimeCapturePort(workspace.data, options.validator);
     const acceptance = acceptRuntimeSessions(runtimeHost, runtime);
     api = await startHostLocalApi({

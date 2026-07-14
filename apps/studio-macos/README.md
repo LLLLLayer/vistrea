@@ -134,8 +134,12 @@ swift build --package-path apps/studio-macos --product VistreaStudio
 See [Studio interaction design](../../docs/product/STUDIO_INTERACTIONS.md) and [Engine use cases](../../docs/interfaces/ENGINE_API.md).
 
 `VistreaStudioAcceptanceProbe` is a non-UI end-to-end verifier used by the real
-iOS vertical acceptance. It exercises this same bounded Host client, canonical
-decoder, Object integrity path, and presentation projection before the native
-window launch smoke test. Credentials and the expected Snapshot ID are accepted
-only through environment variables; its JSON output contains evidence identity
-and counts, never credentials.
+iOS and Android vertical acceptances. `StudioCoreAcceptanceWorkflow` drives the
+production `SnapshotWorkspaceModel` through Host/Runtime status, build scopes,
+the Evidence library, canonical Snapshot and screenshot, Canvas and entry state,
+Review Issues, Runtime events, Deep Wiki, active tuning, and design references.
+The probe fails closed if the expected Snapshot, screenshot integrity, Canvas,
+or any supporting pane is unavailable; it emits the resulting evidence as
+strict JSON before the native window launch smoke test. Credentials and the
+expected Snapshot ID are accepted only through environment variables; output
+contains evidence identity and counts, never credentials.

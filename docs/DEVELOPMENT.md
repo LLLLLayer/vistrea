@@ -150,3 +150,23 @@ digest. These jobs intentionally exclude connected Android tests, dedicated
 temporary-device loops, WebDriverAgent, and physical-device acceptance; those
 belong to explicit opt-in end-to-end lanes and must not be inferred from a green
 pull request matrix.
+
+Physical-device vertical loops are separate operator-owned gates and always
+require an explicit device selector:
+
+```bash
+VISTREA_ANDROID_DEVICE_SERIAL=<adb-serial> \
+  pnpm test:e2e:android-physical-vertical
+
+VISTREA_IOS_DEVICE=<device-id-or-udid> \
+VISTREA_IOS_DEVELOPMENT_TEAM=<team-id> \
+  pnpm test:e2e:ios-physical-vertical
+```
+
+The Android lane uses a temporary `adb reverse` rule. The iOS lane uses an
+ephemeral TLS 1.3 certificate pinned by the Runtime over an explicit
+CoreDevice/operator IP. Neither lane may auto-select, install to, or alter a
+developer's currently used device without the opt-in variable and selector.
+Their implementation is not evidence of hardware verification; record the
+exact device and successful command in `docs/DEVELOPMENT_PROGRESS.md` only
+after a complete run.

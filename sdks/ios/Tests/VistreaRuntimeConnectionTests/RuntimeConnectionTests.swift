@@ -69,6 +69,26 @@ final class RuntimeConnectionTests: XCTestCase {
 
     func testConfigurationRejectsReleaseNonLoopbackAndWeakTokens() throws {
         XCTAssertThrowsError(try LoopbackRuntimeEndpoint(host: "0.0.0.0", port: 9_999))
+        XCTAssertThrowsError(try TlsRuntimeEndpoint(
+            host: "runtime.example.test",
+            port: 9_999,
+            pinnedCertificateSHA256Hex: String(repeating: "0", count: 64)
+        ))
+        XCTAssertThrowsError(try TlsRuntimeEndpoint(
+            host: "0.0.0.0",
+            port: 9_999,
+            pinnedCertificateSHA256Hex: String(repeating: "0", count: 64)
+        ))
+        XCTAssertThrowsError(try TlsRuntimeEndpoint(
+            host: "192.0.2.1",
+            port: 9_999,
+            pinnedCertificateSHA256Hex: "not-a-digest"
+        ))
+        XCTAssertNoThrow(try TlsRuntimeEndpoint(
+            host: "2001:db8::2",
+            port: 9_999,
+            pinnedCertificateSHA256Hex: String(repeating: "a", count: 64)
+        ))
         let endpoint = try LoopbackRuntimeEndpoint(port: 9_999)
         XCTAssertThrowsError(
             try LoopbackRuntimeClientConfiguration(

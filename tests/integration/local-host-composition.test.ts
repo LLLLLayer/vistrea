@@ -257,11 +257,17 @@ test("the Host executable writes credentials only to a private ephemeral descrip
   const readyLine = await withTimeout(readLine(child.stdout), 10_000, "Host ready output");
   const descriptor = JSON.parse(await fs.readFile(connectionFile, "utf8")) as {
     readonly api: { readonly base_url: string; readonly bearer_token: string };
-    readonly runtime: { readonly authorization_token: string };
+    readonly runtime: {
+      readonly authorization_token: string;
+      readonly transport: "loopback" | "tls";
+      readonly certificate_sha256?: string;
+    };
   };
   assert.equal((await fs.stat(connectionFile)).mode & 0o777, 0o600);
   assert.match(descriptor.api.bearer_token, /^[A-Za-z0-9_-]{43}$/);
   assert.match(descriptor.runtime.authorization_token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(descriptor.runtime.transport, "loopback");
+  assert.equal(descriptor.runtime.certificate_sha256, undefined);
   assert.equal(readyLine.includes(descriptor.api.bearer_token), false);
   assert.equal(readyLine.includes(descriptor.runtime.authorization_token), false);
   assert.equal(JSON.parse(readyLine).connection_file, connectionFile);
