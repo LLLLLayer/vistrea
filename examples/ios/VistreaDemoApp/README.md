@@ -36,7 +36,8 @@ it uses TLS 1.3 to the explicit Host IP and still requires the normal HMAC
 token. The opt-in physical-device runner obtains the CoreDevice tunnel path,
 creates an ephemeral certificate, passes the exact pin through protected launch
 configuration, and removes its temporary resources. That runner is implemented
-but has not completed hardware acceptance yet.
+and completed its full hardware acceptance on an iPhone 14 Pro running iOS
+26.5, including deterministic uninstall and temporary-resource cleanup.
 
 ## Generate and verify
 

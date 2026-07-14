@@ -145,10 +145,12 @@ identity, bounded crash recovery and state restoration, design review and
 reversible tuning, Deep Wiki knowledge, core validation and build diff, and
 optional Hub pack sync are implemented behind the same Data ports. The basic
 real-input, dangerous-action, and raised Storefront acceptances are verified on
-both platforms; iOS also proves real clear and dismiss actions. The physical
-vertical runners are implemented but await complete operator-owned hardware
-acceptance. Dedicated versioning and generic long-running operation use cases
-above the Data ports remain future Engine slices.
+both platforms; iOS also proves real clear and dismiss actions. The iOS
+physical vertical is verified through pinned TLS, Studio/CLI equality,
+production reopen, credential rotation, secret scanning, and cleanup on an
+iPhone 14 Pro running iOS 26.5. The Android physical runner remains implemented
+but hardware-unverified. Dedicated versioning and generic long-running
+operation use cases above the Data ports remain future Engine slices.
 
 ### 2.5 Vistrea Studio for macOS
 

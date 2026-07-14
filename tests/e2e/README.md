@@ -21,8 +21,8 @@ through Runtime connection, canonical Snapshot and PNG capture, Host receipt,
 Studio presentation, CLI readback, production SQLite/Object Store persistence,
 and Data reopen. They also verify per-run credential rotation and scan generated
 evidence for leaked Host credentials. The physical variants are implemented as
-separate explicit opt-ins and are not part of pull request CI; their first
-complete hardware pass is still pending.
+separate explicit opt-ins and are not part of pull request CI. The iOS variant
+passed on an iPhone 14 Pro running iOS 26.5; Android hardware remains pending.
 
 The Android physical variant refuses emulator serials, uses `adb reverse` for
 the loopback Runtime path, installs the one-shot token through standard input,
@@ -46,11 +46,11 @@ SDK, and `adb`; they transfer the one-shot Runtime token through standard input
 to the app-private token installer and use `adb reverse` for loopback transport.
 The basic iOS automation, dangerous-action path, raised Storefront walk, real
 search clear, and targeted overlay dismiss have passed on a dedicated
-Simulator. The physical iOS pinned-TLS path and both hardware vertical runners
-are code-complete but intentionally not recorded as verified until their opt-in
-commands finish on dedicated devices. Validation, Canvas, and Deep Wiki now
-participate in the non-UI Studio core acceptance workflow; broader workflow UI
-automation remains follow-up work.
+Simulator. The physical iOS pinned-TLS vertical is verified on dedicated
+hardware; the Android physical runner remains code-complete but intentionally
+unverified until its opt-in command finishes on a selected device. Validation,
+Canvas, and Deep Wiki participate in the production Studio core acceptance
+workflow; broader workflow UI automation remains follow-up work.
 
 ## Device regression cadence
 

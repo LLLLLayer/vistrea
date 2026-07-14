@@ -120,7 +120,8 @@ loopback initializers remain source-compatible.
   and non-32-byte pins.
 - Node/Swift interoperability rejects a wrong pin before authentication and
   completes handshake plus Snapshot capture with the exact pin.
-- The physical iOS and Android commands must complete capture, Studio core
-  acceptance, CLI equality, Workspace reopen, credential rotation, secret
-  scans, and deterministic cleanup on explicitly selected hardware before the
-  physical vertical is marked Verified.
+- The iOS physical command completed capture, Studio core acceptance, CLI
+  equality, Workspace reopen, credential rotation, secret scanning, and
+  deterministic cleanup on an explicitly selected iPhone 14 Pro running iOS
+  26.5. Android retains the same hardware gate before its physical vertical is
+  marked Verified.

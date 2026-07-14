@@ -78,7 +78,7 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 ## Recommended implementation sequence
 
 1. Add dedicated Studio controls for Difference promotion, source suggestions, fresh-build recapture verification, and Knowledge Collection management.
-2. Run the implemented iOS pinned-TLS and Android adb physical vertical lanes on dedicated hardware, exercise the broader native tuning matrix there, and strengthen the iOS Release artifact boundary.
+2. Run the remaining Android adb physical vertical lane, extend the verified iOS pinned-TLS lane across the broader native tuning matrix, and strengthen the iOS Release artifact boundary.
 3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
 4. Validate the Hub RBAC/audit/activity Beta, then add user-facing Studio sync,
    permission administration, discovery, subscriptions, and versioned
@@ -92,11 +92,13 @@ Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JS
 
 The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 65 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
 
-The physical-device vertical code is ready but not yet accepted on hardware:
-Android reuses the one-shot-token and `adb reverse` path, while iOS adds a
-TLS 1.3 Runtime listener with exact leaf-certificate pinning over an explicit
-CoreDevice or operator-provided IP. Both remain opt-in and fail closed unless a
-specific physical device is supplied.
+The iOS physical-device vertical is verified on an iPhone 14 Pro running iOS
+26.5: its exact-IP TLS 1.3 Runtime listener and leaf-certificate-pinned client
+completed Snapshot capture, production Studio/CLI equality, Workspace reopen,
+credential rotation, secret scanning, and deterministic app/resource cleanup.
+The Android physical lane reuses the one-shot-token and `adb reverse` path and
+remains implemented but hardware-unverified. Both lanes stay opt-in and fail
+closed unless a specific physical device is supplied.
 
 The optional Hub Beta now adds five project roles, named-principal rotating
 tokens, a private append-only audit log, administrator permission/audit views,

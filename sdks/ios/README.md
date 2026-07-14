@@ -56,7 +56,8 @@ accepts only the exact configured DER leaf-certificate SHA-256, and then runs
 the same HMAC protocol authentication. A CoreDevice or operator-managed network
 path must still make the Host's explicit IP reachable; the SDK does not discover
 or create that path. The opt-in physical vertical runner composes this profile,
-but full hardware acceptance is not yet recorded.
+and its complete Snapshot, Studio/CLI, reopen, credential, secret-scan, and
+cleanup acceptance passed on an iPhone 14 Pro running iOS 26.5.
 
 The adapter is compiled only where UIKit is available. It is included only by internal Debug Demo App builds in the current vertical slice.
 
