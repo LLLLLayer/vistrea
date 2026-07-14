@@ -497,7 +497,8 @@ export class AutomationEngine {
 
   #classifyRisk(command: ExecuteSemanticActionCommand): AutomationActionRisk {
     // Caller classification is untrusted input: it may only raise risk.
-    const baseline: AutomationActionRisk = command.kind === "type_text" ? "sensitive" : "safe";
+    const baseline: AutomationActionRisk =
+      command.kind === "type_text" || command.kind === "clear_text" ? "sensitive" : "safe";
     const claimed = command.intent.caller_classification;
     if (claimed === undefined) {
       return baseline;

@@ -74,6 +74,14 @@ class FakeWdaServer {
           reply(200, null);
           return;
         }
+        if (suffix === "/element") {
+          reply(200, { "element-6066-11e4-a52e-4f735466cecf": "fixture-element" });
+          return;
+        }
+        if (suffix === "/element/fixture-element/clear" || suffix === "/alert/dismiss") {
+          reply(200, null);
+          return;
+        }
         if (suffix === "/window/size") {
           reply(200, { width: 390, height: 844 });
           return;
@@ -148,7 +156,7 @@ function pointerActions(body: JsonObject): readonly JsonObject[] {
   return actions["actions"] as readonly JsonObject[];
 }
 
-test("the WDA provider drives tap, back, text, and launch through the wire protocol", async (t) => {
+test("the WDA provider drives tap, back, text, clear, dismiss, and launch through the wire protocol", async (t) => {
   const { server, engine, snapshot, sessionId } = await wdaContext(t);
 
   const tap = await engine.execute({
@@ -192,6 +200,37 @@ test("the WDA provider drives tap, back, text, and launch through the wire proto
   assert.deepEqual(server.bodiesFor("/wda/keys"), [{ value: ["vistrea"] }]);
   // Typing with a target taps the field first to focus it.
   assert.equal(server.bodiesFor("/actions").length, 3);
+
+  const cleared = await engine.execute({
+    automation_session_id: sessionId,
+    kind: "clear_text",
+    target: { stable_id: "demo.home.open_catalog" },
+    expected_snapshot_id: snapshot.snapshot_id,
+    intent: { requested_effect: "Clear the search field" },
+  });
+  assert.equal(cleared.outcome, "uncertain");
+  assert.deepEqual(server.bodiesFor("/element"), [
+    { using: "accessibility id", value: "demo.home.open_catalog" },
+  ]);
+  assert.equal(server.bodiesFor("/element/fixture-element/clear").length, 1);
+
+  const targetedDismiss = await engine.execute({
+    automation_session_id: sessionId,
+    kind: "dismiss",
+    target: { stable_id: "demo.home.open_catalog" },
+    expected_snapshot_id: snapshot.snapshot_id,
+    intent: { requested_effect: "Dismiss the visible overlay" },
+  });
+  assert.equal(targetedDismiss.outcome, "uncertain");
+  assert.equal(server.bodiesFor("/actions").length, 4);
+
+  const alertDismiss = await engine.execute({
+    automation_session_id: sessionId,
+    kind: "dismiss",
+    intent: { requested_effect: "Dismiss the system alert" },
+  });
+  assert.equal(alertDismiss.outcome, "uncertain");
+  assert.equal(server.bodiesFor("/alert/dismiss").length, 1);
 
   const launch = await engine.execute({
     automation_session_id: sessionId,

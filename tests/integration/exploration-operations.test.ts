@@ -217,6 +217,8 @@ test("exploration runs as one auditable Operation through the Host API", async (
   const started = (await client.execute("RunExploration", {
     maximum_actions: 20,
     settle_milliseconds: 0,
+    application_id: runtimeContext["application_id"],
+    maximum_recovery_attempts: 2,
   })) as JsonObject;
   assert.equal(started["kind"], "RunExploration");
   assert.equal(started["state"], "running");
@@ -233,6 +235,10 @@ test("exploration runs as one auditable Operation through the Host API", async (
   const report = result["value"] as JsonObject;
   assert.equal((report["discovered_state_ids"] as readonly string[]).length, 3);
   assert.equal(report["stopped_reason"], "frontier_exhausted");
+  assert.equal(report["recovery_attempt_count"], 0);
+  assert.equal(report["recovery_count"], 0);
+  assert.equal(report["restoration_action_count"], 0);
+  assert.deepEqual(report["recoveries"], []);
   // Every executed step reported progress on the wire.
   const progressed = events.filter((event) => event["kind"] === "progressed");
   assert.equal(progressed.length, (report["steps"] as readonly JsonObject[]).length);

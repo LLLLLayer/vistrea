@@ -40,6 +40,18 @@ function withSnapshotId(
   return { ...structuredClone(snapshot), snapshot_id: snapshotId };
 }
 
+function withBuildScope(
+  snapshot: Record<string, unknown>,
+  buildID: string,
+  applicationVersion: string,
+): Record<string, unknown> {
+  const copy = structuredClone(snapshot);
+  const context = copy["runtime_context"] as Record<string, unknown>;
+  context["build_id"] = buildID;
+  context["application_version"] = applicationVersion;
+  return copy;
+}
+
 function withExtraNode(snapshot: Record<string, unknown>): Record<string, unknown> {
   const copy = structuredClone(snapshot);
   const trees = copy["trees"] as JsonObject[];
@@ -178,6 +190,83 @@ test("structural identity dedups repeated observations and separates changed str
   assert.equal(graph.states.length, 2);
   assert.equal(graph.observations.length, 3);
   assert.deepEqual(graph["entry_state_ids"], [initial.screen_state.screen_state_id]);
+});
+
+test("build-scoped graph views and state lookup use build-local evidence", async () => {
+  const { workspace, engine, base } = await engineContext();
+  const firstBuildID = "build_019f0000-0000-7000-8000-000000000001";
+  const secondBuildID = "build_019f0000-0000-7000-8000-000000000002";
+  const first = withSnapshotId(
+    withBuildScope(base, firstBuildID, "1.0.0"),
+    "snapshot_019f0000-0000-7000-8000-0000000000d1",
+  );
+  const repeatedInSecondBuild = withSnapshotId(
+    withBuildScope(base, secondBuildID, "2.0.0"),
+    "snapshot_019f0000-0000-7000-8000-0000000000d2",
+  );
+  const secondBuildOnly = withSnapshotId(
+    withBuildScope(withExtraNode(base), secondBuildID, "2.0.0"),
+    "snapshot_019f0000-0000-7000-8000-0000000000d3",
+  );
+  persistSnapshots(workspace, [first, repeatedInSecondBuild, secondBuildOnly]);
+
+  const shared = engine.recordStateObservation({ snapshot_id: first["snapshot_id"] as string });
+  const repeated = engine.recordStateObservation({
+    snapshot_id: repeatedInSecondBuild["snapshot_id"] as string,
+  });
+  const secondOnly = engine.recordStateObservation({
+    snapshot_id: secondBuildOnly["snapshot_id"] as string,
+  });
+  assert.equal(repeated.screen_state.screen_state_id, shared.screen_state.screen_state_id);
+
+  const runtimeContext = first["runtime_context"] as JsonObject;
+  const firstView = engine.getGraph({
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+    build_id: firstBuildID,
+    application_version: "1.0.0",
+  });
+  const firstScope = (firstView["extensions"] as JsonObject)[
+    "vistrea.build_scope"
+  ] as JsonObject;
+  assert.deepEqual(firstScope["screen_state_ids"], [shared.screen_state.screen_state_id]);
+
+  const secondView = engine.getGraph({
+    project_id: runtimeContext["project_id"] as string,
+    application_id: runtimeContext["application_id"] as string,
+    build_id: secondBuildID,
+    application_version: "2.0.0",
+  });
+  const secondScope = (secondView["extensions"] as JsonObject)[
+    "vistrea.build_scope"
+  ] as JsonObject;
+  assert.deepEqual(secondScope["screen_state_ids"], [
+    shared.screen_state.screen_state_id,
+    secondOnly.screen_state.screen_state_id,
+  ]);
+
+  const scopedState = engine.getState(shared.screen_state.screen_state_id, {
+    build_id: secondBuildID,
+    application_version: "2.0.0",
+  });
+  assert.equal(scopedState["canonical_snapshot_id"], repeatedInSecondBuild["snapshot_id"]);
+  assert.throws(
+    () =>
+      engine.getState(secondOnly.screen_state.screen_state_id, {
+        build_id: firstBuildID,
+        application_version: "1.0.0",
+      }),
+    (error: unknown) => isDataError(error, "not_found"),
+  );
+  assert.throws(
+    () =>
+      engine.getGraph({
+        project_id: runtimeContext["project_id"] as string,
+        application_id: runtimeContext["application_id"] as string,
+        build_id: secondBuildID,
+      }),
+    (error: unknown) => isDataError(error, "invalid_argument"),
+  );
 });
 
 test("transition observations dedup by action signature and count occurrences", async () => {

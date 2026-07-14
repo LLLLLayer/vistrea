@@ -16,6 +16,7 @@ const BACK_SWIPE_DISTANCE_POINTS = 220;
 const MAXIMUM_RESPONSE_BYTES = 512 * 1024;
 const LOOPBACK_URL_PATTERN = /^http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost):[0-9]{1,5}$/;
 const BUNDLE_ID_PATTERN = /^[A-Za-z0-9.-]{1,256}$/;
+const W3C_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 
 export interface WdaAutomationProviderOptions {
   /** A loopback WebDriverAgent endpoint, for example `http://127.0.0.1:8100`. */
@@ -64,8 +65,18 @@ export class WdaAutomationProvider implements AutomationProviderPort {
       provider_id: "ios-wda",
       platform: "ios",
       device_kind: options.deviceKind ?? "simulator",
-      action_kinds: ["tap", "long_press", "type_text", "swipe", "scroll", "back", "launch"],
-      supports_system_alerts: false,
+      action_kinds: [
+        "tap",
+        "long_press",
+        "type_text",
+        "clear_text",
+        "swipe",
+        "scroll",
+        "back",
+        "launch",
+        "dismiss",
+      ],
+      supports_system_alerts: true,
     };
   }
 
@@ -106,6 +117,32 @@ export class WdaAutomationProvider implements AutomationProviderPort {
         await this.#sessionRequest("POST", "/wda/keys", { value: [text] }, options);
         return { outcome: "uncertain", detail: "Text injected through WebDriverAgent." };
       }
+      case "clear_text": {
+        const locator = command.target?.provider_locator;
+        if (locator?.strategy !== "accessibility_id") {
+          return {
+            outcome: "failed",
+            detail: "clear_text requires an accessibility-resolved target on iOS.",
+          };
+        }
+        const element = await this.#sessionRequest(
+          "POST",
+          "/element",
+          { using: "accessibility id", value: locator.value },
+          options,
+        );
+        const elementId = (element as JsonObject | null)?.[W3C_ELEMENT_KEY];
+        if (typeof elementId !== "string" || elementId.length === 0 || elementId.length > 512) {
+          throw new DataError("internal", "WebDriverAgent did not return an element identifier.");
+        }
+        await this.#sessionRequest(
+          "POST",
+          `/element/${encodeURIComponent(elementId)}/clear`,
+          undefined,
+          options,
+        );
+        return { outcome: "uncertain", detail: "Text cleared through WebDriverAgent." };
+      }
       case "swipe":
       case "scroll": {
         const point = requirePoint(command);
@@ -145,6 +182,18 @@ export class WdaAutomationProvider implements AutomationProviderPort {
         }
         await this.#sessionRequest("POST", "/wda/apps/launch", { bundleId }, options);
         return { outcome: "succeeded", detail: "WebDriverAgent confirmed the launch." };
+      }
+      case "dismiss": {
+        const point = command.target?.absolute_point;
+        if (point !== undefined) {
+          await this.#performPointerActions(
+            pressSequence(point.x, point.y, TAP_PRESS_MILLISECONDS),
+            options,
+          );
+          return { outcome: "uncertain", detail: "Dismiss target tapped through WebDriverAgent." };
+        }
+        await this.#sessionRequest("POST", "/alert/dismiss", undefined, options);
+        return { outcome: "uncertain", detail: "System alert dismissal sent through WebDriverAgent." };
       }
       default:
         return { outcome: "failed", detail: "The provider does not implement this action kind." };

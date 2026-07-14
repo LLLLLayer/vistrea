@@ -23,6 +23,8 @@ import { SecureUuidV7IdGenerator } from "../design/index.js";
 
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const IDENTITY_PROFILE = { kind: "identity_profile", id: "structural-v1" } as const;
+const BUILD_ID_PATTERN =
+  /^build_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /**
  * Capture limitations that make a Snapshot unusable as Screen State evidence.
@@ -168,6 +170,14 @@ export interface IdentityCurationResult {
 export interface GetScreenGraphQuery {
   readonly project_id: string;
   readonly application_id: string;
+  /** Build and application version are an all-or-nothing product scope. */
+  readonly build_id?: string;
+  readonly application_version?: string;
+}
+
+export interface GetScreenStateQuery {
+  readonly build_id?: string;
+  readonly application_version?: string;
 }
 
 interface StateResolution {
@@ -905,13 +915,85 @@ export class ScreenGraphEngine {
   }
 
   getGraph(query: GetScreenGraphQuery): ScreenGraph {
-    return this.#read((unit) =>
-      unit.screenGraph.getGraph(deterministicGraphId(query.project_id, query.application_id)),
-    );
+    const scope = parseBuildScope(query);
+    return this.#read((unit) => {
+      const graph = unit.screenGraph.getGraph(
+        deterministicGraphId(query.project_id, query.application_id),
+      );
+      if (scope === undefined) {
+        return graph;
+      }
+      const observationById = new Map(
+        graph.observations.map((observation) => [observation.observation_id, observation]),
+      );
+      const visibleStateIds = graph.states
+        .filter((state) =>
+          (state["observation_ids"] as readonly string[]).some((observationId) => {
+            const observation = observationById.get(observationId);
+            return observation !== undefined && observationMatchesScope(observation, scope);
+          }),
+        )
+        .map((state) => state.screen_state_id);
+      const visibleStateSet = new Set(visibleStateIds);
+      const visibleTransitionIds = graph.transitions
+        .filter(
+          (transition) =>
+            visibleStateSet.has(transition.source_state_id) &&
+            visibleStateSet.has(transition.target_state_id) &&
+            (transition["observation_ids"] as readonly string[]).some((observationId) => {
+              const observation = observationById.get(observationId);
+              return observation !== undefined && observationMatchesScope(observation, scope);
+            }),
+        )
+        .map((transition) => transition.transition_id);
+      const scoped = {
+        ...graph,
+        extensions: {
+          ...(graph["extensions"] as JsonObject),
+          "vistrea.build_scope": {
+            ...scope,
+            screen_state_ids: visibleStateIds,
+            transition_ids: visibleTransitionIds,
+          },
+        },
+      } as unknown as ScreenGraph;
+      this.#validator.assert(PROTOCOL_SCHEMA_IDS.screenGraph, scoped);
+      return scoped;
+    });
   }
 
-  getState(screenStateId: string): ScreenState {
-    return this.#read((unit) => unit.screenGraph.getState(screenStateId));
+  getState(screenStateId: string, query: GetScreenStateQuery = {}): ScreenState {
+    const scope = parseBuildScope(query);
+    return this.#read((unit) => {
+      const state = unit.screenGraph.getState(screenStateId);
+      if (scope === undefined) {
+        return state;
+      }
+      const matching = (state["observation_ids"] as readonly string[])
+        .map((observationId) => unit.observations.get(observationId))
+        .filter((observation) => observationMatchesScope(observation, scope))
+        .sort((left, right) => observationWallTime(right).localeCompare(observationWallTime(left)));
+      const canonicalSnapshotId = (
+        matching[0]?.["snapshot_ids"] as readonly string[] | undefined
+      )?.[0];
+      if (typeof canonicalSnapshotId !== "string") {
+        throw new DataError(
+          "not_found",
+          "The Screen State was not observed in the requested build scope.",
+          { details: { screen_state_id: screenStateId, ...scope } },
+        );
+      }
+      const scoped = {
+        ...state,
+        canonical_snapshot_id: canonicalSnapshotId,
+        extensions: {
+          ...(state["extensions"] as JsonObject),
+          "vistrea.build_scope": scope,
+        },
+      } as unknown as ScreenState;
+      this.#validator.assert(PROTOCOL_SCHEMA_IDS.screenState, scoped);
+      return scoped;
+    });
   }
 
   findPath(query: PathQuery): readonly PathResult[] {
@@ -1293,6 +1375,43 @@ function observationBuilds(observations: readonly JsonObject[]): string[] {
     observations.map(
       (observation) => (observation["runtime_context"] as JsonObject)["build_id"] as string,
     ),
+  );
+}
+
+interface BuildScope {
+  readonly build_id: string;
+  readonly application_version: string;
+}
+
+function parseBuildScope(
+  query: GetScreenGraphQuery | GetScreenStateQuery,
+): BuildScope | undefined {
+  if (query.build_id === undefined && query.application_version === undefined) {
+    return undefined;
+  }
+  if (
+    query.build_id === undefined ||
+    query.application_version === undefined ||
+    !BUILD_ID_PATTERN.test(query.build_id) ||
+    query.application_version.length < 1 ||
+    query.application_version.length > 128
+  ) {
+    throw new DataError(
+      "invalid_argument",
+      "build_id and application_version must form one valid build scope.",
+    );
+  }
+  return {
+    build_id: query.build_id,
+    application_version: query.application_version,
+  };
+}
+
+function observationMatchesScope(observation: Observation, scope: BuildScope): boolean {
+  const runtimeContext = observation["runtime_context"] as JsonObject;
+  return (
+    runtimeContext["build_id"] === scope.build_id &&
+    runtimeContext["application_version"] === scope.application_version
   );
 }
 

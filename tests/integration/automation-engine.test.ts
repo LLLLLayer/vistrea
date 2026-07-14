@@ -28,8 +28,8 @@ class ScriptedAutomationProvider implements AutomationProviderPort {
     provider_id: "scripted",
     platform: "ios",
     device_kind: "simulator",
-    action_kinds: ["tap", "type_text", "back"],
-    supports_system_alerts: false,
+    action_kinds: ["tap", "type_text", "clear_text", "back", "dismiss"],
+    supports_system_alerts: true,
   } as const;
 
   readonly executed: ProviderActionCommand[] = [];
@@ -204,6 +204,24 @@ test("automation enforces risk policy, confirmation binding, and session lifecyc
   assert.equal(typed.risk, "sensitive");
   assert.equal(typed.outcome, "succeeded");
 
+  const cleared = await engine.execute({
+    automation_session_id: sessionId,
+    kind: "clear_text",
+    target: { stable_id: "demo.home.open_catalog" },
+    expected_snapshot_id: snapshot.snapshot_id,
+    intent: { requested_effect: "Clear a search phrase" },
+  });
+  assert.equal(cleared.risk, "sensitive");
+  assert.equal(cleared.outcome, "succeeded");
+
+  const dismissed = await engine.execute({
+    automation_session_id: sessionId,
+    kind: "dismiss",
+    intent: { requested_effect: "Dismiss a system alert" },
+  });
+  assert.equal(dismissed.risk, "safe");
+  assert.equal(dismissed.outcome, "succeeded");
+
   const dangerousCommand = {
     automation_session_id: sessionId,
     kind: "tap" as const,
@@ -217,7 +235,7 @@ test("automation enforces risk policy, confirmation binding, and session lifecyc
   const blocked = await engine.execute(dangerousCommand);
   assert.equal(blocked.outcome, "blocked");
   assert.equal(blocked.authorization.decision, "deny");
-  assert.equal(provider.executed.length, 1);
+  assert.equal(provider.executed.length, 3);
 
   // A confirmation token is bound to kind, resolved target, and session.
   const token = engine.confirmationTokenFor(dangerousCommand);

@@ -24,6 +24,8 @@ const optInEnvironment = "VISTREA_RUN_IOS_REAL_AUTOMATION";
 const wdaProjectEnvironment = "VISTREA_WDA_PROJECT";
 const scenarioId = "demo.navigation.basic";
 const storefrontScenarioId = "demo.store.navigation";
+const searchScenarioId = "demo.store.search";
+const sheetScenarioId = "demo.store.sheet";
 const homeStableId = "demo.home.open_catalog";
 const catalogStableId = "demo.catalog.item_primary";
 const demoBundleId = "dev.vistrea.demo";
@@ -459,6 +461,109 @@ test(
     });
     assert.equal(storefrontVersion.state_count, 7);
 
+    // Provider actions that are easy to fake at the wire boundary still need
+    // real UIKit evidence. Type and clear the canonical search field, then
+    // prove both structural variants through fresh Runtime captures.
+    const searchEnvironment = cleanEnvironment({
+      SIMCTL_CHILD_VISTREA_SCENARIO_ID: searchScenarioId,
+      SIMCTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
+      SIMCTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
+      SIMCTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
+      SIMCTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
+    });
+    await runCommand(
+      "xcrun",
+      ["simctl", "launch", "--terminate-running-process", resources.simulatorId, demoBundleId],
+      {
+        environment: searchEnvironment,
+        secrets: knownSecrets,
+        label: "iOS Demo search launch",
+      },
+    );
+    await resources.host.waitForRuntime(60_000);
+    await delay(settleMilliseconds);
+    const searchSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.search.field"),
+    );
+    persistForResolution(searchSnapshot);
+    const typedSearch = await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "type_text",
+      target: { stable_id: "demo.search.field" },
+      expected_snapshot_id: searchSnapshot["snapshot_id"] as string,
+      intent: { requested_effect: "Filter the catalog for Aurora" },
+      payload: { text_input: "Aurora" },
+    });
+    assert.equal(typedSearch.outcome, "uncertain");
+    await delay(settleMilliseconds);
+    const filteredSearchSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.state.search-filtered.root"),
+    );
+    persistForResolution(filteredSearchSnapshot);
+    const clearedSearch = await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "clear_text",
+      target: { stable_id: "demo.search.field" },
+      expected_snapshot_id: filteredSearchSnapshot["snapshot_id"] as string,
+      intent: { requested_effect: "Restore the unfiltered catalog" },
+    });
+    assert.equal(clearedSearch.outcome, "uncertain");
+    await delay(settleMilliseconds);
+    const clearedSearchSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.state.search.root"),
+    );
+    assert.equal(hasStableId(clearedSearchSnapshot, "demo.state.search-filtered.root"), false);
+
+    // Targeted dismiss is distinct from system-alert dismissal: it must tap
+    // the Runtime-resolved control and remove the in-tree overlay.
+    const sheetEnvironment = cleanEnvironment({
+      SIMCTL_CHILD_VISTREA_SCENARIO_ID: sheetScenarioId,
+      SIMCTL_CHILD_VISTREA_SCENARIO_PROFILE: "baseline",
+      SIMCTL_CHILD_VISTREA_RUNTIME_HOST: resources.host.runtime.host,
+      SIMCTL_CHILD_VISTREA_RUNTIME_PORT: String(resources.host.runtime.port),
+      SIMCTL_CHILD_VISTREA_RUNTIME_TOKEN: resources.host.runtime.authorizationToken,
+    });
+    await runCommand(
+      "xcrun",
+      ["simctl", "launch", "--terminate-running-process", resources.simulatorId, demoBundleId],
+      {
+        environment: sheetEnvironment,
+        secrets: knownSecrets,
+        label: "iOS Demo sheet launch",
+      },
+    );
+    await resources.host.waitForRuntime(60_000);
+    await delay(settleMilliseconds);
+    const sheetBaseSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.sheet.open"),
+    );
+    persistForResolution(sheetBaseSnapshot);
+    await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "tap",
+      target: { stable_id: "demo.sheet.open" },
+      expected_snapshot_id: sheetBaseSnapshot["snapshot_id"] as string,
+      intent: { requested_effect: "Open sort options" },
+    });
+    await delay(settleMilliseconds);
+    const sheetOpenSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.sheet.dismiss"),
+    );
+    persistForResolution(sheetOpenSnapshot);
+    const dismissedSheet = await automation.execute({
+      automation_session_id: session.automation_session_id,
+      kind: "dismiss",
+      target: { stable_id: "demo.sheet.dismiss" },
+      expected_snapshot_id: sheetOpenSnapshot["snapshot_id"] as string,
+      intent: { requested_effect: "Dismiss sort options" },
+    });
+    assert.equal(dismissedSheet.outcome, "uncertain");
+    await delay(settleMilliseconds);
+    const sheetDismissedSnapshot = await captureUntil(resources.host, knownSecrets, (snapshot) =>
+      hasStableId(snapshot, "demo.state.sheet-base.root"),
+    );
+    assert.equal(hasStableId(sheetDismissedSnapshot, "demo.sheet.container"), false);
+
     automation.closeSession(session.automation_session_id);
     await resources.host.close();
     resources.host = undefined;
@@ -476,6 +581,8 @@ test(
         storefront_states: storefrontReport.discovered_state_ids.length,
         storefront_actions: storefrontReport.action_count,
         storefront_version_tag: storefrontVersion.tag_name,
+        clear_text: "real-input-then-structure-verified",
+        dismiss: "real-input-then-overlay-removal-verified",
         exploration_actions: report.action_count,
         exploration_version_tag: version.tag_name,
       }),
