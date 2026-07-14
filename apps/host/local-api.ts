@@ -14,7 +14,6 @@ import {
   type JsonObject,
   type ObjectStore,
   type PageRequest,
-  type ProtocolValidator,
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
 import {
@@ -24,7 +23,6 @@ import {
   ListSnapshotsQuery,
   LoopbackTransportError,
   type CaptureSnapshotCommand,
-  type RuntimeCapturePort,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
 import {
@@ -33,7 +31,7 @@ import {
   TuningEngine,
   type RuntimeTuningPort,
 } from "../../engine/design/index.js";
-import { AutomationEngine, type AutomationProviderPort } from "../../engine/automation/index.js";
+import { AutomationEngine } from "../../engine/automation/index.js";
 import {
   ExplorationEngine,
   ExplorationOperationEngine,
@@ -43,6 +41,19 @@ import {
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
 import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
+import type {
+  HostLocalApiBindAddress,
+  HostLocalApiDependencies,
+  HostLocalApiHandle,
+  StartHostLocalApiOptions,
+} from "./local-api-contracts.js";
+
+export type {
+  HostLocalApiBindAddress,
+  HostLocalApiDependencies,
+  HostLocalApiHandle,
+  StartHostLocalApiOptions,
+} from "./local-api-contracts.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -60,46 +71,6 @@ const CAPTURE_REASONS = new Set<CaptureSnapshotCommand["reason"]>([
   "review",
   "validation",
 ]);
-
-export type HostLocalApiBindAddress = "127.0.0.1" | "::1";
-
-export interface HostLocalApiDependencies {
-  readonly runtime: RuntimeCapturePort;
-  /** The live tuning boundary; absent when the composition is Snapshot-only. */
-  readonly runtimeTuning?: RuntimeTuningPort;
-  /** Reports live Runtime readiness without exposing transport state to API consumers. */
-  readonly isRuntimeConnected?: () => boolean;
-  /** Reports the Runtime event pump status when the Host composition runs one. */
-  readonly runtimeEventsStatus?: () => RuntimeEventPumpStatus | undefined;
-  /** Reports Runtime self-reversion audit counts when the composition tracks them. */
-  readonly tuningReversionsStatus?: () => { recorded: number; failed: number } | undefined;
-  /**
-   * The device automation provider exploration runs on; absent when the
-   * composition has no configured device, in which case the exploration
-   * routes fail closed as unsupported.
-   */
-  readonly automationProvider?: AutomationProviderPort;
-  readonly workspace: WorkspaceDataSource;
-  readonly objects: ObjectStore;
-  readonly validator: ProtocolValidator;
-}
-
-export interface StartHostLocalApiOptions extends HostLocalApiDependencies {
-  /** A literal loopback address is required. Hostnames and wildcard addresses fail closed. */
-  readonly host: HostLocalApiBindAddress;
-  /** Zero asks the operating system for an unused port. */
-  readonly port?: number;
-  readonly maximumJsonBodyBytes?: number;
-}
-
-export interface HostLocalApiHandle {
-  readonly host: HostLocalApiBindAddress;
-  readonly port: number;
-  readonly baseUrl: string;
-  /** Generated once for this server lifetime and never written to the Workspace. */
-  readonly bearerToken: string;
-  close(): Promise<void>;
-}
 
 interface HostApiErrorBody {
   readonly request_id: string;

@@ -139,16 +139,18 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var selectedDifferenceID: String?
 
     // Exploration Operation state (device automation Host capability).
-    @Published public private(set) var explorationOperationID: String?
-    @Published public private(set) var explorationState: String?
-    @Published public private(set) var explorationProgress: ExplorationProgressSummary?
-    @Published public private(set) var explorationLastEventMessage: String?
-    @Published public private(set) var explorationReport: ExplorationReportSummary?
-    @Published public private(set) var explorationError: String?
-    @Published public private(set) var isExploring = false
-    @Published public private(set) var isCancellingExploration = false
+    // Internal setters let the exploration workflow live in a focused file
+    // while preserving read-only access for package consumers.
+    @Published public internal(set) var explorationOperationID: String?
+    @Published public internal(set) var explorationState: String?
+    @Published public internal(set) var explorationProgress: ExplorationProgressSummary?
+    @Published public internal(set) var explorationLastEventMessage: String?
+    @Published public internal(set) var explorationReport: ExplorationReportSummary?
+    @Published public internal(set) var explorationError: String?
+    @Published public internal(set) var isExploring = false
+    @Published public internal(set) var isCancellingExploration = false
 
-    private let client: any HostClient
+    let client: any HostClient
     private var selectionGeneration = 0
     // Per-pane request generations: a slow older response must never
     // overwrite the state a newer request already applied.
@@ -165,7 +167,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     private var issueDetailGeneration = 0
     private var wikiEditGeneration = 0
     private var canvasStateGeneration = 0
-    private var explorationGeneration = 0
+    var explorationGeneration = 0
     private var designReferencesGeneration = 0
     private var designReferenceGeneration = 0
     private var designComparisonsGeneration = 0
@@ -1523,174 +1525,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         selectedDifferenceID = ids[next]
     }
 
-    // MARK: - Exploration Operations (device automation Host capability)
-
-    /// The canonical terminal Operation states. A run that reached one of
-    /// them is no longer addressable for cancellation.
-    private static let terminalExplorationStates: Set<String> = ["succeeded", "failed", "cancelled"]
-
-    /// True while an exploration Operation this Studio started is still
-    /// addressable on the Host: Cancel must stay reachable even when the poll
-    /// loop is no longer running (a superseded start, a torn-down model), so
-    /// the run can never be orphaned.
-    public var isExplorationRunAddressable: Bool {
-        guard explorationOperationID != nil else {
-            return false
-        }
-        guard let state = explorationState else {
-            return true
-        }
-        return !Self.terminalExplorationStates.contains(state)
-    }
-
-    /// Starts one background exploration Operation and polls it to a
-    /// terminal state. The poll loop is bound to the Operation, not to the
-    /// Canvas pane: switching tabs never stops it. A Host without a
-    /// configured automation provider rejects the run with HTTP 501 code
-    /// `unsupported`; the message is shown inline and the controls stay
-    /// usable.
-    public func startExploration(
-        maximumActions: Int,
-        maximumDepth: Int? = nil,
-        settleMilliseconds: Int? = nil,
-        excludedStableIDs: [String] = []
-    ) async {
-        guard !isExploring else {
-            return
-        }
-        explorationGeneration += 1
-        let generation = explorationGeneration
-        isExploring = true
-        explorationError = nil
-        explorationReport = nil
-        explorationProgress = nil
-        explorationLastEventMessage = nil
-        let command = ExplorationRunCommand(
-            maximumActions: maximumActions,
-            maximumDepth: maximumDepth,
-            settleMilliseconds: settleMilliseconds,
-            excludedStableIDs: excludedStableIDs.isEmpty ? nil : excludedStableIDs
-        )
-        let reference: ExplorationOperationRef
-        do {
-            reference = try await client.runExploration(command)
-            guard generation == explorationGeneration else {
-                return
-            }
-        } catch {
-            guard generation == explorationGeneration else {
-                return
-            }
-            explorationError = Self.explorationMessage(for: error)
-            isExploring = false
-            // The previous Operation identity survives a rejected start: a
-            // Host that rejects the run because one is already active must
-            // leave that run cancellable, not orphaned.
-            return
-        }
-        // Only an accepted run replaces the previous Operation identity.
-        explorationOperationID = reference.operationID
-        explorationState = reference.state
-        await pollExploration(operationID: reference.operationID, generation: generation)
-    }
-
-    /// Requests cancellation of the addressable exploration. The Operation
-    /// stays running until the walk observes the request; the poll loop then
-    /// shows the terminal `cancelled` state.
-    public func cancelExploration() async {
-        guard !isCancellingExploration,
-              isExplorationRunAddressable,
-              let operationID = explorationOperationID
-        else {
-            return
-        }
-        isCancellingExploration = true
-        defer { isCancellingExploration = false }
-        do {
-            let ref = try await client.cancelExploration(id: operationID)
-            if explorationOperationID == operationID {
-                explorationState = ref.state
-            }
-        } catch {
-            if explorationOperationID == operationID {
-                explorationError = Self.explorationMessage(for: error)
-            }
-        }
-    }
-
-    /// Tears down the exploration poll loop without cancelling the Host-side
-    /// run, when the model itself is discarded or a newer request supersedes
-    /// it. The Canvas pane must never call this: a tab switch keeps the run
-    /// polling. The Operation identity survives so Cancel stays reachable.
-    public func stopExplorationPolling() {
-        explorationGeneration += 1
-        isExploring = false
-    }
-
-    /// Polls the exploration Operation once per interval until it reaches a
-    /// terminal state, the generation guard supersedes the loop, or the
-    /// enclosing Task is cancelled.
-    private func pollExploration(operationID: String, generation: Int) async {
-        while generation == explorationGeneration {
-            if Task.isCancelled {
-                return
-            }
-            do {
-                try await explorationPollSleep()
-            } catch {
-                // The only failure a sleep reports is cancellation: stop the
-                // loop instead of spinning through it.
-                return
-            }
-            guard !Task.isCancelled, generation == explorationGeneration else {
-                return
-            }
-            let record: ExplorationOperationRecord
-            do {
-                record = try await client.getExplorationOperation(id: operationID)
-            } catch {
-                guard generation == explorationGeneration else {
-                    return
-                }
-                explorationError = Self.explorationMessage(for: error)
-                isExploring = false
-                return
-            }
-            guard generation == explorationGeneration else {
-                return
-            }
-            explorationState = record.operation.state
-            let previousCompletedUnits = explorationProgress?.completedUnits
-            explorationProgress = record.latestProgress
-            explorationLastEventMessage = record.latestEventMessage
-            switch record.operation.state {
-            case "succeeded":
-                explorationReport = record.report
-                isExploring = false
-                await refreshCanvasAfterExploration()
-                return
-            case "failed", "cancelled":
-                explorationError = Self.terminalExplorationMessage(for: record.operation)
-                isExploring = false
-                return
-            default:
-                // The walk records observations as it goes, so the Canvas
-                // grows while the device is still walking: every executed
-                // action may have discovered a state, and waiting for the
-                // run to settle would hide exactly the live picture an
-                // operator watches an exploration for.
-                if record.latestProgress?.completedUnits != previousCompletedUnits {
-                    await refreshCanvasAfterExploration()
-                }
-                continue
-            }
-        }
-    }
-
     /// Discovered states belong on the Canvas immediately — during the walk
     /// after every executed action, and once more when the run settles — so
     /// this reloads the same Screen Graph the Canvas last showed.
-    private func refreshCanvasAfterExploration() async {
+    func refreshCanvasAfterExploration() async {
         guard lastCanvasProjectID != nil, lastCanvasApplicationID != nil else {
             return
         }
@@ -1698,7 +1536,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     }
 
     /// Surfaces the canonical error code and message verbatim.
-    private static func explorationMessage(for error: Error) -> String {
+    static func explorationMessage(for error: Error) -> String {
         if let hostError = error as? HostClientError,
            case let .server(_, _, code, message, _) = hostError {
             return "\(code): \(message)"
@@ -1706,7 +1544,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         return message(for: error)
     }
 
-    private static func terminalExplorationMessage(for operation: ExplorationOperationRef) -> String {
+    static func terminalExplorationMessage(for operation: ExplorationOperationRef) -> String {
         guard let error = operation.error else {
             return "The exploration operation ended as \(operation.state)."
         }

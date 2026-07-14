@@ -33,12 +33,13 @@ vistrea/
 │   ├── README.md
 │   ├── host/                    # production Host composition and Local API
 │   │   ├── README.md
+│   │   ├── local-api-contracts.ts # public composition contracts
 │   │   ├── local-api.ts
 │   │   ├── local-host.ts
 │   │   └── serve.ts
 │   └── studio-macos/            # native SwiftUI Studio workspace
 │       ├── Package.swift
-│       ├── Sources/
+│       ├── Sources/             # feature views and model workflows split by domain
 │       ├── Tests/
 │       └── README.md
 ├── protocol/
@@ -141,6 +142,7 @@ vistrea/
 ├── integrations/
 │   ├── README.md
 │   ├── shared/                  # strict authenticated Host client
+│   │   ├── host-local-client-errors.ts # canonical client error boundary
 │   │   └── host-operation-manifest.ts # executable Host/CLI operation parity
 │   ├── cli/
 │   │   ├── README.md
