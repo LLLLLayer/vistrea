@@ -34,6 +34,9 @@ export const PACK_FORMAT_VERSION = 1;
 export const PACK_MEDIA_TYPE = "application/vnd.vistrea-pack";
 export const PACK_LOGICAL_NAME = "workspace-export.vistrea-pack";
 
+const EXPORTED_OBJECT_RETENTION_REASON =
+  "Preserve an explicitly exported artifact until a future user-managed retention workflow releases it.";
+
 const HEADER_LINE_LIMIT = 4_096;
 const TRAILER_LINE_LIMIT = 4_096;
 const MANIFEST_BYTE_LIMIT = 64 * 1024 * 1024;
@@ -189,6 +192,10 @@ export class PackExchangeService implements ExchangeService {
       media_type: PACK_MEDIA_TYPE,
       compression: "none",
       logical_name: PACK_LOGICAL_NAME,
+    });
+    await this.#objects.pin(packRef.hash, {
+      policy_id: `workspace-export:${packRef.hash}`,
+      reason: EXPORTED_OBJECT_RETENTION_REASON,
     });
     this.#data.registerVerifiedObjects([packRef]);
     return packRef;
@@ -446,6 +453,12 @@ export class PackExchangeService implements ExchangeService {
           },
         }),
       );
+    }
+    for (const output of outputs) {
+      await this.#objects.pin(output.hash, {
+        policy_id: `readable-export:${output.hash}`,
+        reason: EXPORTED_OBJECT_RETENTION_REASON,
+      });
     }
     this.#data.registerVerifiedObjects(outputs);
     return outputs;

@@ -145,6 +145,10 @@ class DelegatingObjectStore implements ObjectStore {
     return this.delegate.pin(hash, policy);
   }
 
+  unpin(hash: string, policyId: string): Promise<void> {
+    return this.delegate.unpin(hash, policyId);
+  }
+
   inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef> {
     return this.delegate.inventory(query);
   }

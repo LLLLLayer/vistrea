@@ -16,6 +16,7 @@ import {
   SequenceIdGenerator,
   createRepositoryProtocolValidator,
 } from "../../data/memory/index.js";
+import { FileObjectStore } from "../../data/objects/index.js";
 import { LocalDataWorkspace } from "../../data/workspace/index.js";
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 
@@ -344,6 +345,13 @@ test("a Knowledge Collection publishes through Commit/Ref identity and exports i
     formats: ["markdown", "html"],
   });
   assert.deepEqual(exports.map((object) => object.media_type), ["text/markdown", "text/html"]);
+  const lifecycleStore = await FileObjectStore.open({ workspaceRoot, clock });
+  for (const output of exports) {
+    assert.deepEqual(
+      (await lifecycleStore.inspectLifecycle(output.hash)).active_retention_policy_ids,
+      [`readable-export:${output.hash}`],
+    );
+  }
   const markdown = await readObject(workspace.objects, exports[0]?.hash as string);
   const html = await readObject(workspace.objects, exports[1]?.hash as string);
   assert.match(markdown, /# Storefront runtime knowledge/);

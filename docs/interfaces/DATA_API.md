@@ -31,10 +31,10 @@ interface WorkspaceRepository {
   registerVerifiedObjects(objects: ObjectRef[]): void;
   beginUnitOfWork(mode: "read" | "write"): DataUnitOfWork;
   checkHealth(): WorkspaceHealth;
-  applyMigrations(target_version?: uint32): MigrationResult;
-  backup(command: BackupWorkspaceCommand): ObjectRef;
+  applyMigrations(target_version?: uint32): Promise<MigrationResult>;
+  backup(command: BackupWorkspaceCommand): Promise<ObjectRef>;
   compact(command: CompactWorkspaceCommand): CompactWorkspaceResult;
-  restore(command: RestoreWorkspaceCommand): WorkspaceDescriptor;
+  restore(command: RestoreWorkspaceCommand): Promise<WorkspaceRestoreResult>;
 }
 ```
 
@@ -48,6 +48,41 @@ interface WorkspaceRepository {
 - Object writes that succeed before a metadata rollback become unreachable candidates and are reclaimed later by Workspace GC.
 - `registerVerifiedObjects` records only canonical metadata returned by a successful Object Store write. It is idempotent for equal values, rejects conflicting metadata for one hash, and does not by itself make an Object reachable from a Snapshot, Working Set, or Commit.
 - Revisioned creates and updates follow the shared `1`, `N`, `N + 1` rule in `COMMON_CONTRACTS.md`; repositories reject stale preconditions and submitted revision jumps.
+
+### Workspace lifecycle maintenance
+
+The production local composition implements the lifecycle boundary through
+`LocalDataWorkspace` while the manifest/bootstrap portion of the complete
+`WorkspaceRepository` remains separate:
+
+- `backup` is the only maintenance operation allowed while the Workspace is
+  open. It refuses active Units of Work, uses SQLite's online backup API,
+  independently runs schema, ledger, `quick_check`, foreign-key, catalog, and
+  metadata validation, then stores and pins the resulting ObjectRef.
+- Opening an existing older schema creates that verified and pinned backup
+  before synchronously authorizing any migration SQL. A failed migration rolls
+  the complete batch back and keeps the recovery object.
+- `restore` is offline and lock-exclusive. It verifies the stored ObjectRef and
+  candidate SQLite file before changing `metadata.sqlite`, preserves the old
+  database/WAL/SHM files under `.recovery/`, and uses a durable restore journal.
+  Normal open refuses an interrupted restore until explicit recovery rolls the
+  preserved files back.
+- local garbage collection is offline, dry-run by default, and applies a
+  minimum-age grace period. Its mark set includes every live metadata ObjectRef,
+  Commit ancestry rooted by Refs, Tags, Working Sets and live resources, plus
+  active Object Store retention policies. Catalog rows are removed only after a
+  same-transaction reachability recheck and before physical deletion, so a
+  crash can leave a repairable unregistered orphan but never a registered
+  missing payload.
+- stale `.host.lock` recovery is explicit and succeeds only for a valid lock
+  whose PID is definitely absent. The original lock is retained as recovery
+  evidence; live, inaccessible, malformed, or symlinked locks fail closed.
+
+Explicit pack and readable exports receive indefinite retention policies.
+Unreferenced capture payloads remain unpinned and become GC candidates after
+the grace period. `ObjectStore.unpin(hash, policy_id)` explicitly releases a
+named policy, after which the ordinary reachability and age rules decide
+whether GC may delete the object.
 
 ## 3. Snapshot and observation ports
 
@@ -253,12 +288,19 @@ interface ObjectStore {
   open(hash: string, range?: ByteRange): Promise<ByteStream>;
   has(hashes: readonly string[]): Promise<ReadonlySet<string>>;
   pin(hash: string, policy: RetentionPolicy): Promise<void>;
+  unpin(hash: string, policy_id: string): Promise<void>;
   inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef>;
   deletePhysical(hash: string): Promise<void>;
 }
 ```
 
-`put` hashes the exact encoded byte stream and verifies `expected_hash` before success. Compression and optional encryption descriptors remain immutable `ObjectRef` metadata; neither changes encoded-byte identity. The Object Store does not decide reachability. Workspace Engine GC computes protected hashes from Version Repository refs, commits, pins, Working Sets, and retention policy, then invokes the internal `deletePhysical` operation.
+`put` hashes the exact encoded byte stream and verifies `expected_hash` before
+success. Compression and optional encryption descriptors remain immutable
+`ObjectRef` metadata; neither changes encoded-byte identity. `unpin` releases
+only the named policy and is idempotent; it never deletes bytes. The Object
+Store does not decide reachability. Offline Workspace GC computes protected
+hashes from live metadata, Commit roots and ancestry, Working Sets, retention
+policy, and object age, then invokes the internal `deletePhysical` operation.
 
 ## 10. Search port
 

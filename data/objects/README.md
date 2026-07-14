@@ -21,6 +21,10 @@ The SHA-256 hash and `ObjectRef.byte_size` cover the exact encoded bytes. Compre
 - Startup removes abandoned put/pin temporary files and completes interrupted physical deletes.
 - `open({ offset, length })` reads the half-open encoded-byte interval `[offset, offset + length)`. Omitted length reads to EOF; zero length is empty; ranges beyond EOF are rejected.
 - Inventory is ordered by canonical hash. `has` accepts batches and returns only complete objects.
-- Retention policies are persisted and enforced by physical deletion. Commit/Ref/Working Set reachability remains an Engine GC decision and is not implemented here.
+- Retention policies are persisted and enforced by physical deletion. `unpin`
+  idempotently releases only one named policy; it never deletes the object.
+  `inspectLifecycle` is a concrete local-maintenance view of payload age and
+  active policies. Commit/Ref/Working-Set and live-metadata reachability remains
+  outside this adapter and is combined by `LocalDataWorkspace.collectGarbage`.
 - Every payload and metadata shard must be a real directory at its canonical Workspace path. Symlinked or redirected shard parents fail closed before reads, publication, recovery, or deletion.
 - Physical deletion accepts only canonical hashes, removes metadata before bytes through a recoverable tombstone, and never derives a path from caller-controlled names.

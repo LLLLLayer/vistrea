@@ -868,6 +868,8 @@ export interface MigrationResult {
   readonly from_version: number;
   readonly to_version: number;
   readonly applied_versions: readonly number[];
+  /** Present when an existing Workspace was backed up before a forward migration. */
+  readonly backup?: ObjectRef;
 }
 
 export interface BackupWorkspaceCommand {
@@ -885,6 +887,47 @@ export interface CompactWorkspaceResult {
 
 export interface RestoreWorkspaceCommand {
   readonly backup: ObjectRef;
+}
+
+export interface WorkspaceRestoreResult {
+  readonly backup: ObjectRef;
+  readonly restored_schema_version: number;
+  readonly restored_generation: number;
+  /** Identifies the preserved pre-restore files under `.recovery/`. */
+  readonly recovery_id: string;
+}
+
+export interface CollectWorkspaceGarbageCommand {
+  /** Defaults to true. Physical deletion requires an explicit false value. */
+  readonly dry_run?: boolean;
+  /** Defaults to 24 hours and protects newly written, not-yet-referenced objects. */
+  readonly minimum_age_seconds?: number;
+}
+
+export interface CollectWorkspaceGarbageResult {
+  readonly dry_run: boolean;
+  readonly minimum_age_seconds: number;
+  readonly scanned_objects: number;
+  readonly reachable_objects: number;
+  readonly retained_objects: number;
+  readonly young_objects: number;
+  readonly candidate_objects: number;
+  readonly candidate_bytes: number;
+  readonly stale_catalog_entries: number;
+  readonly removed_catalog_entries: number;
+  readonly deleted_objects: number;
+  readonly deleted_bytes: number;
+  readonly candidate_hashes: readonly string[];
+}
+
+export interface RecoverWorkspaceLockResult {
+  readonly recovered_process_id: number;
+  readonly recovery_id: string;
+}
+
+export interface RecoverWorkspaceRestoreResult {
+  readonly recovery_id: string;
+  readonly restored_original_files: readonly string[];
 }
 
 export interface Clock {

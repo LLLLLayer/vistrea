@@ -73,6 +73,11 @@ export interface AppliedMigrationResult {
   readonly appliedVersions: readonly number[];
 }
 
+export interface VerifiedSQLiteSchema {
+  readonly schemaVersion: number;
+  readonly latestSupportedVersion: number;
+}
+
 interface LedgerRow {
   readonly version: number;
   readonly filename: string;
@@ -432,6 +437,37 @@ function verifyAppliedMigrations(
       });
     }
   }
+}
+
+/**
+ * Verifies an existing Vistrea schema without applying migrations or changing
+ * connection policy. Backup and restore paths use this read-only check.
+ */
+export function verifySQLiteMetadataSchema(
+  db: Database.Database,
+  migrations: readonly SQLiteMigration[],
+): VerifiedSQLiteSchema {
+  validateMigrationSequence(migrations);
+  assertDatabaseIntegrity(db);
+  const schemaVersion = sqliteInteger(db, "user_version");
+  const latestSupportedVersion = migrations.at(-1)?.version ?? 0;
+  if (schemaVersion < 1) {
+    throw new DataError("integrity_error", "The SQLite metadata schema is not initialized.", {
+      details: { schema_version: schemaVersion },
+    });
+  }
+  if (schemaVersion > latestSupportedVersion) {
+    throw new DataError("unsupported", "The Workspace schema is newer than this Vistrea binary.", {
+      details: { current_version: schemaVersion, latest_version: latestSupportedVersion },
+    });
+  }
+  if (sqliteInteger(db, "application_id") !== VISTREA_APPLICATION_ID) {
+    throw new DataError("integrity_error", "The SQLite file is not a Vistrea metadata database.");
+  }
+  verifyAppliedMigrations(db, migrations, schemaVersion);
+  assertExpectedSchema(db);
+  assertForeignKeyIntegrity(db);
+  return { schemaVersion, latestSupportedVersion };
 }
 
 function createLedger(db: Database.Database): void {

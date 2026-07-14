@@ -101,7 +101,13 @@ The implementation follows this order:
 1. Discover and validate the complete packaged migration sequence before opening a write transaction.
 2. Open the Workspace only far enough to run preflight and determine current and target versions.
 3. Reject a lower target, a target newer than the binary, modified history, or an incompatible database.
-4. For an existing non-empty Workspace, create a verified SQLite backup through `WorkspaceRepository.backup`, store it through the Object Store, and pin it for migration recovery.
+4. For an existing non-empty Workspace, `LocalDataWorkspace.open` first opens
+   the current schema without upgrading, creates a WAL-aware backup through
+   SQLite's backup API, independently verifies its schema, ledger, integrity,
+   foreign keys, catalog, and metadata, stores it through the Object Store, and
+   pins it for migration recovery. The low-level `SQLiteDataStore` still
+   requires a synchronous authorization callback and never assumes that a
+   backup exists.
 5. Start one `BEGIN IMMEDIATE` transaction for the complete pending sequence.
 6. Set `PRAGMA application_id = 1448301650` and create the migration ledger when initializing version zero.
 7. For each pending migration in ascending order:
