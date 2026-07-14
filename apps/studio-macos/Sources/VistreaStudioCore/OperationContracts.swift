@@ -380,6 +380,53 @@ public struct ReviewIssueTransitionRequest: Encodable, Equatable, Sendable {
     }
 }
 
+/// The `POST /v1/design-comparisons/:id/issues` command body. The Host owns
+/// the immutable Difference evidence; Studio only names the Difference and
+/// the interactive actor so it cannot accidentally recopy or alter evidence.
+public struct CreateReviewIssueFromDifferenceRequest: Encodable, Equatable, Sendable {
+    public let differenceID: String
+    public let title: String?
+    public let description: String?
+    public let createdBy: StudioActorRef
+
+    public init(
+        differenceID: String,
+        title: String? = nil,
+        description: String? = nil,
+        createdBy: StudioActorRef = .studio
+    ) {
+        self.differenceID = differenceID
+        self.title = title
+        self.description = description
+        self.createdBy = createdBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case differenceID = "difference_id"
+        case title
+        case description
+        case createdBy = "created_by"
+    }
+}
+
+/// The `POST /v1/review-issues/:id/recapture-verifications` command body.
+/// The Host captures the configured Runtime, requires a different real build,
+/// reruns the design comparison, and appends immutable verification evidence.
+public struct RecaptureReviewIssueRequest: Encodable, Equatable, Sendable {
+    public let expectedRevision: UInt64
+    public let verifiedBy: StudioActorRef
+
+    public init(expectedRevision: UInt64, verifiedBy: StudioActorRef = .studio) {
+        self.expectedRevision = expectedRevision
+        self.verifiedBy = verifiedBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case expectedRevision = "expected_revision"
+        case verifiedBy = "verified_by"
+    }
+}
+
 // MARK: - Deep Wiki vocabulary and commands
 
 /// The canonical Deep Wiki enums mirrored from the knowledge schema.

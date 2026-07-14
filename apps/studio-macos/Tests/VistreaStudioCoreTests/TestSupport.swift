@@ -36,6 +36,20 @@ extension HostClient {
         throw HostClientError.fixtureUnavailable("This test double does not support issue writes.")
     }
 
+    func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary {
+        throw HostClientError.fixtureUnavailable("This test double does not support issue writes.")
+    }
+
+    func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult {
+        throw HostClientError.fixtureUnavailable("This test double does not support issue recapture.")
+    }
+
     func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail {
         throw HostClientError.fixtureUnavailable("This test double does not support wiki writes.")
     }

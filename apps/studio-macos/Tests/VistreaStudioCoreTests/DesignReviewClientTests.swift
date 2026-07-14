@@ -10,6 +10,8 @@ private let treeID = "tree_019f0000-0000-7000-8000-000000000002"
 private let nodeID = "node_019f0000-0000-7000-8000-000000000011"
 private let designReferenceID = "designref_019f0000-0000-7000-8000-000000000001"
 private let comparisonID = "comparison_019f0000-0000-7000-8000-000000000001"
+private let differenceID = "difference_019f0000-0000-7000-8000-000000000001"
+private let issueID = "issue_019f0000-0000-7000-8000-000000000001"
 private let graphID = "graph_019f0000-0000-7000-8000-000000000001"
 private let stateOneID = "screenstate_019f0000-0000-7000-8000-000000000001"
 private let stateTwoID = "screenstate_019f0000-0000-7000-8000-000000000002"
@@ -73,6 +75,10 @@ final class DesignReviewClientTests: XCTestCase {
          "completed_by":{"kind":"human","id":"studio","extensions":{}},
          "extensions":{"vistrea.pixel":{"status":"unavailable","reason":"The Snapshot has no screenshot."}}}
         """#
+    }
+
+    private static func issueJSON(revision: Int, state: String) -> String {
+        #"{"issue_id":"\#(issueID)","revision":\#(revision),"title":"Design frame differs on demo.home.open_catalog","category":"frame","severity":"major","state":"\#(state)","updated_at":"2026-07-12T02:02:00Z","runtime_target":{"snapshot_id":"\#(snapshotID)"}}"#
     }
 
     private static func curationResultJSON(revision: Int, stateID: String) -> String {
@@ -207,6 +213,61 @@ final class DesignReviewClientTests: XCTestCase {
         )
     }
 
+    func testDifferencePromotionAndFreshBuildRecaptureUseCanonicalRoutes() async throws {
+        let snapshotJSON = try XCTUnwrap(
+            String(
+                data: StudioTestFixtures.data(
+                    "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"
+                ),
+                encoding: .utf8
+            )
+        )
+        let recaptureJSON = #"{"snapshot":\#(snapshotJSON),"comparison":\#(Self.comparisonJSON()),"verification":{"verification_record_id":"verification_019f0000-0000-7000-8000-000000000001","issue_id":"\#(issueID)","issue_revision":1,"basis":"real_build","result":"passed","verified_snapshot_id":"\#(snapshotID)","verified_build_id":"build_019f0000-0000-7000-8000-000000000002","verified_at":"2026-07-12T02:03:00Z"},"issue":\#(Self.issueJSON(revision: 2, state: "resolved"))}"#
+        let transport = DesignRecordingTransport(responses: [
+            HostHTTPResponse(
+                statusCode: 201,
+                body: Data(Self.issueJSON(revision: 1, state: "open").utf8)
+            ),
+            HostHTTPResponse(statusCode: 201, body: Data(recaptureJSON.utf8)),
+        ])
+        let client = try makeClient(transport)
+
+        let issue = try await client.createReviewIssueFromDifference(
+            comparisonID: comparisonID,
+            CreateReviewIssueFromDifferenceRequest(differenceID: differenceID)
+        )
+        XCTAssertEqual(issue.issueID, issueID)
+        XCTAssertEqual(issue.state, "open")
+
+        let result = try await client.recaptureAndVerifyReviewIssue(
+            id: issueID,
+            RecaptureReviewIssueRequest(expectedRevision: 1)
+        )
+        XCTAssertEqual(result.snapshot.snapshotID.rawValue, snapshotID)
+        XCTAssertEqual(result.verification.basis, "real_build")
+        XCTAssertEqual(result.verification.result, "passed")
+        XCTAssertEqual(
+            result.verification.verifiedBuildID,
+            "build_019f0000-0000-7000-8000-000000000002"
+        )
+        XCTAssertEqual(result.issue.state, "resolved")
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST"])
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/v1/design-comparisons/\(comparisonID)/issues",
+            "/v1/review-issues/\(issueID)/recapture-verifications",
+        ])
+        let promotionBody = try bodyObject(of: requests[0])
+        XCTAssertEqual(Set(promotionBody.keys), ["difference_id", "created_by"])
+        XCTAssertEqual(promotionBody["difference_id"] as? String, differenceID)
+        let recaptureBody = try bodyObject(of: requests[1])
+        XCTAssertEqual(Set(recaptureBody.keys), ["expected_revision", "verified_by"])
+        XCTAssertEqual(recaptureBody["expected_revision"] as? Int, 1)
+        let verifiedBy = try XCTUnwrap(recaptureBody["verified_by"] as? [String: Any])
+        XCTAssertEqual(verifiedBy["id"] as? String, "studio")
+    }
+
     func testIdentityCurationRoutesEncodeCanonicalCommands() async throws {
         let transport = DesignRecordingTransport(responses: [
             HostHTTPResponse(
@@ -336,6 +397,18 @@ final class DesignReviewClientTests: XCTestCase {
                     targetSnapshotID: snapshotID,
                     completedBy: .studio
                 )
+            )
+        }
+        await XCTAssertThrowsClientValidation {
+            _ = try await client.createReviewIssueFromDifference(
+                comparisonID: comparisonID,
+                CreateReviewIssueFromDifferenceRequest(differenceID: "difference_invalid")
+            )
+        }
+        await XCTAssertThrowsClientValidation {
+            _ = try await client.recaptureAndVerifyReviewIssue(
+                id: issueID,
+                RecaptureReviewIssueRequest(expectedRevision: 0)
             )
         }
         // A merge names at least two states.

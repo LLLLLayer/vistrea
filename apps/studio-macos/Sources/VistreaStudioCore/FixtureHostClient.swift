@@ -11,6 +11,17 @@ public actor FixtureHostClient: HostClient {
     private var wikiDetails: [WikiNodeDetail]
     private var designReferences: [DesignReferenceDetail]
     private var designComparisons: [DesignComparisonDetail] = []
+    private var recaptureSnapshots: [RuntimeSnapshot]
+
+    private struct PromotedIssueSource {
+        let comparisonID: String
+        let category: String
+        let nodeID: String
+        let stableID: String?
+    }
+
+    private var promotedIssueSources: [String: PromotedIssueSource] = [:]
+    private var promotedDifferenceIssueIDs: [String: String] = [:]
 
     private struct StoredTuningPatch {
         let summary: TuningPatchSummary
@@ -75,6 +86,7 @@ public actor FixtureHostClient: HostClient {
         canvasGraph: CanvasGraph? = nil,
         wikiNodes: [WikiNodeSummary] = [],
         designReferences: [DesignReferenceDetail]? = nil,
+        recaptureSnapshots: [RuntimeSnapshot] = [],
         automationConfigured: Bool = true
     ) {
         self.status = status
@@ -84,6 +96,7 @@ public actor FixtureHostClient: HostClient {
         self.eventTimeline = eventTimeline
         self.reviewIssues = reviewIssues
         self.canvasGraph = canvasGraph
+        self.recaptureSnapshots = recaptureSnapshots
         wikiDetails = wikiNodes.map { node in
             WikiNodeDetail(
                 wikiNodeID: node.wikiNodeID,
@@ -441,6 +454,155 @@ public actor FixtureHostClient: HostClient {
         )
         reviewIssues[index] = updated
         return updated
+    }
+
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary {
+        guard let comparison = designComparisons.first(where: { $0.comparisonID == comparisonID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard let difference = comparison.differences.first(where: { $0.differenceID == request.differenceID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The Design Difference does not exist.")
+        }
+        let duplicateKey = "\(comparisonID)|\(request.differenceID)"
+        if promotedDifferenceIssueIDs[duplicateKey] != nil {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The Design Difference already has a Review Issue."
+            )
+        }
+        guard let runtimeTarget = difference.runtimeTarget else {
+            throw Self.serverError(
+                409,
+                code: "integrity_error",
+                message: "The Design Difference has no resolvable Runtime target."
+            )
+        }
+        let targetLabel = runtimeTarget.stableID ?? runtimeTarget.nodeID
+        let issue = ReviewIssueSummary(
+            issueID: mintIdentifier("issue"),
+            revision: 1,
+            title: request.title ?? "Design \(difference.category) differs on \(targetLabel)",
+            category: difference.category,
+            severity: difference.severity,
+            state: "open",
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: comparison.targetSnapshotID
+        )
+        reviewIssues.append(issue)
+        promotedIssueSources[issue.issueID] = PromotedIssueSource(
+            comparisonID: comparisonID,
+            category: difference.category,
+            nodeID: runtimeTarget.nodeID,
+            stableID: runtimeTarget.stableID
+        )
+        promotedDifferenceIssueIDs[duplicateKey] = issue.issueID
+        return issue
+    }
+
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult {
+        try requireConnectedRuntime()
+        guard let issueIndex = reviewIssues.firstIndex(where: { $0.issueID == id }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        let current = reviewIssues[issueIndex]
+        guard current.revision == request.expectedRevision else {
+            throw Self.serverError(409, code: "conflict", message: "The Review Issue revision is stale.")
+        }
+        guard current.state == "ready_for_verification" else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "Only a Review Issue that is ready for verification can be recaptured."
+            )
+        }
+        guard let source = promotedIssueSources[id],
+              let originalSnapshotID = current.targetSnapshotID,
+              let originalSnapshot = snapshotsByID[originalSnapshotID]
+        else {
+            throw HostClientError.fixtureUnavailable(
+                "Fresh-build recapture requires explicit fixture evidence for a promoted Design Difference."
+            )
+        }
+        guard !recaptureSnapshots.isEmpty else {
+            throw HostClientError.fixtureUnavailable(
+                "Fresh-build recapture requires a connected Runtime; fixture mode does not invent acceptance evidence."
+            )
+        }
+        guard let originalComparison = designComparisons.first(where: {
+            $0.comparisonID == source.comparisonID
+        }) else {
+            throw Self.serverError(
+                409,
+                code: "integrity_error",
+                message: "The promoted Design Comparison no longer exists."
+            )
+        }
+        let captured = recaptureSnapshots.removeFirst()
+        guard captured.runtimeContext.buildID != originalSnapshot.runtimeContext.buildID else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "Design acceptance requires a capture from a different real build."
+            )
+        }
+        snapshotsByID[captured.snapshotID.rawValue] = captured
+        let comparison = try await runDesignComparison(
+            DesignComparisonCommand(
+                designReferenceID: originalComparison.designReferenceID,
+                targetSnapshotID: captured.snapshotID.rawValue,
+                includePixel: true,
+                completedBy: request.verifiedBy
+            )
+        )
+        guard let latestIndex = reviewIssues.firstIndex(where: { $0.issueID == id }),
+              reviewIssues[latestIndex].revision == request.expectedRevision
+        else {
+            throw Self.serverError(409, code: "conflict", message: "The Review Issue revision is stale.")
+        }
+        let matchingDifference = comparison.differences.first { difference in
+            guard difference.category == source.category else { return false }
+            if let stableID = source.stableID {
+                return difference.runtimeTarget?.stableID == stableID
+            }
+            return difference.runtimeTarget?.nodeID == source.nodeID
+        }
+        let result = comparison.quality != "complete"
+            ? "inconclusive"
+            : matchingDifference == nil ? "passed" : "failed"
+        let verification = ReviewVerificationSummary(
+            verificationRecordID: mintIdentifier("verification"),
+            issueID: id,
+            issueRevision: request.expectedRevision,
+            basis: "real_build",
+            result: result,
+            verifiedSnapshotID: captured.snapshotID.rawValue,
+            verifiedBuildID: captured.runtimeContext.buildID.rawValue,
+            verifiedAt: mintTimestamp()
+        )
+        let updated = ReviewIssueSummary(
+            issueID: current.issueID,
+            revision: current.revision + 1,
+            title: current.title,
+            category: current.category,
+            severity: current.severity,
+            state: result == "passed" ? "resolved" : "in_progress",
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: current.targetSnapshotID
+        )
+        reviewIssues[latestIndex] = updated
+        return RecaptureReviewIssueResult(
+            snapshot: captured,
+            comparison: comparison,
+            verification: verification,
+            issue: updated
+        )
     }
 
     // MARK: - Deep Wiki writes
@@ -1251,6 +1413,14 @@ public struct UnavailableHostClient: HostClient {
         id: String,
         _ request: ReviewIssueTransitionRequest
     ) async throws -> ReviewIssueSummary { throw error }
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary { throw error }
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult { throw error }
     public func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail { throw error }
     public func getWikiNode(id: String) async throws -> WikiNodeDetail { throw error }
     public func reviseWikiNode(id: String, _ draft: WikiNodeRevisionDraft) async throws -> WikiNodeDetail {

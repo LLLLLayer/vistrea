@@ -602,6 +602,14 @@ public protocol HostClient: Sendable {
         id: String,
         _ request: ReviewIssueTransitionRequest
     ) async throws -> ReviewIssueSummary
+    func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary
+    func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult
 
     // Deep Wiki writes.
     func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail

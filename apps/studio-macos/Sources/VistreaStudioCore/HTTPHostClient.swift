@@ -397,6 +397,44 @@ public struct HTTPHostClient: HostClient, Sendable {
         )
     }
 
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary {
+        guard Self.isTypedIdentifier(comparisonID, prefix: "comparison") else {
+            throw HostClientError.invalidIdentifier(comparisonID)
+        }
+        guard Self.isTypedIdentifier(request.differenceID, prefix: "difference") else {
+            throw HostClientError.invalidIdentifier(request.differenceID)
+        }
+        return try await sendJSON(
+            ReviewIssueSummary.self,
+            path: ["v1", "design-comparisons", comparisonID, "issues"],
+            body: request,
+            expectedStatus: 201
+        )
+    }
+
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult {
+        guard Self.isTypedIdentifier(id, prefix: "issue") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        guard request.expectedRevision >= 1 else {
+            throw HostClientError.invalidConfiguration(
+                "The expected Review Issue revision must be at least 1."
+            )
+        }
+        return try await sendJSON(
+            RecaptureReviewIssueResult.self,
+            path: ["v1", "review-issues", id, "recapture-verifications"],
+            body: request,
+            expectedStatus: 201
+        )
+    }
+
     public func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail {
         try await sendJSON(
             WikiNodeDetail.self,

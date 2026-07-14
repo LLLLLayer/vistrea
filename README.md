@@ -77,7 +77,7 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 
 ## Recommended implementation sequence
 
-1. Add dedicated Studio controls for Difference promotion, source suggestions, fresh-build recapture verification, and Knowledge Collection management.
+1. Add dedicated Studio controls for source suggestions and Knowledge Collection management; Difference promotion and fresh-build recapture verification are implemented.
 2. Run the remaining Android adb physical vertical lane, extend the verified iOS pinned-TLS lane across the broader native tuning matrix, and strengthen the iOS Release artifact boundary.
 3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
 4. Add Hub organization/team inheritance, discovery, subscriptions, versioned

@@ -73,6 +73,56 @@ final class DesignWorkbenchModelTests: XCTestCase {
         XCTAssertEqual(model.selectedDifferenceID, ids[1], "Unknown IDs never select.")
     }
 
+    func testDifferencePromotionAndRecapturePreserveEvidenceAndInspectorContext() async throws {
+        let original = try StudioTestFixtures.snapshot()
+        let later = try Self.laterBuildSnapshot()
+        let client = FixtureHostClient(
+            snapshots: [original],
+            objectsByHash: [Self.fixtureScreenshotHash: Data("fixture-image".utf8)],
+            recaptureSnapshots: [later]
+        )
+        let model = SnapshotWorkspaceModel(client: client)
+        await model.refresh()
+        await model.loadDesignReferences()
+        let reference = try XCTUnwrap(model.designReferences.first)
+        await model.selectDesignReference(id: reference.id)
+        await model.runDesignComparison(includePixel: true)
+        let comparison = try XCTUnwrap(model.designComparison)
+        let difference = try XCTUnwrap(comparison.differences.first)
+        model.selectDifference(id: difference.id)
+
+        await model.promoteSelectedDifferenceToIssue()
+        let issue = try XCTUnwrap(model.lastPromotedIssue)
+        XCTAssertNil(model.differenceIssueError)
+        XCTAssertEqual(issue.category, difference.category)
+        XCTAssertEqual(issue.targetSnapshotID, original.snapshotID.rawValue)
+
+        await model.selectReviewIssue(id: issue.issueID)
+        await model.transitionSelectedIssue(to: "ready_for_verification", reason: nil)
+        XCTAssertEqual(model.selectedIssue?.state, "ready_for_verification")
+        let inspectorSnapshotID = model.selectedSnapshotID
+        let inspectorScope = model.selectedScope
+
+        await model.recaptureAndVerifySelectedIssue()
+
+        let acceptance = try XCTUnwrap(model.lastIssueVerification)
+        XCTAssertNil(model.issueVerificationError)
+        XCTAssertEqual(acceptance.verification.basis, "real_build")
+        XCTAssertEqual(acceptance.verification.result, "failed")
+        XCTAssertEqual(acceptance.verification.verifiedSnapshotID, later.snapshotID.rawValue)
+        XCTAssertEqual(
+            acceptance.verification.verifiedBuildID,
+            later.runtimeContext.buildID.rawValue
+        )
+        XCTAssertEqual(model.selectedIssue?.state, "in_progress")
+        XCTAssertEqual(model.snapshots.first?.id, later.snapshotID.rawValue)
+        XCTAssertTrue(model.availableScopes.contains(where: {
+            $0.buildID == later.runtimeContext.buildID.rawValue
+        }))
+        XCTAssertEqual(model.selectedSnapshotID, inspectorSnapshotID)
+        XCTAssertEqual(model.selectedScope, inspectorScope)
+    }
+
     func testComparisonWithoutBundledBytesDegradesToPartialPixel() async throws {
         let snapshot = try StudioTestFixtures.snapshot()
         let client = FixtureHostClient(snapshots: [snapshot])
@@ -293,5 +343,26 @@ final class DesignWorkbenchModelTests: XCTestCase {
         await model.runDesignComparison(includePixel: false)
         XCTAssertNotNil(model.designComparisonError)
         XCTAssertNil(model.designComparison)
+    }
+
+    private static func laterBuildSnapshot() throws -> RuntimeSnapshot {
+        let data = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"
+        )
+        guard var document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var runtimeContext = document["runtime_context"] as? [String: Any],
+              var capturedAt = document["captured_at"] as? [String: Any]
+        else {
+            throw HostClientError.decoding("The Runtime Snapshot fixture is not a JSON object.")
+        }
+        document["snapshot_id"] = "snapshot_019f0000-0000-7000-8000-000000000099"
+        runtimeContext["build_id"] = "build_019f0000-0000-7000-8000-000000000002"
+        document["runtime_context"] = runtimeContext
+        capturedAt["wall_time"] = "2026-07-12T00:01:00Z"
+        capturedAt["monotonic_offset_ns"] = 62_000_000
+        document["captured_at"] = capturedAt
+        return try RuntimeSnapshotCodec.decode(
+            JSONSerialization.data(withJSONObject: document, options: [.sortedKeys])
+        )
     }
 }

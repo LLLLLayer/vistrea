@@ -86,6 +86,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isTransitioningIssue = false
     @Published public private(set) var issueTransitionError: String?
     @Published public private(set) var issueConflictNote: String?
+    @Published public private(set) var isRecapturingIssue = false
+    @Published public private(set) var issueVerificationError: String?
+    @Published public private(set) var lastIssueVerification: RecaptureReviewIssueResult?
 
     // Deep Wiki editing state.
     @Published public private(set) var isSavingWikiNode = false
@@ -137,6 +140,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isComparingDesign = false
     @Published public private(set) var designComparisonError: String?
     @Published public private(set) var selectedDifferenceID: String?
+    @Published public private(set) var isPromotingDifference = false
+    @Published public private(set) var differenceIssueError: String?
+    @Published public private(set) var lastPromotedIssue: ReviewIssueSummary?
 
     // Exploration Operation state (device automation Host capability).
     // Internal setters let the exploration workflow live in a focused file
@@ -714,6 +720,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         selectedIssueID = id
         issueTransitionError = nil
         issueConflictNote = nil
+        issueVerificationError = nil
+        lastIssueVerification = nil
         guard let id else {
             selectedIssue = nil
             issueDetailPhase = .idle
@@ -745,6 +753,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         isTransitioningIssue = true
         issueTransitionError = nil
         issueConflictNote = nil
+        issueVerificationError = nil
         defer { isTransitioningIssue = false }
         do {
             let updated = try await client.transitionReviewIssue(
@@ -766,6 +775,57 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 await reloadIssueAfterConflict(issueID: issue.issueID)
             } else {
                 issueTransitionError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// Captures a different real build and asks the Host to rerun the design
+    /// comparison before recording an immutable verification. The captured
+    /// Snapshot joins Evidence and scope discovery, but Studio preserves the
+    /// user's current Inspector selection until they explicitly open it.
+    public func recaptureAndVerifySelectedIssue() async {
+        guard !isRecapturingIssue, let issue = selectedIssue else {
+            return
+        }
+        guard issue.state == "ready_for_verification" else {
+            issueVerificationError =
+                "Move the Review Issue to ready_for_verification before recapturing."
+            return
+        }
+        isRecapturingIssue = true
+        issueVerificationError = nil
+        issueConflictNote = nil
+        lastIssueVerification = nil
+        defer { isRecapturingIssue = false }
+        do {
+            let result = try await client.recaptureAndVerifyReviewIssue(
+                id: issue.issueID,
+                RecaptureReviewIssueRequest(
+                    expectedRevision: issue.revision,
+                    verifiedBy: .studio
+                )
+            )
+            let item = SnapshotListItem(snapshot: result.snapshot)
+            snapshots.removeAll(where: { $0.id == item.id })
+            snapshots.insert(item, at: 0)
+            applyDerivedScopes()
+            contentPhase = .content
+            applyIssueToList(result.issue)
+            if selectedIssueID == issue.issueID {
+                selectedIssue = result.issue
+                issueDetailPhase = .content
+                lastIssueVerification = result
+            }
+        } catch {
+            guard selectedIssueID == issue.issueID else {
+                return
+            }
+            if Self.isConflict(error) {
+                issueConflictNote =
+                    "This issue or build changed elsewhere. The latest issue revision is shown; review it before retrying."
+                await reloadIssueAfterConflict(issueID: issue.issueID)
+            } else {
+                issueVerificationError = Self.message(for: error)
             }
         }
     }
@@ -1406,6 +1466,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         designComparison = nil
         selectedDifferenceID = nil
         designComparisonError = nil
+        differenceIssueError = nil
+        lastPromotedIssue = nil
         guard let id else {
             designReferencePhase = .idle
             designComparisons = []
@@ -1480,6 +1542,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             )
             designComparison = comparison
             selectedDifferenceID = nil
+            differenceIssueError = nil
+            lastPromotedIssue = nil
         } catch {
             designComparisonError = Self.message(for: error)
             return
@@ -1494,18 +1558,65 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         designComparison = comparison
         selectedDifferenceID = nil
+        differenceIssueError = nil
+        lastPromotedIssue = nil
     }
 
     /// Highlights one difference of the shown comparison.
     public func selectDifference(id: String?) {
         guard let id else {
             selectedDifferenceID = nil
+            differenceIssueError = nil
+            lastPromotedIssue = nil
             return
         }
         guard designComparison?.differences.contains(where: { $0.id == id }) == true else {
             return
         }
         selectedDifferenceID = id
+        differenceIssueError = nil
+        lastPromotedIssue = nil
+    }
+
+    /// Promotes the selected immutable Difference into a canonical Review
+    /// Issue. Studio names only the Difference; expected/actual values,
+    /// Runtime target, and evidence remain owned by the Host.
+    public func promoteSelectedDifferenceToIssue() async {
+        guard !isPromotingDifference else {
+            return
+        }
+        guard let comparison = designComparison, let differenceID = selectedDifferenceID else {
+            differenceIssueError = "Select a Design Difference before creating a Review Issue."
+            return
+        }
+        isPromotingDifference = true
+        differenceIssueError = nil
+        lastPromotedIssue = nil
+        defer { isPromotingDifference = false }
+        do {
+            let issue = try await client.createReviewIssueFromDifference(
+                comparisonID: comparison.comparisonID,
+                CreateReviewIssueFromDifferenceRequest(
+                    differenceID: differenceID,
+                    createdBy: .studio
+                )
+            )
+            let selectionStillCurrent = designComparison?.comparisonID == comparison.comparisonID
+                && selectedDifferenceID == differenceID
+            if selectionStillCurrent {
+                lastPromotedIssue = issue
+            }
+            if selectedCanvasStateID != nil {
+                await loadReviewIssues()
+                if designComparison?.comparisonID == comparison.comparisonID,
+                   selectedDifferenceID == differenceID,
+                   reviewIssues.contains(where: { $0.issueID == issue.issueID }) {
+                    await selectReviewIssue(id: issue.issueID)
+                }
+            }
+        } catch {
+            differenceIssueError = Self.message(for: error)
+        }
     }
 
     /// Steps the difference selection for review mode, wrapping at both
@@ -1518,11 +1629,15 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         let ids = comparison.differences.map(\.differenceID)
         guard let current = selectedDifferenceID, let index = ids.firstIndex(of: current) else {
             selectedDifferenceID = step >= 0 ? ids.first : ids.last
+            differenceIssueError = nil
+            lastPromotedIssue = nil
             return
         }
         let count = ids.count
         let next = ((index + step) % count + count) % count
         selectedDifferenceID = ids[next]
+        differenceIssueError = nil
+        lastPromotedIssue = nil
     }
 
     /// Discovered states belong on the Canvas immediately — during the walk

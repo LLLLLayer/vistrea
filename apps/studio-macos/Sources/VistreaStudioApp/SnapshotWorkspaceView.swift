@@ -1635,7 +1635,41 @@ private struct DesignDifferenceColumn: View {
             }
             Divider()
             content
+            Divider()
+            issueAction
         }
+    }
+
+    private var issueAction: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button("Create Review Issue", systemImage: "exclamationmark.bubble") {
+                Task { await model.promoteSelectedDifferenceToIssue() }
+            }
+            .controlSize(.small)
+            .disabled(model.selectedDifferenceID == nil || model.isPromotingDifference)
+            if model.isPromotingDifference {
+                ProgressView("Creating Review Issue…")
+                    .controlSize(.small)
+                    .font(.caption)
+            } else if let issue = model.lastPromotedIssue {
+                Text("Created \(issue.title)")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .lineLimit(2)
+                    .accessibilityLabel("Review Issue created: \(issue.title)")
+            } else if let error = model.differenceIssueError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            } else {
+                Text("Select a Difference to preserve its target and evidence as an Issue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
     }
 
     @ViewBuilder
@@ -2323,7 +2357,7 @@ private struct ReviewIssueDetailPanel: View {
             }
             TextField("Transition reason (optional)", text: $reason)
                 .textFieldStyle(.roundedBorder)
-                .disabled(model.isTransitioningIssue)
+                .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
             HStack(spacing: 6) {
                 ForEach(model.legalIssueTransitions, id: \.self) { target in
                     Button(target) {
@@ -2333,10 +2367,44 @@ private struct ReviewIssueDetailPanel: View {
                         }
                     }
                     .font(.caption)
-                    .disabled(model.isTransitioningIssue)
+                    .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
+                }
+            }
+            if issue.state == "ready_for_verification" {
+                Button("Recapture and Verify", systemImage: "camera.badge.ellipsis") {
+                    Task { await model.recaptureAndVerifySelectedIssue() }
+                }
+                .controlSize(.small)
+                .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
+            }
+            if model.isRecapturingIssue {
+                ProgressView("Capturing a later build and verifying…")
+                    .controlSize(.small)
+                    .font(.caption)
+            } else if let result = model.lastIssueVerification,
+                      result.issue.issueID == issue.issueID {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Verification \(result.verification.result.uppercased())")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(
+                            result.verification.result == "passed" ? Color.green : Color.orange
+                        )
+                    Text("Build \(result.verification.verifiedBuildID)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("The captured Snapshot is available in Evidence.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             if let error = model.issueTransitionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            if let error = model.issueVerificationError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
