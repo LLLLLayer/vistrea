@@ -96,6 +96,7 @@ interface WikiRepository {
   update(node: WikiNode, precondition: RevisionPrecondition): WikiNode;
   get(node_id: string, at?: VersionSelector): WikiNode;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
+  getLink(link_id: string, at?: VersionSelector): WikiLink;
   unlink(link_id: string, precondition: RevisionPrecondition): void;
   backlinks(node_id: string, page?: PageRequest): Page<WikiLink>;
   related(ref: ResourceRef, page?: PageRequest): Page<WikiNode>;
@@ -110,6 +111,8 @@ interface WikiRepository {
 ```
 
 `unlink` removes the live link and persists its next-revision deletion evidence in the same Unit of Work. The owning Engine command includes that deletion in its Working Set/Commit; a historical version can still reconstruct the prior link.
+
+Knowledge Collection publication writes a canonical `KnowledgeGraph` bundle to the Object Store first, registers its verified `ObjectRef`, then creates a Working Set, Commit, CAS Ref update, and published Collection projection in one metadata Unit of Work. The bundle contains the pre-publication draft Collection so its own `commit_id` never creates a circular content hash; the mutable projection carries the returned Commit/Ref identity.
 
 ## 6. Design review port
 
@@ -147,6 +150,8 @@ interface DesignReviewRepository {
 ```
 
 Design Comparisons and Verification Records are immutable evidence. References, mappings, Review Issues, Tuning Patches, and Tuning Applications are revisioned mutable resources and require optimistic concurrency after creation.
+
+`ReviewIssueQuery.screen_state_id` restricts results to issues whose `runtime_target.snapshot_id` appears in an Observation owned by that Screen State. This is a Data-port query, not a Studio-side approximation, so in-memory and SQLite Workspaces return identical state-scoped issue sets.
 
 ## 7. Validation and operation ports
 
@@ -287,6 +292,8 @@ interface SyncClient {
   resolveConflict(command: ResolveSyncConflictCommand): SyncConflictResolution;
 }
 ```
+
+`ExportReadableCommand` names one published `collection_id` and an optional unique subset of `markdown` and `html`. The exporter resolves the Collection's immutable Commit `wiki` root, verifies its bytes and canonical protocol value, and writes deterministic readable objects; it never renders mutable draft state.
 
 Pack and sync use the same Commit Manifest and ObjectRef formats.
 

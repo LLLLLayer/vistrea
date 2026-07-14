@@ -272,12 +272,29 @@ export interface KnowledgeCollectionShape extends JsonObject {
   readonly revision: number;
   readonly name: string;
   readonly summary?: string;
+  readonly node_ids: readonly string[];
+  readonly link_ids: readonly string[];
+  readonly entry_node_ids: readonly string[];
   readonly publication: JsonObject;
 }
 
 export type KnowledgeCollection = CanonicalProtocolValue<
   typeof PROTOCOL_SCHEMA_IDS.knowledgeCollection,
   KnowledgeCollectionShape
+>;
+
+export interface KnowledgeGraphShape extends JsonObject {
+  readonly protocol_version: ProtocolVersion;
+  readonly revision: number;
+  readonly nodes: readonly WikiNode[];
+  readonly links: readonly WikiLink[];
+  readonly collections: readonly KnowledgeCollection[];
+  readonly extensions: JsonObject;
+}
+
+export type KnowledgeGraph = CanonicalProtocolValue<
+  typeof PROTOCOL_SCHEMA_IDS.knowledgeGraph,
+  KnowledgeGraphShape
 >;
 
 interface RevisionedDesignValue extends JsonObject {
@@ -683,6 +700,8 @@ export interface DesignRegionMappingQuery {
 
 export interface ReviewIssueQuery {
   readonly design_reference_id?: string;
+  /** Restricts issues to runtime targets observed in this Screen State. */
+  readonly screen_state_id?: string;
   readonly states?: readonly string[];
   readonly severities?: readonly string[];
 }
@@ -809,7 +828,14 @@ export interface ImportPackResult {
   readonly conflicting_refs: readonly PackRefConflict[];
 }
 
-export interface ExportReadableCommand extends JsonObject {}
+export type ReadableKnowledgeFormat = "markdown" | "html";
+
+export interface ExportReadableCommand extends JsonObject {
+  /** Published collection whose immutable Commit root is rendered. */
+  readonly collection_id: string;
+  /** Unique output formats; defaults to both Markdown and HTML. */
+  readonly formats?: readonly ReadableKnowledgeFormat[];
+}
 export interface RemoteRef extends JsonObject {}
 export interface SyncStatus extends JsonObject {}
 export interface FetchCommand extends JsonObject {}

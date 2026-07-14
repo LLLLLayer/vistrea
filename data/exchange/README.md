@@ -10,7 +10,9 @@ Pack exchange and Hub sync must use the same commit manifest and object-referenc
 
 - `exportPack` resolves the requested refs and head commits, walks the parent closure, and writes one `.vistrea-pack` object into the local Object Store. A non-empty `prerequisite_commit_ids` list produces a thin pack: commits and objects reachable from those prerequisites are omitted and listed instead.
 - `importPack` reads a verified pack object from the local Object Store, verifies every framed byte, stores and registers the included objects, then creates commits and refs in one metadata Unit of Work. Ref conflicts are reported in the result and never forced.
-- `exportReadable` is a later slice and currently fails with `unsupported`.
+- `exportReadable` accepts a published Knowledge Collection and a unique subset of `markdown` and `html`. It resolves the Collection's immutable Commit `wiki` root, verifies ObjectRef metadata, byte count, SHA-256, strict UTF-8, canonical JSON, and Knowledge Graph semantics, then writes content-addressed readable objects. Draft state is never exported as published truth.
+
+The Markdown export preserves each inline source document and adds deterministic Collection, Commit, Ref, contents, resource, and link metadata. The self-contained HTML export safely escapes all source content and renders a conservative subset of headings, paragraphs, lists, blockquotes, and fenced code; unsupported Markdown remains readable text rather than executable markup.
 
 ## `.vistrea-pack` version 1 container
 
@@ -51,6 +53,4 @@ before any ref may advance:
    diverged refs are reported as conflicts while the rest of the import
    completes.
 
-Contract coverage lives in `tests/contract/pack-exchange.test.ts`; the
-cross-Workspace product path is proven in
-`tests/integration/local-data-workspace.test.ts`.
+Contract coverage lives in `tests/contract/pack-exchange.test.ts`; cross-Workspace pack transfer is proven in `tests/integration/local-data-workspace.test.ts`, and immutable Collection publication plus both readable formats are proven in `tests/integration/knowledge-engine.test.ts` and the Host/CLI integration suites.

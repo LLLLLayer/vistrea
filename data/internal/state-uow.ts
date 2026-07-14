@@ -621,6 +621,12 @@ class StateWikiRepository extends BoundStateRepository implements WikiRepository
     return cloneFrozen(value);
   }
 
+  getLink(linkId: string): WikiLink {
+    this.read();
+    const value = this.unit.state.wikiLinks.get(linkId);
+    return value === undefined ? this.missing("wiki_link", linkId) : cloneFrozen(value);
+  }
+
   unlink(linkId: string, precondition: RevisionPrecondition): void {
     this.write();
     const current = this.unit.state.wikiLinks.get(linkId);
@@ -931,11 +937,33 @@ class StateDesignReviewRepository
     this.read();
     const states = query.states === undefined ? undefined : new Set(query.states);
     const severities = query.severities === undefined ? undefined : new Set(query.severities);
+    const scopedSnapshotIds = new Set<string>();
+    if (query.screen_state_id !== undefined) {
+      for (const graph of this.unit.state.screenGraphs.values()) {
+        const screenState = graph.states.find(
+          (candidate) => candidate.screen_state_id === query.screen_state_id,
+        );
+        if (screenState === undefined) {
+          continue;
+        }
+        for (const observationId of screenState["observation_ids"] as readonly string[]) {
+          const observation = this.unit.state.observations.get(observationId);
+          for (const snapshotId of (observation?.["snapshot_ids"] ?? []) as readonly string[]) {
+            scopedSnapshotIds.add(snapshotId);
+          }
+        }
+      }
+    }
     const values = [...this.unit.state.reviewIssues.values()]
       .filter(
         (issue) =>
           query.design_reference_id === undefined ||
           issue.design_reference_id === query.design_reference_id,
+      )
+      .filter(
+        (issue) =>
+          query.screen_state_id === undefined ||
+          scopedSnapshotIds.has((issue["runtime_target"] as JsonObject)["snapshot_id"] as string),
       )
       .filter((issue) => states === undefined || states.has(String(issue.state)))
       .filter((issue) => severities === undefined || severities.has(String(issue.severity)))

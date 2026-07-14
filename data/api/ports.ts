@@ -137,6 +137,7 @@ export interface WikiRepository extends UnitOfWorkBound {
   get(nodeId: string, at?: VersionSelector): WikiNode;
   listNodes(query?: WikiNodeQuery, page?: PageRequest): Page<WikiNode>;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
+  getLink(linkId: string, at?: VersionSelector): WikiLink;
   unlink(linkId: string, precondition: RevisionPrecondition): void;
   backlinks(nodeId: string, page?: PageRequest): Page<WikiLink>;
   related(ref: ResourceRef, page?: PageRequest): Page<WikiNode>;
