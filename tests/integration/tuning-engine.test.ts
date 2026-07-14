@@ -284,3 +284,69 @@ test("self-reverted previews persist and mismatched runtime results fail closed"
   );
   assert.deepEqual(engine.listActiveTuning(CONNECTION_ID), []);
 });
+
+test("design acceptance properties produce source-oriented Coding Agent suggestions", async () => {
+  const { engine, snapshot, target } = await tuningContext();
+  const patch = engine.createTuningPatch({
+    title: "Design acceptance preview",
+    target_snapshot_id: snapshot.snapshot_id,
+    changes: [
+      {
+        runtime_target: target,
+        property: "foreground_color",
+        original_value: {
+          kind: "color_rgba",
+          value: { red: 0, green: 0, blue: 0, alpha: 1 },
+          color_space: "srgb",
+          extensions: {},
+        },
+        preview_value: {
+          kind: "color_rgba",
+          value: { red: 0.2, green: 0.4, blue: 0.9, alpha: 1 },
+          color_space: "srgb",
+          extensions: {},
+        },
+      },
+      {
+        runtime_target: target,
+        property: "font",
+        original_value: {
+          kind: "font",
+          value: { family: "System", size: 17, weight: 400, style: "normal" },
+          extensions: {},
+        },
+        preview_value: {
+          kind: "font",
+          value: { family: "System", size: 18, weight: 600, style: "normal" },
+          extensions: {},
+        },
+      },
+      {
+        runtime_target: target,
+        property: "spacing",
+        original_value: { kind: "number", value: 8, unit: "logical_point", extensions: {} },
+        preview_value: { kind: "number", value: 12, unit: "logical_point", extensions: {} },
+      },
+      {
+        runtime_target: target,
+        property: "corner_radius",
+        original_value: { kind: "number", value: 0, unit: "logical_point", extensions: {} },
+        preview_value: { kind: "number", value: 12, unit: "logical_point", extensions: {} },
+      },
+    ],
+    created_by: DESIGNER,
+  });
+  assert.deepEqual(
+    (patch["changes"] as readonly JsonObject[]).map((change) => change["property"]),
+    ["foreground_color", "font", "spacing", "corner_radius"],
+  );
+  const result = engine.generateSourceSuggestions(patch.patch_id);
+  assert.equal(result.patch_id, patch.patch_id);
+  assert.equal(result.suggestions.length, 4);
+  assert.ok(result.suggestions.every((suggestion) => suggestion.status === "actionable"));
+  assert.ok(
+    result.suggestions.every((suggestion) =>
+      suggestion.coding_agent_instructions.some((line) => line.includes("recapture")),
+    ),
+  );
+});

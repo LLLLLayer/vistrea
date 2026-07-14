@@ -164,18 +164,127 @@ export interface RegionColor {
   readonly sampled_pixels: number;
 }
 
+export interface PixelRegionDifference {
+  readonly expected: RegionColor;
+  readonly actual: RegionColor;
+  /** Mean absolute RGB channel delta, normalized to 0...1. */
+  readonly mean_channel_delta: number;
+  /** Largest absolute RGBA channel delta observed, normalized to 0...1. */
+  readonly max_channel_delta: number;
+  /** Fraction of sampled pixels above the supplied per-channel threshold. */
+  readonly changed_pixel_ratio: number;
+  readonly sampled_pixels: number;
+}
+
+const MAXIMUM_COMPARISON_SAMPLES = 1_000_000;
+
+/**
+ * Compares two regions pixel by pixel in normalized region coordinates.
+ * Nearest-neighbour sampling intentionally avoids inventing interpolated
+ * colors; the returned metrics preserve both small localized regressions and
+ * broad low-amplitude changes that a mean-color comparison would erase.
+ */
+export function comparePixelRegions(
+  expectedImage: DecodedImage,
+  expectedRegion: { x: number; y: number; width: number; height: number },
+  actualImage: DecodedImage,
+  actualRegion: { x: number; y: number; width: number; height: number },
+  changedChannelThreshold = 8 / 255,
+): PixelRegionDifference | undefined {
+  const expected = integerRegion(expectedImage, expectedRegion);
+  const actual = integerRegion(actualImage, actualRegion);
+  if (expected === undefined || actual === undefined) {
+    return undefined;
+  }
+  const naturalWidth = Math.max(expected.width, actual.width);
+  const naturalHeight = Math.max(expected.height, actual.height);
+  const scale = Math.min(
+    1,
+    Math.sqrt(MAXIMUM_COMPARISON_SAMPLES / (naturalWidth * naturalHeight)),
+  );
+  const sampleWidth = Math.max(1, Math.floor(naturalWidth * scale));
+  const sampleHeight = Math.max(1, Math.floor(naturalHeight * scale));
+  const count = sampleWidth * sampleHeight;
+  const expectedSums = [0, 0, 0, 0];
+  const actualSums = [0, 0, 0, 0];
+  let totalRgbDelta = 0;
+  let maxChannelDelta = 0;
+  let changedPixels = 0;
+  for (let row = 0; row < sampleHeight; row += 1) {
+    const expectedY = expected.top + Math.min(
+      expected.height - 1,
+      Math.floor(((row + 0.5) / sampleHeight) * expected.height),
+    );
+    const actualY = actual.top + Math.min(
+      actual.height - 1,
+      Math.floor(((row + 0.5) / sampleHeight) * actual.height),
+    );
+    for (let column = 0; column < sampleWidth; column += 1) {
+      const expectedX = expected.left + Math.min(
+        expected.width - 1,
+        Math.floor(((column + 0.5) / sampleWidth) * expected.width),
+      );
+      const actualX = actual.left + Math.min(
+        actual.width - 1,
+        Math.floor(((column + 0.5) / sampleWidth) * actual.width),
+      );
+      const expectedOffset = (expectedY * expectedImage.width + expectedX) * 4;
+      const actualOffset = (actualY * actualImage.width + actualX) * 4;
+      let rgbDelta = 0;
+      let pixelMaximum = 0;
+      for (let channel = 0; channel < 4; channel += 1) {
+        const expectedValue = expectedImage.pixels[expectedOffset + channel] as number;
+        const actualValue = actualImage.pixels[actualOffset + channel] as number;
+        expectedSums[channel] = (expectedSums[channel] as number) + expectedValue;
+        actualSums[channel] = (actualSums[channel] as number) + actualValue;
+        const delta = Math.abs(expectedValue - actualValue) / 255;
+        pixelMaximum = Math.max(pixelMaximum, delta);
+        if (channel < 3) rgbDelta += delta;
+      }
+      totalRgbDelta += rgbDelta / 3;
+      maxChannelDelta = Math.max(maxChannelDelta, pixelMaximum);
+      if (pixelMaximum > changedChannelThreshold) changedPixels += 1;
+    }
+  }
+  const color = (sums: readonly number[]): RegionColor => ({
+    red: (sums[0] as number) / count / 255,
+    green: (sums[1] as number) / count / 255,
+    blue: (sums[2] as number) / count / 255,
+    alpha: (sums[3] as number) / count / 255,
+    sampled_pixels: count,
+  });
+  return {
+    expected: color(expectedSums),
+    actual: color(actualSums),
+    mean_channel_delta: totalRgbDelta / count,
+    max_channel_delta: maxChannelDelta,
+    changed_pixel_ratio: changedPixels / count,
+    sampled_pixels: count,
+  };
+}
+
+function integerRegion(
+  image: DecodedImage,
+  region: { x: number; y: number; width: number; height: number },
+): { left: number; top: number; width: number; height: number } | undefined {
+  const left = Math.max(0, Math.floor(region.x));
+  const top = Math.max(0, Math.floor(region.y));
+  const right = Math.min(image.width, Math.ceil(region.x + region.width));
+  const bottom = Math.min(image.height, Math.ceil(region.y + region.height));
+  if (right <= left || bottom <= top) return undefined;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
 /** The mean color of one pixel-space region, normalized to the 0..1 range. */
 export function meanRegionColor(
   image: DecodedImage,
   region: { x: number; y: number; width: number; height: number },
 ): RegionColor | undefined {
-  const left = Math.max(0, Math.floor(region.x));
-  const top = Math.max(0, Math.floor(region.y));
-  const right = Math.min(image.width, Math.ceil(region.x + region.width));
-  const bottom = Math.min(image.height, Math.ceil(region.y + region.height));
-  if (right <= left || bottom <= top) {
-    return undefined;
-  }
+  const bounds = integerRegion(image, region);
+  if (bounds === undefined) return undefined;
+  const { left, top, width, height } = bounds;
+  const right = left + width;
+  const bottom = top + height;
   let red = 0;
   let green = 0;
   let blue = 0;

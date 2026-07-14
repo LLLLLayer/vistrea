@@ -20,7 +20,7 @@ import {
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
 import { SecureUuidV7IdGenerator } from "./uuid-v7.js";
-import { decodePng, meanRegionColor, type DecodedImage } from "./png.js";
+import { comparePixelRegions, decodePng, type DecodedImage } from "./png.js";
 
 export const REVIEW_ISSUE_STATES = [
   "open",
@@ -51,6 +51,9 @@ export const REVIEW_ISSUE_CATEGORIES = [
   "border",
   "shadow",
   "alpha",
+  "content",
+  "accessibility",
+  "other",
 ] as const;
 
 export const REVIEW_ISSUE_SEVERITIES = ["info", "minor", "major", "critical"] as const;
@@ -76,6 +79,13 @@ export interface AddDesignReferenceCommand {
   readonly pixel_size: { readonly width: number; readonly height: number };
   /** A design asset already verified by the local Object Store. */
   readonly asset_hash: string;
+  readonly source?: { readonly kind: string; readonly id: string; readonly version?: string };
+  readonly created_by: JsonObject;
+}
+
+export interface PromoteSnapshotBaselineCommand {
+  readonly snapshot_id: string;
+  readonly name: string;
   readonly created_by: JsonObject;
 }
 
@@ -96,8 +106,8 @@ export interface RunDesignComparisonCommand {
   readonly target_snapshot_id: string;
   readonly completed_by: JsonObject;
   /**
-   * Also compares the mean pixel color of every mapped design region against
-   * the captured screenshot region. Requires a decodable design asset and a
+   * Also compares every mapped design region pixel by pixel against the
+   * captured screenshot region. Requires a decodable design asset and a
    * Snapshot screenshot; when either is unavailable the comparison degrades
    * to `partial` quality with the reason recorded instead of guessing.
    */
@@ -120,6 +130,14 @@ export interface CreateReviewIssueCommand {
   readonly severity: (typeof REVIEW_ISSUE_SEVERITIES)[number];
   readonly expected: JsonObject;
   readonly actual: JsonObject;
+  readonly created_by: JsonObject;
+}
+
+export interface CreateReviewIssueFromDifferenceCommand {
+  readonly comparison_id: string;
+  readonly difference_id: string;
+  readonly title?: string;
+  readonly description?: string;
   readonly created_by: JsonObject;
 }
 
@@ -150,6 +168,7 @@ export interface VerifyReviewIssueResult {
 const PROTOCOL_VERSION = { major: 1, minor: 0 } as const;
 const FRAME_TOLERANCE_LOGICAL_POINTS = 0.5;
 const COLOR_TOLERANCE_MEAN_CHANNEL = 0.05;
+const PIXEL_CHANGED_RATIO_TOLERANCE = 0.001;
 const MAJOR_COLOR_DELTA_MEAN_CHANNEL = 0.15;
 const MAJOR_FRAME_DEVIATION_LOGICAL_POINTS = 8;
 
@@ -205,6 +224,7 @@ export class DesignReviewEngine {
         retention: "pinned",
         extensions: {},
       },
+      ...(command.source === undefined ? {} : { source: command.source }),
       canvas_size: command.canvas_size,
       pixel_size: command.pixel_size,
       created_at: now,
@@ -215,6 +235,53 @@ export class DesignReviewEngine {
     } as unknown as DesignReference;
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.designReference, reference);
     return this.#write((unit) => unit.designReviews.createReference(reference));
+  }
+
+  /** Promotes a captured screenshot into an immutable approved-build baseline. */
+  async promoteSnapshotBaseline(
+    command: PromoteSnapshotBaselineCommand,
+  ): Promise<DesignReference> {
+    const snapshot = this.#read((unit) => unit.snapshots.get(command.snapshot_id)) as JsonObject;
+    const screenshot = snapshot["screenshot"] as JsonObject | undefined;
+    const object = screenshot?.["object"] as JsonObject | undefined;
+    const display = snapshot["display"] as JsonObject | undefined;
+    const logicalSize = display?.["logical_size"] as JsonObject | undefined;
+    const pixelSize = screenshot?.["pixel_size"] as JsonObject | undefined;
+    if (
+      typeof object?.["hash"] !== "string" ||
+      typeof logicalSize?.["width"] !== "number" ||
+      typeof logicalSize?.["height"] !== "number" ||
+      typeof pixelSize?.["width"] !== "number" ||
+      typeof pixelSize?.["height"] !== "number"
+    ) {
+      throw new DataError(
+        "invalid_argument",
+        "The Snapshot needs complete screenshot and display geometry to become a baseline.",
+        { details: { snapshot_id: command.snapshot_id } },
+      );
+    }
+    const runtimeContext = snapshot["runtime_context"] as JsonObject;
+    return this.addDesignReference({
+      name: command.name,
+      kind: "approved_build",
+      canvas_size: {
+        width: logicalSize["width"] as number,
+        height: logicalSize["height"] as number,
+      },
+      pixel_size: {
+        width: pixelSize["width"] as number,
+        height: pixelSize["height"] as number,
+      },
+      asset_hash: object["hash"],
+      source: {
+        kind: "runtime_snapshot",
+        id: command.snapshot_id,
+        ...(typeof runtimeContext?.["build_id"] === "string"
+          ? { version: runtimeContext["build_id"] as string }
+          : {}),
+      },
+      created_by: command.created_by,
+    });
   }
 
   mapDesignRegion(command: MapDesignRegionCommand): DesignRegionMapping {
@@ -315,27 +382,30 @@ export class DesignReviewEngine {
           });
         }
         if (pixel !== undefined && pixel.status === "compared") {
-          const designColor = meanRegionColor(pixel.design, {
-            x: expected.x * pixel.designScaleX,
-            y: expected.y * pixel.designScaleY,
-            width: expected.width * pixel.designScaleX,
-            height: expected.height * pixel.designScaleY,
-          });
-          const screenColor = meanRegionColor(pixel.screenshot, {
-            x: actual.x * pixel.screenScaleX,
-            y: actual.y * pixel.screenScaleY,
-            width: actual.width * pixel.screenScaleX,
-            height: actual.height * pixel.screenScaleY,
-          });
-          if (designColor === undefined || screenColor === undefined) {
+          const visualDiff = comparePixelRegions(
+            pixel.design,
+            {
+              x: expected.x * pixel.designScaleX,
+              y: expected.y * pixel.designScaleY,
+              width: expected.width * pixel.designScaleX,
+              height: expected.height * pixel.designScaleY,
+            },
+            pixel.screenshot,
+            {
+              x: actual.x * pixel.screenScaleX,
+              y: actual.y * pixel.screenScaleY,
+              width: actual.width * pixel.screenScaleX,
+              height: actual.height * pixel.screenScaleY,
+            },
+          );
+          if (visualDiff === undefined) {
             quality = "partial";
           } else {
-            const colorDelta =
-              (Math.abs(designColor.red - screenColor.red) +
-                Math.abs(designColor.green - screenColor.green) +
-                Math.abs(designColor.blue - screenColor.blue)) /
-              3;
-            if (colorDelta > COLOR_TOLERANCE_MEAN_CHANNEL) {
+            const colorDelta = visualDiff.mean_channel_delta;
+            if (
+              colorDelta > COLOR_TOLERANCE_MEAN_CHANNEL ||
+              visualDiff.changed_pixel_ratio > PIXEL_CHANGED_RATIO_TOLERANCE
+            ) {
               differences.push({
                 difference_id: this.#ids.next("difference"),
                 mapping_id: String(mapping["mapping_id"]),
@@ -346,10 +416,10 @@ export class DesignReviewEngine {
                 expected: {
                   kind: "color_rgba",
                   value: {
-                    red: designColor.red,
-                    green: designColor.green,
-                    blue: designColor.blue,
-                    alpha: designColor.alpha,
+                    red: visualDiff.expected.red,
+                    green: visualDiff.expected.green,
+                    blue: visualDiff.expected.blue,
+                    alpha: visualDiff.expected.alpha,
                   },
                   color_space: "srgb",
                   extensions: {},
@@ -357,10 +427,10 @@ export class DesignReviewEngine {
                 actual: {
                   kind: "color_rgba",
                   value: {
-                    red: screenColor.red,
-                    green: screenColor.green,
-                    blue: screenColor.blue,
-                    alpha: screenColor.alpha,
+                    red: visualDiff.actual.red,
+                    green: visualDiff.actual.green,
+                    blue: visualDiff.actual.blue,
+                    alpha: visualDiff.actual.alpha,
                   },
                   color_space: "srgb",
                   extensions: {},
@@ -369,8 +439,11 @@ export class DesignReviewEngine {
                 evidence: [],
                 extensions: {
                   "vistrea.pixel": {
-                    design_sampled_pixels: designColor.sampled_pixels,
-                    screenshot_sampled_pixels: screenColor.sampled_pixels,
+                    comparison: "normalized_nearest_neighbor",
+                    sampled_pixels: visualDiff.sampled_pixels,
+                    changed_pixel_ratio: visualDiff.changed_pixel_ratio,
+                    mean_channel_delta: visualDiff.mean_channel_delta,
+                    max_channel_delta: visualDiff.max_channel_delta,
                   },
                 },
               });
@@ -525,6 +598,109 @@ export class DesignReviewEngine {
     });
   }
 
+  /**
+   * Promotes one immutable comparison difference into a Review Issue without
+   * asking clients to copy expected/actual values or target identities.
+   */
+  createReviewIssueFromDifference(
+    command: CreateReviewIssueFromDifferenceCommand,
+  ): ReviewIssue {
+    this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.created_by);
+    return this.#write((unit) => {
+      const comparison = unit.designReviews.getComparison(command.comparison_id) as JsonObject;
+      const difference = (comparison["differences"] as readonly JsonObject[]).find(
+        (candidate) => candidate["difference_id"] === command.difference_id,
+      );
+      if (difference === undefined) {
+        throw new DataError("not_found", "The Design Difference does not exist in the comparison.", {
+          details: {
+            comparison_id: command.comparison_id,
+            difference_id: command.difference_id,
+          },
+        });
+      }
+      const duplicate = collectAllPages((page) =>
+        unit.designReviews.listIssues(undefined, page),
+      ).find((candidate) => {
+        const extension = (candidate["extensions"] as JsonObject)["vistrea.design_difference"];
+        return (
+          candidate["comparison_id"] === command.comparison_id &&
+          typeof extension === "object" &&
+          extension !== null &&
+          !Array.isArray(extension) &&
+          (extension as JsonObject)["difference_id"] === command.difference_id
+        );
+      });
+      if (duplicate !== undefined) {
+        throw new DataError("conflict", "The Design Difference already has a Review Issue.", {
+          details: { issue_id: duplicate.issue_id, difference_id: command.difference_id },
+        });
+      }
+      const mappingId =
+        typeof difference["mapping_id"] === "string"
+          ? String(difference["mapping_id"])
+          : undefined;
+      let runtimeTarget = difference["runtime_target"] as JsonObject | undefined;
+      if (runtimeTarget === undefined && mappingId !== undefined) {
+        const mapping = collectAllPages((page) =>
+          unit.designReviews.listRegionMappings(
+            { design_reference_id: String(comparison["design_reference_id"]) },
+            page,
+          ),
+        ).find((candidate) => candidate["mapping_id"] === mappingId);
+        runtimeTarget = mapping?.["runtime_target"] as JsonObject | undefined;
+      }
+      if (runtimeTarget === undefined) {
+        throw new DataError(
+          "integrity_error",
+          "The Design Difference has no resolvable Runtime target.",
+          { details: { difference_id: command.difference_id } },
+        );
+      }
+      const now = this.#workspace.clock.now();
+      const category = String(difference["category"]);
+      const targetLabel = String(runtimeTarget["stable_id"] ?? runtimeTarget["node_id"]);
+      const issue = {
+        issue_id: this.#ids.next("issue"),
+        protocol_version: PROTOCOL_VERSION,
+        revision: 1,
+        design_reference_id: String(comparison["design_reference_id"]),
+        ...(mappingId === undefined ? {} : { mapping_id: mappingId }),
+        comparison_id: command.comparison_id,
+        runtime_target: { ...runtimeTarget, extensions: {} },
+        title: command.title ?? `Design ${category} differs on ${targetLabel}`,
+        ...(command.description === undefined ? {} : { description: command.description }),
+        category,
+        severity: difference["severity"],
+        state: "open",
+        expected: difference["expected"],
+        actual: difference["actual"],
+        evidence: difference["evidence"],
+        state_history: [
+          {
+            revision: 1,
+            to_state: "open",
+            changed_at: now,
+            changed_by: command.created_by,
+            extensions: {},
+          },
+        ],
+        verification_record_ids: [],
+        tuning_patch_ids: [],
+        created_at: now,
+        created_by: command.created_by,
+        updated_at: now,
+        updated_by: command.created_by,
+        extensions: {
+          "vistrea.design_difference": { difference_id: command.difference_id },
+        },
+      } as unknown as ReviewIssue;
+      this.#validator.assert(PROTOCOL_SCHEMA_IDS.reviewIssue, issue);
+      unit.designReviews.getReference(String(comparison["design_reference_id"]));
+      return unit.designReviews.createIssue(issue);
+    });
+  }
+
   updateReviewIssue(command: UpdateReviewIssueCommand): ReviewIssue {
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.changed_by);
     return this.#write((unit) => {
@@ -675,6 +851,15 @@ export class DesignReviewEngine {
 
   getReviewIssue(id: string): ReviewIssue {
     return this.#read((unit) => findIssue(unit, id));
+  }
+
+  /** Resolves the immutable Snapshot against which a Review Issue was filed. */
+  getReviewIssueTargetSnapshot(id: string): RuntimeSnapshot {
+    return this.#read((unit) => {
+      const issue = findIssue(unit, id) as JsonObject;
+      const target = issue["runtime_target"] as JsonObject;
+      return unit.snapshots.get(String(target["snapshot_id"]));
+    });
   }
 
   listReviewIssues(query?: ReviewIssueQuery, page?: PageRequest): Page<ReviewIssue> {

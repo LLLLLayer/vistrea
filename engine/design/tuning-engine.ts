@@ -12,8 +12,25 @@ import {
 import type { ApplyTuningWireCommand } from "../connection/loopback-runtime-transport.js";
 import { SecureUuidV7IdGenerator } from "./uuid-v7.js";
 
-/** The project tuning allowlist for this verified slice. */
-export const TUNING_PROPERTY_ALLOWLIST = ["alpha"] as const;
+/**
+ * Visual properties a protected Debug Runtime may preview.
+ *
+ * The schema deliberately carries a wider future-facing vocabulary. This
+ * list is the product policy boundary implemented end to end by both native
+ * adapters; layout frame, border, and shadow mutation remain denied until
+ * their source-value and reversion semantics are equally portable.
+ */
+export const TUNING_PROPERTY_ALLOWLIST = [
+  "content_insets",
+  "spacing",
+  "font",
+  "foreground_color",
+  "background_color",
+  "alpha",
+  "corner_radius",
+] as const;
+
+export type TuningProperty = (typeof TUNING_PROPERTY_ALLOWLIST)[number];
 
 const ACTIVE_APPLICATION_STATUSES = new Set(["active", "partially_active"]);
 const TERMINAL_REVERTED_STATUSES = new Set(["reverted", "expired", "connection_lost"]);
@@ -69,6 +86,24 @@ export interface RevertTuningApplicationCommand {
   readonly tuning_application_id: string;
 }
 
+export interface TuningSourceSuggestion {
+  readonly tuning_change_id: string;
+  readonly property: string;
+  readonly stable_id?: string;
+  readonly source_context?: JsonObject;
+  readonly status: "actionable" | "needs_source_mapping";
+  readonly original_value: JsonObject;
+  readonly suggested_value: JsonObject;
+  readonly coding_agent_instructions: readonly string[];
+}
+
+export interface TuningSourceSuggestionResult {
+  readonly patch_id: string;
+  readonly patch_revision: number;
+  readonly target_snapshot_id: string;
+  readonly suggestions: readonly TuningSourceSuggestion[];
+}
+
 /**
  * Protected reversible tuning over the authenticated Runtime connection.
  *
@@ -91,7 +126,7 @@ export class TuningEngine {
   createTuningPatch(command: CreateTuningPatchCommand): TuningPatch {
     this.#validator.assert(PROTOCOL_SCHEMA_IDS.actorRef, command.created_by);
     for (const change of command.changes) {
-      if (!TUNING_PROPERTY_ALLOWLIST.includes(change.property as "alpha")) {
+      if (!TUNING_PROPERTY_ALLOWLIST.includes(change.property as TuningProperty)) {
         throw new DataError(
           "unsupported",
           "The tuning property is outside the project allowlist.",
@@ -257,6 +292,67 @@ export class TuningEngine {
 
   listActiveTuning(connectionId: string): readonly TuningApplication[] {
     return this.#read((unit) => unit.designReviews.listActiveApplications(connectionId));
+  }
+
+  /**
+   * Converts a reviewed Runtime preview into source-oriented Coding Agent
+   * instructions. It never edits source and never invents a file location:
+   * missing capture provenance is returned as an explicit mapping need.
+   */
+  generateSourceSuggestions(patchId: string): TuningSourceSuggestionResult {
+    return this.#read((unit) => {
+      const patch = unit.designReviews.getPatch(patchId) as JsonObject;
+      const snapshot = unit.snapshots.get(String(patch["target_snapshot_id"])) as JsonObject;
+      const nodes = new Map<string, JsonObject>();
+      const stableNodes = new Map<string, JsonObject>();
+      for (const treeValue of (snapshot["trees"] as readonly JsonObject[]) ?? []) {
+        const payload = treeValue["payload"] as JsonObject | undefined;
+        const inlineNodes = payload?.["inline_nodes"];
+        if (!Array.isArray(inlineNodes)) continue;
+        for (const nodeValue of inlineNodes) {
+          const node = nodeValue as JsonObject;
+          nodes.set(String(node["node_id"]), node);
+          if (typeof node["stable_id"] === "string") stableNodes.set(node["stable_id"], node);
+        }
+      }
+      const suggestions = (patch["changes"] as readonly JsonObject[]).map((change) => {
+        const target = change["runtime_target"] as JsonObject;
+        const stableId =
+          typeof target["stable_id"] === "string" ? String(target["stable_id"]) : undefined;
+        const node =
+          (stableId === undefined ? undefined : stableNodes.get(stableId)) ??
+          nodes.get(String(target["node_id"]));
+        const sourceContext = node?.["source_context"] as JsonObject | undefined;
+        const locators = sourceContext === undefined
+          ? []
+          : ["module", "component", "controller", "route"]
+              .map((key) => sourceContext[key])
+              .filter((value): value is string => typeof value === "string");
+        const property = String(change["property"]);
+        return {
+          tuning_change_id: String(change["tuning_change_id"]),
+          property,
+          ...(stableId === undefined ? {} : { stable_id: stableId }),
+          ...(sourceContext === undefined ? {} : { source_context: sourceContext }),
+          status: locators.length === 0 ? "needs_source_mapping" as const : "actionable" as const,
+          original_value: change["original_value"] as JsonObject,
+          suggested_value: change["preview_value"] as JsonObject,
+          coding_agent_instructions: [
+            locators.length === 0
+              ? `Locate the UI element by stable ID ${stableId ?? String(target["node_id"])} before editing.`
+              : `Locate the UI element through captured source context: ${locators.join(" / ")}.`,
+            `Change only the source value that controls ${property}; do not ship the Runtime override.`,
+            "Build the affected target, recapture the same screen state, and run design re-verification.",
+          ],
+        } satisfies TuningSourceSuggestion;
+      });
+      return {
+        patch_id: String(patch["patch_id"]),
+        patch_revision: Number(patch["revision"]),
+        target_snapshot_id: String(patch["target_snapshot_id"]),
+        suggestions,
+      };
+    });
   }
 
   #validateApplication(
