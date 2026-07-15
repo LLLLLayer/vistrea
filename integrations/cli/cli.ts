@@ -31,6 +31,7 @@ export const VISTREA_CLI_TOOLSETS = {
   assets: ["snapshot", "events", "object", "pack"],
   exploration: ["explore", "graph", "screen", "driver"],
   knowledge: ["wiki", "collection"],
+  collaboration: ["sync"],
   verification: ["design", "issue", "tuning", "validate"],
 } as const;
 
@@ -112,6 +113,7 @@ export async function runVistreaCli(
       await resolveJsonFileArguments(arguments_),
       context,
       enabledGroups,
+      runtime.environment["VISTREA_HUB_TOKEN"],
     );
     if (invocation.help === true) {
       writeEnvelope(runtime, context, {
@@ -172,6 +174,10 @@ export async function runVistreaCli(
           "validate suppress <finding_id> --json <command>",
           "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id> [--baseline <tag>]",
           "validate get-build-diff <build_diff_id>",
+          "sync status --url <https-origin> --project <project_id> [--refs a,b]",
+          "sync fetch --url <https-origin> --project <project_id> --refs a,b [--actor <id>]",
+          "sync push --url <https-origin> --project <project_id> --refs a,b [--actor <id>] [--message <text>]",
+          "sync activity --url <https-origin> --project <project_id> [--after-sequence <n>] [--limit <n>]",
           "pack export --json <command>",
           "pack import --file <path>",
           "object get --hash <sha256:...> --output <path>",
@@ -227,6 +233,7 @@ function parseArguments(
   arguments_: readonly string[],
   context: CliContext,
   enabledGroups?: ReadonlySet<string>,
+  hubBearerToken?: string,
 ): ParsedInvocation {
   const command: string[] = [];
   let timeoutMilliseconds: number | undefined;
@@ -796,6 +803,76 @@ function parseArguments(
       timeoutMilliseconds,
     );
   }
+  if (command[0] === "sync" && command[1] === "status") {
+    const values = parseSyncOptionPairs(command.slice(2), ["--url", "--project", "--refs"]);
+    const refs = values.get("--refs");
+    return invocation(
+      "GetSyncStatus",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ...(refs === undefined ? {} : { ref_names: splitSyncRefs(refs) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "fetch") {
+    const values = parseSyncOptionPairs(command.slice(2), ["--url", "--project", "--refs", "--actor"]);
+    return invocation(
+      "FetchWorkspace",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ref_names: splitSyncRefs(requireOption(values, "--refs")),
+        created_by: syncActor(values.get("--actor")),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "push") {
+    const values = parseSyncOptionPairs(command.slice(2), [
+      "--url",
+      "--project",
+      "--refs",
+      "--actor",
+      "--message",
+    ]);
+    const message = values.get("--message");
+    return invocation(
+      "PushWorkspace",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ref_names: splitSyncRefs(requireOption(values, "--refs")),
+        created_by: syncActor(values.get("--actor")),
+        ...(message === undefined ? {} : { message }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "activity") {
+    const values = parseSyncOptionPairs(command.slice(2), [
+      "--url",
+      "--project",
+      "--after-sequence",
+      "--limit",
+    ]);
+    const afterSequence = values.get("--after-sequence");
+    const limit = values.get("--limit");
+    if (
+      (afterSequence !== undefined && !/^(?:0|[1-9][0-9]{0,15})$/.test(afterSequence)) ||
+      (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) ||
+      (limit !== undefined && Number(limit) > 500)
+    ) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "GetSyncActivity",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ...(afterSequence === undefined ? {} : { after_sequence: Number(afterSequence) }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "pack" && command[1] === "export") {
     return invocation("ExportPack", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
@@ -1039,6 +1116,49 @@ function parseArguments(
     };
   }
   throw invalidArguments();
+}
+
+function parseSyncOptionPairs(
+  arguments_: readonly string[],
+  allowed: readonly string[],
+): Map<string, string> {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!allowed.includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  return values;
+}
+
+function syncRemote(values: Map<string, string>, bearerToken: string | undefined): JsonObject {
+  if (bearerToken === undefined || !/^[A-Za-z0-9_-]{43}$/.test(bearerToken)) {
+    throw new HostClientError(
+      "invalid_argument",
+      "Set VISTREA_HUB_TOKEN to the current Hub bearer token; Hub tokens are never accepted in argv.",
+    );
+  }
+  return {
+    base_url: requireOption(values, "--url"),
+    project_id: requireOption(values, "--project"),
+    bearer_token: bearerToken,
+  };
+}
+
+function splitSyncRefs(value: string): string[] {
+  const refs = value.split(",");
+  if (refs.length === 0 || refs.some((ref) => ref.length === 0)) {
+    throw invalidArguments();
+  }
+  return refs;
+}
+
+function syncActor(actorId: string | undefined): JsonObject {
+  const value = actorId ?? "vistrea-cli";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(value)) {
+    throw invalidArguments();
+  }
+  return { kind: "agent", id: value, extensions: {} };
 }
 
 function parseStateObservationOptions(arguments_: readonly string[]): JsonObject {

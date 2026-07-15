@@ -9,7 +9,7 @@ import {
 } from "../../integrations/shared/index.js";
 
 test("the machine-readable Host operation manifest is unique and complete", () => {
-  assert.equal(HOST_OPERATION_MANIFEST.length, 65);
+  assert.equal(HOST_OPERATION_MANIFEST.length, 69);
   assert.deepEqual(
     IMPLEMENTED_HOST_OPERATIONS,
     HOST_OPERATION_MANIFEST.map(({ operation }) => operation),

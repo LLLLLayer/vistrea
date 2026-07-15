@@ -178,6 +178,16 @@ The implemented Collection publication command freezes the exact member nodes an
 - `SubscribeRef`
 - `ResolveSyncConflict`
 
+`FetchWorkspace` and `PushWorkspace` are implemented synchronously in the
+current bounded pack-transfer slice. Both accept one Hub origin/project/token,
+explicit ref names, and actor context; push optionally carries a message.
+They serialize mutations per Host, advance only ancestry-proven fast-forwards
+with compare-and-set preconditions, never force refs, and return the pack
+import report, advanced refs, remaining conflicts, and a fresh `SyncStatus`.
+Long-running object negotiation may
+move them to the generic `OperationRef` lifecycle without changing their
+conflict semantics.
+
 `CommitWorkingSetAndUpdateRef` is the public authoring boundary: it creates the canonical Commit and compare-and-set updates the target ref atomically. Low-level Commit insertion and ref movement remain Data/Sync primitives for verified import, replication, and Workspace bootstrap; normal Studio and Agent workflows cannot split the operation.
 
 ### Queries
@@ -187,7 +197,15 @@ The implemented Collection publication command freezes the exact member nodes an
 - `ListCommits`
 - `CompareCommits`
 - `GetSyncStatus`
+- `GetSyncActivity`
 - `ListSyncConflicts`
+
+`GetSyncStatus` and `GetSyncActivity` are implemented. Status returns the
+effective Hub role and permission-source provenance, team-visible projects,
+and each selected ref's `synced`, local/remote-only, ahead, diverged, or
+unknown relation. Unknown means required history is not present locally and
+must not be presented as divergence. Activity returns only the safe,
+token-free project collaboration projection with a project-local cursor.
 
 ## 10. Generic operation use cases
 

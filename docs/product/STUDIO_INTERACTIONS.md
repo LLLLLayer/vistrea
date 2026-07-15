@@ -342,7 +342,12 @@ An Agent never gains broader device, tuning, publication, or deletion authority 
 - Offline status is explicit but does not block local capture, review, tuning, Wiki edits, or commits.
 - Local changes appear ahead or diverged from a remote ref.
 - Pull never silently overwrites local commits.
-- Ref conflicts open a resolution view.
+- The Hub section remains reachable in an empty local Workspace so an initial fetch can populate it.
+- Connecting shows the effective direct/inherited role, permission sources, team-visible projects, and the selected refs before any transfer.
+- Fetch and push are explicit actions. Both advance only ancestry-proven fast-forward refs under compare-and-set preconditions; a divergence remains a visible conflict with local and remote commit IDs.
+- The safe project activity feed polls by cursor and never exposes bearer tokens or administrator-only audit details.
+- The Hub token is session-only UI state. Studio may remember the origin, Project ID, and selected refs, but never persists the token in preferences, command arguments, logs, or Workspace content.
+- The current Beta presents conflicts and preserves both histories; guided rebase, merge, and authorized overwrite remain a later resolution workflow.
 - Artifact upload progress is separate from metadata/ref publication.
 - Restricted or redacted artifacts show explicit placeholders.
 
@@ -399,4 +404,4 @@ Every primary screen defines:
 3. reversible allowlisted alpha, color, font, spacing/insets, and corner-radius tuning;
 4. Tuning Patch persistence, source-oriented Agent handoff, and fresh-build re-verification evidence.
 
-Canvas exploration, full Deep Wiki, build diff, 3D inspection, and Hub collaboration follow after these interaction loops are stable.
+Canvas exploration, Deep Wiki editing, build diff, 3D inspection, and the first Hub ref-sync workspace are implemented. Searchable Hub discovery, subscriptions, versioned collaboration editors, guided conflict resolution, and dedicated Coding Agent operation review remain later milestones.

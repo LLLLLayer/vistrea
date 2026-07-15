@@ -89,6 +89,8 @@ const BUILD_ID_PATTERN =
 const COMMIT_ID_PATTERN = /^commit:sha256:[0-9a-f]{64}$/;
 const REF_NAME_PATTERN =
   /^(?:users|teams|builds|baselines|releases)\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/;
+const HUB_REMOTE_URL_PATTERN =
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
 const PACK_MEDIA_TYPE = "application/vnd.vistrea-pack";
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
@@ -1777,6 +1779,26 @@ export class HostLocalApiClient {
         }
         return result;
       }
+      case "GetSyncStatus": {
+        const command = normalizeSyncInput(input, "status");
+        const value = await this.#request("POST", "/v1/sync/status", command, 200, options);
+        return validateSyncStatus(value);
+      }
+      case "FetchWorkspace": {
+        const command = normalizeSyncInput(input, "fetch");
+        const value = await this.#request("POST", "/v1/sync/fetch", command, 200, options);
+        return validateSyncTransferOutcome(value);
+      }
+      case "PushWorkspace": {
+        const command = normalizeSyncInput(input, "push");
+        const value = await this.#request("POST", "/v1/sync/push", command, 200, options);
+        return validateSyncTransferOutcome(value);
+      }
+      case "GetSyncActivity": {
+        const command = normalizeSyncInput(input, "activity");
+        const value = await this.#request("POST", "/v1/sync/activity", command, 200, options);
+        return validateSyncActivityPage(value);
+      }
       case "GetObject": {
         const query = assertExactObject(input, ["hash"], "Object lookup");
         const hash = query["hash"];
@@ -2623,6 +2645,409 @@ function validateRefPreconditionInput(value: JsonValue | undefined): void {
     return;
   }
   throw invalidInput();
+}
+
+type SyncInputKind = "status" | "fetch" | "push" | "activity";
+
+function normalizeSyncInput(input: unknown, kind: SyncInputKind): JsonObject {
+  const keysByKind: Readonly<Record<SyncInputKind, readonly string[]>> = {
+    status: ["remote", "ref_names"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by", "message"],
+    activity: ["remote", "after_sequence", "limit"],
+  };
+  const requiredByKind: Readonly<Record<SyncInputKind, readonly string[]>> = {
+    status: ["remote"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by"],
+    activity: ["remote"],
+  };
+  const command = assertExactObject(input, keysByKind[kind], "Sync input", true);
+  if (requiredByKind[kind].some((key) => !Object.hasOwn(command, key))) {
+    throw invalidInput();
+  }
+  const remote = assertExactObject(
+    command["remote"],
+    ["base_url", "project_id", "bearer_token"],
+    "Hub remote",
+  );
+  if (
+    typeof remote["base_url"] !== "string" ||
+    !HUB_REMOTE_URL_PATTERN.test(remote["base_url"]) ||
+    typeof remote["project_id"] !== "string" ||
+    !PROJECT_ID_PATTERN.test(remote["project_id"]) ||
+    typeof remote["bearer_token"] !== "string" ||
+    !TOKEN_PATTERN.test(remote["bearer_token"])
+  ) {
+    throw invalidInput();
+  }
+  const refNames = command["ref_names"];
+  if (
+    refNames !== undefined &&
+    (!Array.isArray(refNames) ||
+      refNames.length === 0 ||
+      refNames.length > 64 ||
+      new Set(refNames).size !== refNames.length ||
+      refNames.some((name) => typeof name !== "string" || !REF_NAME_PATTERN.test(name)))
+  ) {
+    throw invalidInput();
+  }
+  if (command["created_by"] !== undefined) {
+    validateSyncActorInput(command["created_by"]);
+  }
+  if (
+    command["message"] !== undefined &&
+    (typeof command["message"] !== "string" ||
+      command["message"].length === 0 ||
+      command["message"].length > 1024)
+  ) {
+    throw invalidInput();
+  }
+  if (
+    command["after_sequence"] !== undefined &&
+    (!Number.isSafeInteger(command["after_sequence"]) ||
+      (command["after_sequence"] as number) < 0)
+  ) {
+    throw invalidInput();
+  }
+  if (
+    command["limit"] !== undefined &&
+    (!Number.isSafeInteger(command["limit"]) ||
+      (command["limit"] as number) < 1 ||
+      (command["limit"] as number) > 500)
+  ) {
+    throw invalidInput();
+  }
+  return command;
+}
+
+function validateSyncActorInput(value: JsonValue | undefined): void {
+  const actor = assertExactObject(
+    value,
+    ["kind", "id", "display_name", "extensions"],
+    "Sync actor",
+    true,
+  );
+  if (
+    !Object.hasOwn(actor, "kind") ||
+    !Object.hasOwn(actor, "id") ||
+    !Object.hasOwn(actor, "extensions") ||
+    (actor["kind"] !== "human" && actor["kind"] !== "agent" && actor["kind"] !== "service") ||
+    typeof actor["id"] !== "string" ||
+    actor["id"].length === 0 ||
+    actor["id"].length > 320 ||
+    (actor["display_name"] !== undefined &&
+      (typeof actor["display_name"] !== "string" ||
+        actor["display_name"].length === 0 ||
+        actor["display_name"].length > 256)) ||
+    !isObject(actor["extensions"])
+  ) {
+    throw invalidInput();
+  }
+}
+
+const SYNC_ROLES = new Set(["viewer", "contributor", "reviewer", "maintainer", "admin"]);
+const SYNC_RELATIONS = new Set([
+  "synced",
+  "local_only",
+  "remote_only",
+  "local_ahead",
+  "remote_ahead",
+  "diverged",
+  "unknown",
+]);
+const SYNC_ACTIVITY_KINDS = new Set([
+  "RefUpdated",
+  "HubPackImported",
+  "HubPackExported",
+  "PermissionChanged",
+]);
+
+function validateSyncStatus(value: JsonValue): JsonObject {
+  const status = requireObject(value);
+  assertKeys(status, ["remote", "identity", "accessible_projects", "refs"]);
+  const remote = requireObject(status["remote"]);
+  assertKeys(remote, ["base_url", "project_id"]);
+  if (
+    typeof remote["base_url"] !== "string" ||
+    !HUB_REMOTE_URL_PATTERN.test(remote["base_url"]) ||
+    typeof remote["project_id"] !== "string" ||
+    !PROJECT_ID_PATTERN.test(remote["project_id"])
+  ) {
+    throw invalidHostResult();
+  }
+  validateSyncIdentity(status["identity"] as JsonValue);
+  if (!Array.isArray(status["accessible_projects"]) || status["accessible_projects"].length > 128) {
+    throw invalidHostResult();
+  }
+  for (const value of status["accessible_projects"]) {
+    const project = requireObject(value);
+    assertKeys(
+      project,
+      ["project_id", "organization_id", "team_id", "role", "capabilities"],
+      true,
+    );
+    if (
+      typeof project["project_id"] !== "string" ||
+      !PROJECT_ID_PATTERN.test(project["project_id"]) ||
+      !SYNC_ROLES.has(project["role"] as string) ||
+      !isSyncCapabilities(project["capabilities"])
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  // An omitted selection compares the first local and remote ref pages (50
+  // each), whose disjoint union can contain 100 names. Explicit selections
+  // remain limited to 64 at the request boundary.
+  if (!Array.isArray(status["refs"]) || status["refs"].length > 100) {
+    throw invalidHostResult();
+  }
+  for (const value of status["refs"]) {
+    const ref = requireObject(value);
+    assertKeys(ref, ["name", "local_commit_id", "remote_commit_id", "relation"], true);
+    if (
+      typeof ref["name"] !== "string" ||
+      !REF_NAME_PATTERN.test(ref["name"]) ||
+      (ref["local_commit_id"] !== undefined &&
+        (typeof ref["local_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(ref["local_commit_id"]))) ||
+      (ref["remote_commit_id"] !== undefined &&
+        (typeof ref["remote_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(ref["remote_commit_id"]))) ||
+      typeof ref["relation"] !== "string" ||
+      !SYNC_RELATIONS.has(ref["relation"])
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return status;
+}
+
+function validateSyncIdentity(value: JsonValue): JsonObject {
+  const identity = requireObject(value);
+  assertKeys(
+    identity,
+    [
+      "principal_id",
+      "role",
+      "capabilities",
+      "credential_scope",
+      "permission_sources",
+      "organization_id",
+      "team_id",
+    ],
+    true,
+  );
+  if (
+    typeof identity["principal_id"] !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(identity["principal_id"]) ||
+    !SYNC_ROLES.has(identity["role"] as string) ||
+    !isSyncCapabilities(identity["capabilities"]) ||
+    (identity["credential_scope"] !== "project" && identity["credential_scope"] !== "team") ||
+    !Array.isArray(identity["permission_sources"]) ||
+    identity["permission_sources"].length > 2
+  ) {
+    throw invalidHostResult();
+  }
+  for (const value of identity["permission_sources"]) {
+    const source = requireObject(value);
+    assertKeys(source, ["scope", "role", "organization_id", "team_id"], true);
+    if (
+      (source["scope"] !== "project" && source["scope"] !== "team") ||
+      !SYNC_ROLES.has(source["role"] as string)
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return identity;
+}
+
+function validateSyncTransferOutcome(value: JsonValue): JsonObject {
+  const outcome = requireObject(value);
+  assertKeys(outcome, ["result", "status"]);
+  const result = requireObject(outcome["result"]);
+  assertKeys(result, ["import", "advanced_refs", "remaining_conflicts"]);
+  validateImportPackResult(result["import"] as JsonValue);
+  if (!Array.isArray(result["advanced_refs"]) || !Array.isArray(result["remaining_conflicts"])) {
+    throw invalidHostResult();
+  }
+  for (const value of result["advanced_refs"]) {
+    validateSyncRef(value as JsonValue);
+  }
+  for (const value of result["remaining_conflicts"]) {
+    validatePackConflict(value as JsonValue);
+  }
+  validateSyncStatus(outcome["status"] as JsonValue);
+  return outcome;
+}
+
+function validateImportPackResult(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, [
+    "mode",
+    "imported_commit_ids",
+    "existing_commit_ids",
+    "imported_object_hashes",
+    "existing_object_hashes",
+    "created_refs",
+    "unchanged_ref_names",
+    "conflicting_refs",
+  ]);
+  if (
+    (result["mode"] !== "full" && result["mode"] !== "thin") ||
+    !Array.isArray(result["created_refs"]) ||
+    !Array.isArray(result["conflicting_refs"])
+  ) {
+    throw invalidHostResult();
+  }
+  for (const [key, pattern] of [
+    ["imported_commit_ids", COMMIT_ID_PATTERN],
+    ["existing_commit_ids", COMMIT_ID_PATTERN],
+    ["imported_object_hashes", OBJECT_HASH_PATTERN],
+    ["existing_object_hashes", OBJECT_HASH_PATTERN],
+    ["unchanged_ref_names", REF_NAME_PATTERN],
+  ] as const) {
+    const values = result[key];
+    if (
+      !Array.isArray(values) ||
+      values.length > 50_000 ||
+      new Set(values).size !== values.length ||
+      values.some((item) => typeof item !== "string" || !pattern.test(item))
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  if (result["created_refs"].length > 50_000 || result["conflicting_refs"].length > 50_000) {
+    throw invalidHostResult();
+  }
+  for (const item of result["created_refs"]) {
+    validateSyncRef(item as JsonValue);
+  }
+  for (const item of result["conflicting_refs"]) {
+    validatePackConflict(item as JsonValue);
+  }
+  return result;
+}
+
+function validateSyncRef(value: JsonValue): JsonObject {
+  const ref = requireObject(value);
+  assertKeys(ref, ["name", "commit_id", "revision"]);
+  if (
+    typeof ref["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(ref["name"]) ||
+    typeof ref["commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(ref["commit_id"]) ||
+    !Number.isSafeInteger(ref["revision"]) ||
+    (ref["revision"] as number) < 1
+  ) {
+    throw invalidHostResult();
+  }
+  return ref;
+}
+
+function validatePackConflict(value: JsonValue): JsonObject {
+  const conflict = requireObject(value);
+  assertKeys(conflict, ["name", "pack_commit_id", "local_commit_id"]);
+  if (
+    typeof conflict["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(conflict["name"]) ||
+    typeof conflict["pack_commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(conflict["pack_commit_id"]) ||
+    typeof conflict["local_commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(conflict["local_commit_id"])
+  ) {
+    throw invalidHostResult();
+  }
+  return conflict;
+}
+
+function validateSyncActivityPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor"]);
+  if (
+    !Array.isArray(page["items"]) ||
+    page["items"].length > 500 ||
+    typeof page["next_cursor"] !== "string" ||
+    !/^(?:0|[1-9][0-9]{0,15})$/.test(page["next_cursor"]) ||
+    !Number.isSafeInteger(Number(page["next_cursor"]))
+  ) {
+    throw invalidHostResult();
+  }
+  const eventIDs = new Set<string>();
+  const sequences = new Set<number>();
+  for (const value of page["items"]) {
+    const event = requireObject(value);
+    assertKeys(event, ["event_id", "sequence", "occurred_at", "kind", "actor", "resource", "details"]);
+    const actor = requireObject(event["actor"]);
+    assertKeys(actor, ["principal_id", "role"]);
+    if (
+      typeof event["event_id"] !== "string" ||
+      !/^hub_audit_[0-9a-f-]{36}$/.test(event["event_id"]) ||
+      !Number.isSafeInteger(event["sequence"]) ||
+      (event["sequence"] as number) < 1 ||
+      typeof event["occurred_at"] !== "string" ||
+      !SYNC_ACTIVITY_KINDS.has(event["kind"] as string) ||
+      typeof actor["principal_id"] !== "string" ||
+      !SYNC_ROLES.has(actor["role"] as string) ||
+      typeof event["resource"] !== "string" ||
+      event["resource"].length === 0 ||
+      event["resource"].length > 256
+    ) {
+      throw invalidHostResult();
+    }
+    if (eventIDs.has(event["event_id"]) || sequences.has(event["sequence"] as number)) {
+      throw invalidHostResult();
+    }
+    eventIDs.add(event["event_id"]);
+    sequences.add(event["sequence"] as number);
+    validateSyncActivityDetails(event["kind"] as string, event["details"] as JsonValue);
+  }
+  return page;
+}
+
+function validateSyncActivityDetails(kind: string, value: JsonValue): void {
+  const details = requireObject(value);
+  if (kind === "HubPackImported" || kind === "HubPackExported") {
+    assertKeys(details, []);
+    return;
+  }
+  if (kind === "RefUpdated") {
+    assertKeys(details, ["ref_name"]);
+    if (typeof details["ref_name"] !== "string" || !REF_NAME_PATTERN.test(details["ref_name"])) {
+      throw invalidHostResult();
+    }
+    return;
+  }
+  assertKeys(
+    details,
+    ["organization_id", "team_id", "target_principal_id", "target_role"],
+    true,
+  );
+  const organizationId = details["organization_id"];
+  const teamId = details["team_id"];
+  if (
+    typeof details["target_principal_id"] !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(details["target_principal_id"]) ||
+    (details["target_role"] !== undefined && !SYNC_ROLES.has(details["target_role"] as string)) ||
+    (organizationId === undefined) !== (teamId === undefined) ||
+    (organizationId !== undefined &&
+      (typeof organizationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(organizationId))) ||
+    (teamId !== undefined &&
+      (typeof teamId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(teamId)))
+  ) {
+    throw invalidHostResult();
+  }
+}
+
+function isSyncCapabilities(value: JsonValue | undefined): value is JsonValue[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    new Set(value).size === value.length &&
+    value.every(
+      (item) => typeof item === "string" && /^[a-z][a-z0-9._-]{0,63}$/.test(item),
+    )
+  );
 }
 
 function validateKnowledgePublicationResult(

@@ -39,6 +39,40 @@ public enum EventTimelinePhase: Equatable, Sendable {
     case failure(String)
 }
 
+public enum HubSyncPhase: Equatable, Sendable {
+    case idle
+    case connecting
+    case connected
+    case failure(String)
+}
+
+public enum HubSyncTransferDirection: String, Equatable, Sendable {
+    case fetch
+    case push
+}
+
+public struct HubSyncTransferSummary: Equatable, Sendable {
+    public let direction: HubSyncTransferDirection
+    public let importedCommitCount: Int
+    public let importedObjectCount: Int
+    public let advancedRefCount: Int
+    public let conflicts: [HubSyncConflict]
+
+    public init(
+        direction: HubSyncTransferDirection,
+        importedCommitCount: Int,
+        importedObjectCount: Int,
+        advancedRefCount: Int,
+        conflicts: [HubSyncConflict]
+    ) {
+        self.direction = direction
+        self.importedCommitCount = importedCommitCount
+        self.importedObjectCount = importedObjectCount
+        self.advancedRefCount = advancedRefCount
+        self.conflicts = conflicts
+    }
+}
+
 @MainActor
 public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var contentPhase: WorkspaceContentPhase = .idle
@@ -155,6 +189,21 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public internal(set) var explorationError: String?
     @Published public internal(set) var isExploring = false
     @Published public internal(set) var isCancellingExploration = false
+
+    // Optional Hub collaboration. The credential stays only in `hubRemote`
+    // for this model lifetime and is never published into SwiftUI state.
+    @Published public internal(set) var hubSyncPhase: HubSyncPhase = .idle
+    @Published public internal(set) var hubSyncStatus: HubSyncStatus?
+    @Published public internal(set) var hubSyncActivity: [HubSyncActivityEvent] = []
+    @Published public internal(set) var hubSyncError: String?
+    @Published public internal(set) var hubActivityError: String?
+    @Published public internal(set) var lastHubTransfer: HubSyncTransferSummary?
+    @Published public internal(set) var isHubTransferring = false
+    @Published public internal(set) var isHubActivityLoading = false
+    var hubRemote: HubSyncRemote?
+    var hubRefNames: [String] = []
+    var hubActivityCursor: UInt64 = 0
+    var hubSyncGeneration = 0
 
     let client: any HostClient
     private var selectionGeneration = 0
@@ -1819,7 +1868,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         screenshotPhase = .none
     }
 
-    private static func message(for error: Error) -> String {
+    static func message(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }

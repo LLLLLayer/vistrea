@@ -109,10 +109,11 @@ node .build/typescript/services/hub/main.js \
   [--host <address>] [--port <port>] [--tls-cert <pem> --tls-key <pem>]
 ```
 
-Organization-scoped team inheritance is implemented. Searchable discovery,
-organization-wide roles, multi-team project sharing, versioned collaboration
-mutations, subscriptions, and user-facing Studio sync remain later slices.
+Organization-scoped team inheritance and team-project discovery are
+implemented. Searchable discovery, organization-wide roles, multi-team project
+sharing, versioned collaboration mutations, subscriptions, and guided conflict
+resolution remain later slices.
 
 See [Vistrea Hub API](../../docs/interfaces/HUB_API.md).
 
-Pack exports stream without persisting: storing one pack object per request would let any caller, including a read-only one, grow the Hub's object store without bound. `data/sync/hub-pack-sync.ts` is the client — it pushes with explicit fast-forwards, fetches, and reports divergent refs as conflicts — and has no CLI or Studio surface yet.
+Pack exports stream without persisting: storing one pack object per request would let any caller, including a read-only one, grow the Hub's object store without bound. `data/sync/hub-pack-sync.ts` is the validated client; `engine/sync/` derives local/remote ref relations and preserves conflicts; the authenticated loopback Host exposes that Engine surface to the strict CLI and Studio. Studio can inspect identity and team projects, fetch, fast-forward push, and poll safe activity without receiving a credential back from any response.

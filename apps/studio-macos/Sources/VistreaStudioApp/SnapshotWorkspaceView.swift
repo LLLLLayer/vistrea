@@ -10,6 +10,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
     case canvas = "Canvas"
     case evidence = "Evidence"
     case wiki = "Wiki"
+    case hub = "Hub"
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
         case .canvas: "point.3.connected.trianglepath.dotted"
         case .evidence: "camera.on.rectangle"
         case .wiki: "book"
+        case .hub: "arrow.triangle.2.circlepath.circle"
         }
     }
 }
@@ -54,8 +56,20 @@ struct SnapshotWorkspaceView: View {
             ProgressView("Loading the Workspace…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .empty:
-            EmptyWorkspaceView(isCapturing: model.isCapturing) {
-                Task { await model.capture() }
+            HSplitView {
+                NavigationColumn(section: $section)
+                    .frame(
+                        minWidth: StudioLayoutMetrics.navigationMinWidth,
+                        idealWidth: StudioLayoutMetrics.navigationIdealWidth,
+                        maxWidth: StudioLayoutMetrics.navigationMaxWidth
+                    )
+                if section == .hub {
+                    HubPane(model: model)
+                } else {
+                    EmptyWorkspaceView(isCapturing: model.isCapturing) {
+                        Task { await model.capture() }
+                    }
+                }
             }
         case let .failure(message):
             FailureView(message: message, isBusy: model.isRefreshing || model.isCapturing) {
@@ -76,8 +90,419 @@ struct SnapshotWorkspaceView: View {
                     EvidenceSection(model: model)
                 case .wiki:
                     WikiPane(model: model)
+                case .hub:
+                    HubPane(model: model)
                 }
             }
+        }
+    }
+}
+
+/// Cross-team collaboration remains an optional local-Host workflow. The
+/// secret field is session-only; only the origin, project, and ref names use
+/// UserDefaults so reopening Studio never writes a Hub credential to disk.
+private struct HubPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @AppStorage("vistrea.hub.base-url") private var baseURL = ""
+    @AppStorage("vistrea.hub.project-id") private var projectID = ""
+    @AppStorage("vistrea.hub.ref-names") private var refNames = "teams/design/main"
+    @State private var bearerToken = ""
+    @State private var pushMessage = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if model.hubSyncStatus == nil {
+                connectionForm
+            } else {
+                connectedContent
+            }
+        }
+        .task(id: model.hubSyncStatus?.remote.projectID) {
+            guard model.hubSyncStatus != nil else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    return
+                }
+                await model.loadMoreHubActivity()
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Label("Team Hub", systemImage: "person.2.fill")
+                .font(.headline)
+            if let identity = model.hubSyncStatus?.identity {
+                Text(identity.principalID)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                roleBadge(identity.role)
+            }
+            Spacer()
+            if model.hubSyncStatus != nil {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task {
+                        await model.refreshHubStatus()
+                        await model.loadMoreHubActivity()
+                    }
+                }
+                .disabled(model.isHubTransferring)
+                Button("Disconnect") {
+                    model.disconnectHub()
+                    bearerToken = ""
+                }
+                    .disabled(model.isHubTransferring)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 9)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var connectionForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Connect this local Workspace to an optional Vistrea Hub.", systemImage: "network")
+                    .font(.title3.weight(.semibold))
+                Text("Studio sends the credential only to its authenticated loopback Host. The Host uses TLS for non-local Hub origins and never echoes the token.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                    GridRow {
+                        Text("Hub URL")
+                        TextField("https://hub.example.com", text: $baseURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("Project")
+                        TextField("project_…", text: $projectID)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                    }
+                    GridRow {
+                        Text("Refs")
+                        TextField("teams/design/main", text: $refNames)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                    }
+                    GridRow {
+                        Text("Token")
+                        SecureField("Current Hub bearer token", text: $bearerToken)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                Text("Separate multiple refs with commas. The token is kept only for this Studio session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let error = model.hubSyncError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("Connect", systemImage: "link") {
+                        Task {
+                            await model.connectHub(
+                                baseURL: baseURL,
+                                projectID: projectID,
+                                bearerToken: bearerToken,
+                                refNames: parsedRefNames
+                            )
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || bearerToken.isEmpty
+                            || parsedRefNames.isEmpty
+                            || model.hubSyncPhase == .connecting
+                    )
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var connectedContent: some View {
+        HSplitView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    remoteSection
+                    projectsSection
+                    refsSection
+                    transferSection
+                }
+                .padding(20)
+            }
+            .frame(minWidth: 430, idealWidth: 560)
+            activitySection
+                .frame(minWidth: 330, idealWidth: 430)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteSection: some View {
+        if let status = model.hubSyncStatus {
+            GroupBox("Connected remote") {
+                VStack(alignment: .leading, spacing: 7) {
+                    LabeledContent("Origin") {
+                        Text(status.remote.baseURL).textSelection(.enabled)
+                    }
+                    LabeledContent("Project") {
+                        Text(status.remote.projectID).font(.caption.monospaced()).textSelection(.enabled)
+                    }
+                    LabeledContent("Credential") {
+                        Text(status.identity.credentialScope.rawValue.capitalized)
+                    }
+                    if let organization = status.identity.organizationID,
+                       let team = status.identity.teamID {
+                        LabeledContent("Team") { Text("\(organization) / \(team)") }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var projectsSection: some View {
+        if let projects = model.hubSyncStatus?.accessibleProjects, projects.count > 1 {
+            GroupBox("Team projects") {
+                VStack(spacing: 0) {
+                    ForEach(projects) { project in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.projectID).font(.caption.monospaced())
+                                if let team = project.teamID { Text(team).font(.caption2).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            roleBadge(project.role)
+                            if project.projectID != model.hubSyncStatus?.remote.projectID {
+                                Button("Select") {
+                                    projectID = project.projectID
+                                    Task {
+                                        await model.connectHub(
+                                            baseURL: baseURL,
+                                            projectID: project.projectID,
+                                            bearerToken: bearerToken,
+                                            refNames: parsedRefNames
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .padding(.vertical, 7)
+                        if project.id != projects.last?.id { Divider() }
+                    }
+                }
+            }
+        }
+    }
+
+    private var refsSection: some View {
+        GroupBox("Shared refs") {
+            VStack(spacing: 0) {
+                ForEach(model.hubSyncStatus?.refs ?? []) { ref in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: relationSymbol(ref.relation))
+                            .foregroundStyle(relationColor(ref.relation))
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ref.name).font(.body.monospaced())
+                            Text(relationLabel(ref.relation))
+                                .font(.caption)
+                                .foregroundStyle(relationColor(ref.relation))
+                            if ref.relation == .diverged {
+                                Text("Local and Hub refs were preserved. Fetch or push will not force either side; merge and publish a new Commit explicitly.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    if ref.id != model.hubSyncStatus?.refs.last?.id { Divider() }
+                }
+            }
+        }
+    }
+
+    private var transferSection: some View {
+        GroupBox("Sync") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button("Fetch", systemImage: "arrow.down.circle") {
+                        Task { await model.fetchFromHub() }
+                    }
+                    .disabled(model.isHubTransferring || !canFetch)
+                    Button("Push", systemImage: "arrow.up.circle") {
+                        Task { await model.pushToHub(message: pushMessage) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isHubTransferring || !canPush)
+                    if model.isHubTransferring { ProgressView().controlSize(.small) }
+                }
+                TextField("Optional push message", text: $pushMessage)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!canPush || model.isHubTransferring)
+                if !canPush {
+                    Text("Push requires a maintainer or admin capability; fetch remains available to viewers.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let transfer = model.lastHubTransfer {
+                    Label(
+                        "\(transfer.direction.rawValue.capitalized): \(transfer.importedCommitCount) commits, \(transfer.importedObjectCount) objects, \(transfer.advancedRefCount) refs advanced",
+                        systemImage: transfer.conflicts.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(transfer.conflicts.isEmpty ? Color.green : Color.orange)
+                    if !transfer.conflicts.isEmpty {
+                        ForEach(transfer.conflicts) { conflict in
+                            Text("Conflict: \(conflict.name)")
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                if let error = model.hubSyncError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var activitySection: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Activity", systemImage: "clock.arrow.circlepath")
+                    .font(.headline)
+                Spacer()
+                if model.isHubActivityLoading { ProgressView().controlSize(.small) }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color(nsColor: .controlBackgroundColor))
+            Divider()
+            if model.hubSyncActivity.isEmpty {
+                ContentUnavailableView(
+                    "No collaboration activity",
+                    systemImage: "person.2",
+                    description: Text("New pack, ref, and permission changes will appear here automatically.")
+                )
+            } else {
+                List(model.hubSyncActivity) { event in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: activitySymbol(event.kind))
+                            Text(activityLabel(event.kind)).fontWeight(.medium)
+                            Spacer()
+                            Text("#\(event.sequence)").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Text("\(event.actor.principalID) · \(event.actor.role.rawValue)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(event.resource)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(event.occurredAt)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listStyle(.inset)
+            }
+            if let error = model.hubActivityError {
+                Divider()
+                Text(error).font(.caption).foregroundStyle(.red).padding(8)
+            }
+        }
+    }
+
+    private var parsedRefNames: [String] {
+        refNames.split(separator: ",", omittingEmptySubsequences: false).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+    }
+
+    private var canFetch: Bool {
+        model.hubSyncStatus?.identity.capabilities.contains("packs.export") == true
+    }
+
+    private var canPush: Bool {
+        let capabilities = model.hubSyncStatus?.identity.capabilities ?? []
+        return capabilities.contains("packs.import") && capabilities.contains("refs.update")
+    }
+
+    private func roleBadge(_ role: HubSyncRole) -> some View {
+        Text(role.rawValue.capitalized)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.accentColor.opacity(0.14), in: Capsule())
+    }
+
+    private func relationLabel(_ relation: HubSyncRefRelation) -> String {
+        switch relation {
+        case .synced: "Synced"
+        case .localOnly: "Local only"
+        case .remoteOnly: "Hub only"
+        case .localAhead: "Local ahead"
+        case .remoteAhead: "Hub ahead"
+        case .diverged: "Conflict — both refs preserved"
+        case .unknown: "Different history — fetch to classify"
+        }
+    }
+
+    private func relationSymbol(_ relation: HubSyncRefRelation) -> String {
+        switch relation {
+        case .synced: "checkmark.circle.fill"
+        case .diverged: "exclamationmark.triangle.fill"
+        case .unknown: "questionmark.circle"
+        case .localOnly, .localAhead: "arrow.up.circle"
+        case .remoteOnly, .remoteAhead: "arrow.down.circle"
+        }
+    }
+
+    private func relationColor(_ relation: HubSyncRefRelation) -> Color {
+        switch relation {
+        case .synced: .green
+        case .diverged: .red
+        case .unknown: .orange
+        case .localOnly, .remoteOnly, .localAhead, .remoteAhead: .accentColor
+        }
+    }
+
+    private func activityLabel(_ kind: String) -> String {
+        switch kind {
+        case "RefUpdated": "Ref updated"
+        case "HubPackImported": "Pack imported"
+        case "HubPackExported": "Pack exported"
+        case "PermissionChanged": "Permission changed"
+        default: kind
+        }
+    }
+
+    private func activitySymbol(_ kind: String) -> String {
+        switch kind {
+        case "RefUpdated": "arrow.triangle.branch"
+        case "HubPackImported": "square.and.arrow.down"
+        case "HubPackExported": "square.and.arrow.up"
+        case "PermissionChanged": "person.badge.key.fill"
+        default: "circle"
         }
     }
 }

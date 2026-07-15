@@ -14,6 +14,7 @@ import {
 import { createRepositoryProtocolValidator, MemoryDataStore } from "../../data/memory/index.js";
 import { FileObjectStore } from "../../data/objects/index.js";
 import { HubPackSync, type HubRemote } from "../../data/sync/index.js";
+import { WorkspaceSyncEngine } from "../../engine/sync/index.js";
 import {
   FileHubAuditStore,
   FileHubDirectoryStore,
@@ -278,9 +279,24 @@ test("push and fetch move commits through the optional Hub and never force refs"
     bearerToken: tokenFor(hub, PROJECT_ID).bearerToken,
     projectId: PROJECT_ID,
   };
+  const identity = await hubParty.sync.getIdentity(remote);
+  assert.equal(identity.role, "admin");
+  assert.equal(identity.credential_scope, "project");
+  assert.deepEqual(
+    (await hubParty.sync.listAccessibleProjects(remote, identity)).map((project) => [
+      project.project_id,
+      project.role,
+    ]),
+    [[PROJECT_ID, "admin"]],
+  );
 
   const author = await makeParty(t, "author");
   const seeded = await seedCommit(author, "Record the shared graph.", '{"screens":["home"]}');
+  const authorEngine = new WorkspaceSyncEngine({ workspace: author.workspace, remote: author.sync });
+  assert.equal(
+    (await authorEngine.getStatus({ remote, ref_names: [REF_NAME] })).refs[0]?.relation,
+    "local_only",
+  );
 
   // Unauthenticated and wrong-project requests fail closed.
   const unauthorized = await fetch(`${hub.baseUrl}/v1/projects/${PROJECT_ID}/refs`);
@@ -295,17 +311,19 @@ test("push and fetch move commits through the optional Hub and never force refs"
     (error: unknown) => isDataError(error, "internal"),
   );
 
-  const pushed = await author.sync.push({
+  const pushedOutcome = await authorEngine.push({
     remote,
     ref_names: [REF_NAME],
     created_by: ACTOR,
     message: "First push through the Hub.",
   });
+  const pushed = pushedOutcome.result;
   assert.equal(pushed.import.mode, "full");
   assert.deepEqual(pushed.import.imported_commit_ids, [seeded.commitId]);
   assert.equal(pushed.import.created_refs[0]?.name, REF_NAME);
   assert.deepEqual(pushed.remaining_conflicts, []);
   assert.deepEqual(pushed.advanced_refs, []);
+  assert.equal(pushedOutcome.status.refs[0]?.relation, "synced");
 
   const status = await author.sync.listRemoteRefs(remote);
   assert.equal(status.remote_refs.length, 1);
@@ -318,14 +336,23 @@ test("push and fetch move commits through the optional Hub and never force refs"
 
   // A fresh Workspace fetches the same history byte-identically.
   const reader = await makeParty(t, "reader");
-  const fetched = await reader.sync.fetch({
+  const readerEngine = new WorkspaceSyncEngine({ workspace: reader.workspace, remote: reader.sync });
+  assert.equal(
+    (await readerEngine.getStatus({ remote, ref_names: [REF_NAME] })).refs[0]?.relation,
+    "remote_only",
+  );
+  const fetchedOutcome = await readerEngine.fetch({
     remote,
     ref_names: [REF_NAME],
     created_by: ACTOR,
   });
-  assert.equal(fetched.mode, "full");
-  assert.deepEqual(fetched.imported_commit_ids, [seeded.commitId]);
-  assert.equal(fetched.created_refs[0]?.name, REF_NAME);
+  const fetched = fetchedOutcome.result;
+  assert.equal(fetched.import.mode, "full");
+  assert.deepEqual(fetched.import.imported_commit_ids, [seeded.commitId]);
+  assert.equal(fetched.import.created_refs[0]?.name, REF_NAME);
+  assert.deepEqual(fetched.advanced_refs, []);
+  assert.deepEqual(fetched.remaining_conflicts, []);
+  assert.equal(fetchedOutcome.status.refs[0]?.relation, "synced");
   const readerUnit = reader.workspace.beginUnitOfWork("read");
   try {
     assert.equal(readerUnit.versions.resolveRef(REF_NAME).commit_id, seeded.commitId);
@@ -341,10 +368,38 @@ test("push and fetch move commits through the optional Hub and never force refs"
   // Divergent histories surface as ref conflicts on the Hub, never a force.
   const rival = await makeParty(t, "rival");
   await seedCommit(rival, "A divergent graph.", '{"screens":["other"]}');
-  const conflicted = await rival.sync.push({ remote, ref_names: [REF_NAME], created_by: ACTOR });
+  const rivalEngine = new WorkspaceSyncEngine({ workspace: rival.workspace, remote: rival.sync });
+  const conflictedOutcome = await rivalEngine.push({
+    remote,
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+  const conflicted = conflictedOutcome.result;
   assert.equal(conflicted.remaining_conflicts.length, 1);
   assert.equal(conflicted.remaining_conflicts[0]?.name, REF_NAME);
   assert.deepEqual(conflicted.advanced_refs, []);
+  assert.equal(conflictedOutcome.status.refs[0]?.relation, "diverged");
+  const rivalBeforeFetch = rival.workspace.beginUnitOfWork("read");
+  let rivalCommitId: string;
+  try {
+    rivalCommitId = rivalBeforeFetch.versions.resolveRef(REF_NAME).commit_id;
+  } finally {
+    rivalBeforeFetch.rollback();
+  }
+  const divergentFetch = await rivalEngine.fetch({
+    remote,
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+  assert.deepEqual(divergentFetch.result.advanced_refs, []);
+  assert.equal(divergentFetch.result.remaining_conflicts[0]?.local_commit_id, rivalCommitId);
+  assert.equal(divergentFetch.status.refs[0]?.relation, "diverged");
+  const rivalAfterFetch = rival.workspace.beginUnitOfWork("read");
+  try {
+    assert.equal(rivalAfterFetch.versions.resolveRef(REF_NAME).commit_id, rivalCommitId);
+  } finally {
+    rivalAfterFetch.rollback();
+  }
   const afterConflict = await author.sync.listRemoteRefs(remote);
   assert.equal(
     (afterConflict.remote_refs[0] as unknown as JsonObject)["commit_id"],
@@ -363,6 +418,28 @@ test("push and fetch move commits through the optional Hub and never force refs"
   assert.equal(advanced.advanced_refs.length, 1);
   assert.equal((advanced.advanced_refs[0] as unknown as JsonObject)["commit_id"], second.commitId);
   assert.deepEqual(advanced.remaining_conflicts, []);
+
+  const fastForwarded = await readerEngine.fetch({
+    remote,
+    ref_names: [REF_NAME],
+    created_by: ACTOR,
+  });
+  assert.deepEqual(fastForwarded.result.import.imported_commit_ids, [second.commitId]);
+  assert.equal(fastForwarded.result.advanced_refs[0]?.commit_id, second.commitId);
+  assert.deepEqual(fastForwarded.result.remaining_conflicts, []);
+  assert.equal(fastForwarded.status.refs[0]?.relation, "synced");
+  const fastForwardedUnit = reader.workspace.beginUnitOfWork("read");
+  try {
+    assert.equal(fastForwardedUnit.versions.resolveRef(REF_NAME).commit_id, second.commitId);
+  } finally {
+    fastForwardedUnit.rollback();
+  }
+
+  const activity = await author.sync.listActivity(remote, { limit: 100 });
+  assert.equal(activity.items.some((event) => event.kind === "RefUpdated"), true);
+  assert.equal(activity.items.some((event) => event.kind === "HubPackImported"), true);
+  assert.equal(JSON.stringify(activity).includes(remote.bearerToken), false);
+  assert.match(activity.next_cursor, /^(?:0|[1-9][0-9]*)$/);
   const advancedStatus = await author.sync.listRemoteRefs(remote);
   assert.equal(
     (advancedStatus.remote_refs[0] as unknown as JsonObject)["commit_id"],
@@ -768,6 +845,21 @@ test("team roles inherit across associated projects with effective-role and audi
   const team = teamTokenFor(hub, ORGANIZATION_ID, TEAM_ID);
   const teamAlice = teamGrantTokenFor(hub, ORGANIZATION_ID, TEAM_ID, "alice");
   const directAlice = grantTokenFor(hub, PROJECT_ID, "alice");
+  const syncRemote: HubRemote = {
+    baseUrl: hub.baseUrl,
+    bearerToken: teamAlice,
+    projectId: PROJECT_ID,
+  };
+  const syncIdentity = await first.sync.getIdentity(syncRemote);
+  assert.equal(syncIdentity.credential_scope, "team");
+  assert.equal(syncIdentity.role, "maintainer");
+  assert.deepEqual(
+    (await first.sync.listAccessibleProjects(syncRemote, syncIdentity)).map((project) => [
+      project.project_id,
+      project.role,
+    ]),
+    [[PROJECT_ID, "maintainer"], [PROJECT_ID_TWO, "reviewer"]],
+  );
   const firstIdentity = await hubJson(hub.baseUrl, PROJECT_ID, "me", teamAlice);
   assert.equal(firstIdentity.status, 200);
   assert.equal(firstIdentity.body["role"], "maintainer");

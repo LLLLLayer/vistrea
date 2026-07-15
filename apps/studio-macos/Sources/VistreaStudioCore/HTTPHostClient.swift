@@ -761,6 +761,91 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func getSyncStatus(
+        remote: HubSyncRemote,
+        refNames: [String]?
+    ) async throws -> HubSyncStatus {
+        try Self.validateHubRemote(remote)
+        if let refNames { try Self.validateSyncRefNames(refNames) }
+        return try await sendJSON(
+            HubSyncStatus.self,
+            path: ["v1", "sync", "status"],
+            body: HubSyncStatusRequest(remote: remote, refNames: refNames),
+            expectedStatus: 200
+        )
+    }
+
+    public func fetchWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor
+    ) async throws -> HubSyncFetchOutcome {
+        try Self.validateHubRemote(remote)
+        try Self.validateSyncRefNames(refNames)
+        try Self.validateSyncActor(actor)
+        return try await sendJSON(
+            HubSyncFetchOutcome.self,
+            path: ["v1", "sync", "fetch"],
+            body: HubSyncTransferRequest(
+                remote: remote,
+                refNames: refNames,
+                createdBy: actor,
+                message: nil
+            ),
+            expectedStatus: 200
+        )
+    }
+
+    public func pushWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor,
+        message: String?
+    ) async throws -> HubSyncPushOutcome {
+        try Self.validateHubRemote(remote)
+        try Self.validateSyncRefNames(refNames)
+        try Self.validateSyncActor(actor)
+        if let message, message.isEmpty || message.utf8.count > 1_024 {
+            throw HostClientError.invalidConfiguration(
+                "A Hub push message must contain 1 through 1024 UTF-8 bytes."
+            )
+        }
+        return try await sendJSON(
+            HubSyncPushOutcome.self,
+            path: ["v1", "sync", "push"],
+            body: HubSyncTransferRequest(
+                remote: remote,
+                refNames: refNames,
+                createdBy: actor,
+                message: message
+            ),
+            expectedStatus: 200
+        )
+    }
+
+    public func getSyncActivity(
+        remote: HubSyncRemote,
+        afterSequence: UInt64?,
+        limit: Int?
+    ) async throws -> HubSyncActivityPage {
+        try Self.validateHubRemote(remote)
+        if let limit, !(1...500).contains(limit) {
+            throw HostClientError.invalidConfiguration(
+                "A Hub activity page limit must be between 1 and 500."
+            )
+        }
+        return try await sendJSON(
+            HubSyncActivityPage.self,
+            path: ["v1", "sync", "activity"],
+            body: HubSyncActivityRequest(
+                remote: remote,
+                afterSequence: afterSequence,
+                limit: limit
+            ),
+            expectedStatus: 200
+        )
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {
@@ -896,6 +981,50 @@ public struct HTTPHostClient: HostClient, Sendable {
         let digest = value.dropFirst("sha256:".count).utf8
         return digest.count == 64 && digest.allSatisfy { byte in
             (0x30...0x39).contains(byte) || (0x61...0x66).contains(byte)
+        }
+    }
+
+    private static func validateHubRemote(_ remote: HubSyncRemote) throws {
+        guard isTypedIdentifier(remote.projectID, prefix: "project"),
+              remote.bearerToken.range(
+                  of: "^[A-Za-z0-9_-]{43}$",
+                  options: .regularExpression
+              ) != nil,
+              let url = URL(string: remote.baseURL),
+              url.user == nil,
+              url.password == nil,
+              url.query == nil,
+              url.fragment == nil,
+              url.path.isEmpty,
+              (url.scheme == "https" && url.host != nil
+                  || url.scheme == "http" && ["127.0.0.1", "::1", "localhost"].contains(url.host))
+        else {
+            throw HostClientError.invalidConfiguration(
+                "The Hub requires an HTTPS origin (or loopback HTTP), a canonical Project ID, and its 43-character bearer token."
+            )
+        }
+    }
+
+    private static func validateSyncRefNames(_ refNames: [String]) throws {
+        let pattern = "^(users|teams|builds|baselines|releases)/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$"
+        guard !refNames.isEmpty,
+              refNames.count <= 64,
+              Set(refNames).count == refNames.count,
+              refNames.allSatisfy({ $0.range(of: pattern, options: .regularExpression) != nil })
+        else {
+            throw HostClientError.invalidConfiguration(
+                "Hub refs must be 1 through 64 unique canonical ref names."
+            )
+        }
+    }
+
+    private static func validateSyncActor(_ actor: HubSyncActor) throws {
+        guard ["human", "agent", "service"].contains(actor.kind),
+              actor.id.range(
+            of: "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+            options: .regularExpression
+        ) != nil else {
+            throw HostClientError.invalidConfiguration("The Hub actor identity is invalid.")
         }
     }
 

@@ -80,6 +80,11 @@ export const HOST_OPERATION_MANIFEST = [
   { operation: "CompareBuilds", kind: "C", method: "POST", route: "/v1/validation/build-diffs", cli: "validate build-diff" },
   { operation: "GetBuildDiff", kind: "Q", method: "GET", route: "/v1/validation/build-diffs/<id>", cli: "validate get-build-diff" },
 
+  { operation: "GetSyncStatus", kind: "Q", method: "POST", route: "/v1/sync/status", cli: "sync status" },
+  { operation: "FetchWorkspace", kind: "C", method: "POST", route: "/v1/sync/fetch", cli: "sync fetch" },
+  { operation: "PushWorkspace", kind: "C", method: "POST", route: "/v1/sync/push", cli: "sync push" },
+  { operation: "GetSyncActivity", kind: "Q", method: "POST", route: "/v1/sync/activity", cli: "sync activity" },
+
   { operation: "ExportPack", kind: "C", method: "POST", route: "/v1/exchange/exports", cli: "pack export" },
   { operation: "ImportPack", kind: "C", method: "POST", route: "/v1/exchange/imports", cli: "pack import" },
   { operation: "GetObject", kind: "Q", method: "GET", route: "/v1/objects/<hash>", cli: "object get" },

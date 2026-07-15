@@ -41,6 +41,8 @@ import {
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
 import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
+import { HubPackSync } from "../../data/sync/index.js";
+import { WorkspaceSyncEngine, type WorkspaceSyncRemote } from "../../engine/sync/index.js";
 import type {
   HostLocalApiBindAddress,
   HostLocalApiDependencies,
@@ -153,6 +155,14 @@ export async function startHostLocalApi(
     objects: options.objects,
     validator: options.validator,
   });
+  const sync = new WorkspaceSyncEngine({
+    workspace: options.workspace,
+    remote: new HubPackSync({
+      workspace: options.workspace,
+      objects: options.objects,
+      validator: options.validator,
+    }),
+  });
   // Version tagging freezes the materialized graph; it drives no device, so
   // it must work on a Host with no automation provider configured.
   const explorationCapture = {
@@ -224,6 +234,7 @@ export async function startHostLocalApi(
         validation,
         buildDiffs,
         exchange,
+        sync,
         exploration: tagging,
         ...(explorationOperations === undefined ? {} : { explorationOperations }),
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
@@ -296,6 +307,7 @@ interface RequestHandlerContext {
   readonly validation: ValidationEngine;
   readonly buildDiffs: BuildDiffEngine;
   readonly exchange: PackExchangeService;
+  readonly sync: WorkspaceSyncEngine;
   readonly exploration: ExplorationEngine;
   readonly explorationOperations?: ExplorationOperationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
@@ -327,6 +339,84 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       ...(reversions === undefined ? {} : { tuning_reversions: reversions }),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
+    return;
+  }
+
+  if (pathname === "/v1/sync/status") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "status",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.getStatus({
+        remote: command.remote,
+        ...(command.refNames === undefined ? {} : { ref_names: command.refNames }),
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/fetch") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "fetch",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.fetch({
+        remote: command.remote,
+        ref_names: command.refNames as readonly string[],
+        created_by: command.createdBy as JsonObject,
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/push") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "push",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.push({
+        remote: command.remote,
+        ref_names: command.refNames as readonly string[],
+        created_by: command.createdBy as JsonObject,
+        ...(command.message === undefined ? {} : { message: command.message }),
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/activity") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "activity",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.listActivity({
+        remote: command.remote,
+        ...(command.afterSequence === undefined
+          ? {}
+          : { after_sequence: command.afterSequence }),
+        ...(command.limit === undefined ? {} : { limit: command.limit }),
+      }),
+    );
     return;
   }
 
@@ -1638,6 +1728,129 @@ const EVENT_EPOCH_ID_PATTERN =
 const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAXIMUM_DESIGN_ASSET_BYTES = 64 * 1024 * 1024;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+const HUB_REMOTE_URL_PATTERN =
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
+const HUB_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const PROJECT_ID_PATTERN =
+  /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SYNC_REF_NAME_PATTERN =
+  /^(?:users|teams|builds|baselines|releases)\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/;
+
+type SyncCommandKind = "status" | "fetch" | "push" | "activity";
+
+interface ParsedSyncCommand {
+  readonly remote: WorkspaceSyncRemote;
+  readonly refNames?: readonly string[];
+  readonly createdBy?: JsonObject;
+  readonly message?: string;
+  readonly afterSequence?: number;
+  readonly limit?: number;
+}
+
+function parseSyncCommand(input: unknown, kind: SyncCommandKind): ParsedSyncCommand {
+  const allowedByKind: Readonly<Record<SyncCommandKind, readonly string[]>> = {
+    status: ["remote", "ref_names"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by", "message"],
+    activity: ["remote", "after_sequence", "limit"],
+  };
+  const requiredByKind: Readonly<Record<SyncCommandKind, readonly string[]>> = {
+    status: ["remote"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by"],
+    activity: ["remote"],
+  };
+  const value = parseCommandObject(
+    input,
+    allowedByKind[kind],
+    requiredByKind[kind],
+    {
+      remote: "object",
+      ref_names: "string_array",
+      created_by: "object",
+      message: "string",
+      after_sequence: "integer",
+      limit: "integer",
+    },
+  );
+  const remoteValue = requirePlainRecord(value["remote"], "Hub remote");
+  assertAllowedKeys(remoteValue, ["base_url", "project_id", "bearer_token"], "Hub remote");
+  if (
+    !["base_url", "project_id", "bearer_token"].every((key) => Object.hasOwn(remoteValue, key))
+  ) {
+    throw invalidArgument("Hub remote requires base_url, project_id, and bearer_token.");
+  }
+  const baseUrl = remoteValue["base_url"];
+  const projectId = remoteValue["project_id"];
+  const bearerToken = remoteValue["bearer_token"];
+  if (typeof baseUrl !== "string" || !HUB_REMOTE_URL_PATTERN.test(baseUrl)) {
+    throw invalidArgument("The Hub URL must be loopback HTTP or an HTTPS origin.");
+  }
+  if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
+    throw invalidArgument("The Hub project_id must be a canonical Project ID.");
+  }
+  if (typeof bearerToken !== "string" || !HUB_TOKEN_PATTERN.test(bearerToken)) {
+    throw invalidArgument("The Hub bearer token is invalid.");
+  }
+  const refNames = value["ref_names"] as readonly string[] | undefined;
+  if (
+    refNames !== undefined &&
+    (refNames.length === 0 ||
+      refNames.length > 64 ||
+      new Set(refNames).size !== refNames.length ||
+      refNames.some((name) => !SYNC_REF_NAME_PATTERN.test(name)))
+  ) {
+    throw invalidArgument("ref_names must contain unique canonical ref names.");
+  }
+  const message = value["message"] as string | undefined;
+  if (message !== undefined && (message.length === 0 || message.length > 1024)) {
+    throw invalidArgument("message must contain 1 through 1024 characters.");
+  }
+  const afterSequence = value["after_sequence"] as number | undefined;
+  if (afterSequence !== undefined && (afterSequence < 0 || !Number.isSafeInteger(afterSequence))) {
+    throw invalidArgument("after_sequence must be a JSON-safe unsigned integer.");
+  }
+  const limit = value["limit"] as number | undefined;
+  if (limit !== undefined && (limit < 1 || limit > 500)) {
+    throw invalidArgument("limit must be an integer from 1 through 500.");
+  }
+  const createdBy =
+    value["created_by"] === undefined ? undefined : parseSyncActor(value["created_by"]);
+  return {
+    remote: { baseUrl, projectId, bearerToken },
+    ...(refNames === undefined ? {} : { refNames }),
+    ...(createdBy === undefined ? {} : { createdBy }),
+    ...(message === undefined ? {} : { message }),
+    ...(afterSequence === undefined ? {} : { afterSequence }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function parseSyncActor(value: unknown): JsonObject {
+  const actor = requirePlainRecord(value, "Sync actor");
+  assertAllowedKeys(actor, ["kind", "id", "display_name", "extensions"], "Sync actor");
+  if (!["kind", "id", "extensions"].every((key) => Object.hasOwn(actor, key))) {
+    throw invalidArgument("created_by must be a canonical ActorRef.");
+  }
+  const kind = actor["kind"];
+  const id = actor["id"];
+  const displayName = actor["display_name"];
+  const extensions = actor["extensions"];
+  if (
+    (kind !== "human" && kind !== "agent" && kind !== "service") ||
+    typeof id !== "string" ||
+    id.length === 0 ||
+    id.length > 320 ||
+    (displayName !== undefined &&
+      (typeof displayName !== "string" || displayName.length === 0 || displayName.length > 256)) ||
+    extensions === null ||
+    typeof extensions !== "object" ||
+    Array.isArray(extensions)
+  ) {
+    throw invalidArgument("created_by must be a canonical ActorRef.");
+  }
+  return actor as JsonObject;
+}
 
 function requireExplorationOperations(
   context: RequestHandlerContext,
@@ -2455,6 +2668,24 @@ function toPublicError(error: unknown): PublicError {
     return error;
   }
   if (error instanceof DataError) {
+    const hubErrorCode = error.details["hub_error_code"];
+    if (hubErrorCode === "unauthenticated") {
+      return {
+        status: 401,
+        code: "unauthenticated",
+        message: "The Hub rejected the supplied credential.",
+        retryable: false,
+        headers: { "www-authenticate": 'Bearer realm="vistrea-hub", charset="UTF-8"' },
+      };
+    }
+    if (hubErrorCode === "forbidden") {
+      return {
+        status: 403,
+        code: "forbidden",
+        message: "The Hub credential does not permit this operation.",
+        retryable: false,
+      };
+    }
     switch (error.code) {
       case "invalid_argument":
         return {

@@ -572,6 +572,459 @@ public struct WikiNodePage: Decodable, Equatable, Sendable {
     }
 }
 
+public enum HubSyncRole: String, Decodable, Equatable, Sendable {
+    case viewer
+    case contributor
+    case reviewer
+    case maintainer
+    case admin
+}
+
+public enum HubSyncCredentialScope: String, Decodable, Equatable, Sendable {
+    case project
+    case team
+}
+
+public enum HubSyncRefRelation: String, Decodable, Equatable, Sendable {
+    case synced
+    case localOnly = "local_only"
+    case remoteOnly = "remote_only"
+    case localAhead = "local_ahead"
+    case remoteAhead = "remote_ahead"
+    case diverged
+    case unknown
+}
+
+public struct HubSyncRemote: Encodable, Equatable, Sendable {
+    public let baseURL: String
+    public let projectID: String
+    public let bearerToken: String
+
+    public init(baseURL: String, projectID: String, bearerToken: String) {
+        self.baseURL = baseURL
+        self.projectID = projectID
+        self.bearerToken = bearerToken
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case projectID = "project_id"
+        case bearerToken = "bearer_token"
+    }
+}
+
+public struct HubSyncActor: Encodable, Equatable, Sendable {
+    public let kind: String
+    public let id: String
+    public let extensions: [String: String]
+
+    public init(kind: String = "human", id: String = "vistrea-studio") {
+        self.kind = kind
+        self.id = id
+        extensions = [:]
+    }
+}
+
+public struct HubSyncPermissionSource: Decodable, Equatable, Sendable {
+    public let scope: HubSyncCredentialScope
+    public let role: HubSyncRole
+    public let organizationID: String?
+    public let teamID: String?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case scope
+        case role
+        case organizationID = "organization_id"
+        case teamID = "team_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        scope = try container.decode(HubSyncCredentialScope.self, forKey: .scope)
+        role = try container.decode(HubSyncRole.self, forKey: .role)
+        organizationID = try container.decodeIfPresent(String.self, forKey: .organizationID)
+        teamID = try container.decodeIfPresent(String.self, forKey: .teamID)
+    }
+}
+
+public struct HubSyncIdentity: Decodable, Equatable, Sendable {
+    public let principalID: String
+    public let role: HubSyncRole
+    public let capabilities: [String]
+    public let credentialScope: HubSyncCredentialScope
+    public let permissionSources: [HubSyncPermissionSource]
+    public let organizationID: String?
+    public let teamID: String?
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case principalID = "principal_id"
+        case role
+        case capabilities
+        case credentialScope = "credential_scope"
+        case permissionSources = "permission_sources"
+        case organizationID = "organization_id"
+        case teamID = "team_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        principalID = try container.decode(String.self, forKey: .principalID)
+        role = try container.decode(HubSyncRole.self, forKey: .role)
+        capabilities = try container.decode([String].self, forKey: .capabilities)
+        credentialScope = try container.decode(HubSyncCredentialScope.self, forKey: .credentialScope)
+        permissionSources = try container.decode([HubSyncPermissionSource].self, forKey: .permissionSources)
+        organizationID = try container.decodeIfPresent(String.self, forKey: .organizationID)
+        teamID = try container.decodeIfPresent(String.self, forKey: .teamID)
+    }
+}
+
+public struct HubSyncProjectAccess: Decodable, Equatable, Sendable, Identifiable {
+    public let projectID: String
+    public let organizationID: String?
+    public let teamID: String?
+    public let role: HubSyncRole
+    public let capabilities: [String]
+
+    public var id: String { projectID }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case projectID = "project_id"
+        case organizationID = "organization_id"
+        case teamID = "team_id"
+        case role
+        case capabilities
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projectID = try container.decode(String.self, forKey: .projectID)
+        organizationID = try container.decodeIfPresent(String.self, forKey: .organizationID)
+        teamID = try container.decodeIfPresent(String.self, forKey: .teamID)
+        role = try container.decode(HubSyncRole.self, forKey: .role)
+        capabilities = try container.decode([String].self, forKey: .capabilities)
+    }
+}
+
+public struct HubSyncRefStatus: Decodable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let localCommitID: String?
+    public let remoteCommitID: String?
+    public let relation: HubSyncRefRelation
+
+    public var id: String { name }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case name
+        case localCommitID = "local_commit_id"
+        case remoteCommitID = "remote_commit_id"
+        case relation
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        localCommitID = try container.decodeIfPresent(String.self, forKey: .localCommitID)
+        remoteCommitID = try container.decodeIfPresent(String.self, forKey: .remoteCommitID)
+        relation = try container.decode(HubSyncRefRelation.self, forKey: .relation)
+    }
+}
+
+public struct HubSyncRemoteSummary: Decodable, Equatable, Sendable {
+    public let baseURL: String
+    public let projectID: String
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case baseURL = "base_url"
+        case projectID = "project_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        projectID = try container.decode(String.self, forKey: .projectID)
+    }
+}
+
+public struct HubSyncStatus: Decodable, Equatable, Sendable {
+    public let remote: HubSyncRemoteSummary
+    public let identity: HubSyncIdentity
+    public let accessibleProjects: [HubSyncProjectAccess]
+    public let refs: [HubSyncRefStatus]
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case remote
+        case identity
+        case accessibleProjects = "accessible_projects"
+        case refs
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        remote = try container.decode(HubSyncRemoteSummary.self, forKey: .remote)
+        identity = try container.decode(HubSyncIdentity.self, forKey: .identity)
+        accessibleProjects = try container.decode([HubSyncProjectAccess].self, forKey: .accessibleProjects)
+        refs = try container.decode([HubSyncRefStatus].self, forKey: .refs)
+    }
+}
+
+public struct HubSyncRef: Decodable, Equatable, Sendable {
+    public let name: String
+    public let commitID: String
+    public let revision: UInt64
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case name
+        case commitID = "commit_id"
+        case revision
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        commitID = try container.decode(String.self, forKey: .commitID)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+    }
+}
+
+public struct HubSyncConflict: Decodable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let packCommitID: String
+    public let localCommitID: String
+
+    public var id: String { "\(name):\(packCommitID):\(localCommitID)" }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case name
+        case packCommitID = "pack_commit_id"
+        case localCommitID = "local_commit_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        packCommitID = try container.decode(String.self, forKey: .packCommitID)
+        localCommitID = try container.decode(String.self, forKey: .localCommitID)
+    }
+}
+
+public struct HubSyncImportReport: Decodable, Equatable, Sendable {
+    public let mode: String
+    public let importedCommitIDs: [String]
+    public let existingCommitIDs: [String]
+    public let importedObjectHashes: [String]
+    public let existingObjectHashes: [String]
+    public let createdRefs: [HubSyncRef]
+    public let unchangedRefNames: [String]
+    public let conflictingRefs: [HubSyncConflict]
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case mode
+        case importedCommitIDs = "imported_commit_ids"
+        case existingCommitIDs = "existing_commit_ids"
+        case importedObjectHashes = "imported_object_hashes"
+        case existingObjectHashes = "existing_object_hashes"
+        case createdRefs = "created_refs"
+        case unchangedRefNames = "unchanged_ref_names"
+        case conflictingRefs = "conflicting_refs"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decode(String.self, forKey: .mode)
+        importedCommitIDs = try container.decode([String].self, forKey: .importedCommitIDs)
+        existingCommitIDs = try container.decode([String].self, forKey: .existingCommitIDs)
+        importedObjectHashes = try container.decode([String].self, forKey: .importedObjectHashes)
+        existingObjectHashes = try container.decode([String].self, forKey: .existingObjectHashes)
+        createdRefs = try container.decode([HubSyncRef].self, forKey: .createdRefs)
+        unchangedRefNames = try container.decode([String].self, forKey: .unchangedRefNames)
+        conflictingRefs = try container.decode([HubSyncConflict].self, forKey: .conflictingRefs)
+    }
+}
+
+public struct HubSyncTransferResult: Decodable, Equatable, Sendable {
+    public let imported: HubSyncImportReport
+    public let advancedRefs: [HubSyncRef]
+    public let remainingConflicts: [HubSyncConflict]
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case imported = "import"
+        case advancedRefs = "advanced_refs"
+        case remainingConflicts = "remaining_conflicts"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        imported = try container.decode(HubSyncImportReport.self, forKey: .imported)
+        advancedRefs = try container.decode([HubSyncRef].self, forKey: .advancedRefs)
+        remainingConflicts = try container.decode([HubSyncConflict].self, forKey: .remainingConflicts)
+    }
+}
+
+public struct HubSyncFetchOutcome: Decodable, Equatable, Sendable {
+    public let result: HubSyncTransferResult
+    public let status: HubSyncStatus
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case result, status }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decode(HubSyncTransferResult.self, forKey: .result)
+        status = try container.decode(HubSyncStatus.self, forKey: .status)
+    }
+}
+
+public struct HubSyncPushOutcome: Decodable, Equatable, Sendable {
+    public let result: HubSyncTransferResult
+    public let status: HubSyncStatus
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case result, status }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decode(HubSyncTransferResult.self, forKey: .result)
+        status = try container.decode(HubSyncStatus.self, forKey: .status)
+    }
+}
+
+public struct HubSyncActivityActor: Decodable, Equatable, Sendable {
+    public let principalID: String
+    public let role: HubSyncRole
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case principalID = "principal_id"
+        case role
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        principalID = try container.decode(String.self, forKey: .principalID)
+        role = try container.decode(HubSyncRole.self, forKey: .role)
+    }
+}
+
+public struct HubSyncActivityEvent: Decodable, Equatable, Sendable, Identifiable {
+    public let eventID: String
+    public let sequence: UInt64
+    public let occurredAt: String
+    public let kind: String
+    public let actor: HubSyncActivityActor
+    public let resource: String
+
+    public var id: String { eventID }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case eventID = "event_id"
+        case sequence
+        case occurredAt = "occurred_at"
+        case kind
+        case actor
+        case resource
+        case details
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eventID = try container.decode(String.self, forKey: .eventID)
+        sequence = try container.decode(UInt64.self, forKey: .sequence)
+        occurredAt = try container.decode(String.self, forKey: .occurredAt)
+        kind = try container.decode(String.self, forKey: .kind)
+        actor = try container.decode(HubSyncActivityActor.self, forKey: .actor)
+        resource = try container.decode(String.self, forKey: .resource)
+        _ = try container.decode(StudioDiscardedJSONValue.self, forKey: .details)
+    }
+}
+
+public struct HubSyncActivityPage: Decodable, Equatable, Sendable {
+    public let items: [HubSyncActivityEvent]
+    public let nextCursor: String
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case items
+        case nextCursor = "next_cursor"
+    }
+
+    public init(from decoder: Decoder) throws {
+        try decoder.rejectStudioUnknownKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decode([HubSyncActivityEvent].self, forKey: .items)
+        nextCursor = try container.decode(String.self, forKey: .nextCursor)
+    }
+}
+
+private enum StudioDiscardedJSONValue: Decodable {
+    case discarded
+
+    init(from decoder: Decoder) throws {
+        if var array = try? decoder.unkeyedContainer() {
+            while !array.isAtEnd { _ = try array.decode(StudioDiscardedJSONValue.self) }
+            self = .discarded
+            return
+        }
+        if let object = try? decoder.container(keyedBy: StudioDynamicCodingKey.self) {
+            for key in object.allKeys { _ = try object.decode(StudioDiscardedJSONValue.self, forKey: key) }
+            self = .discarded
+            return
+        }
+        let value = try decoder.singleValueContainer()
+        if value.decodeNil() || (try? value.decode(Bool.self)) != nil
+            || (try? value.decode(Double.self)) != nil || (try? value.decode(String.self)) != nil {
+            self = .discarded
+            return
+        }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid JSON value"))
+    }
+}
+
+struct HubSyncStatusRequest: Encodable {
+    let remote: HubSyncRemote
+    let refNames: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case remote
+        case refNames = "ref_names"
+    }
+}
+
+struct HubSyncTransferRequest: Encodable {
+    let remote: HubSyncRemote
+    let refNames: [String]
+    let createdBy: HubSyncActor
+    let message: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case remote
+        case refNames = "ref_names"
+        case createdBy = "created_by"
+        case message
+    }
+}
+
+struct HubSyncActivityRequest: Encodable {
+    let remote: HubSyncRemote
+    let afterSequence: UInt64?
+    let limit: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case remote
+        case afterSequence = "after_sequence"
+        case limit
+    }
+}
+
 public protocol HostClient: Sendable {
     func getStatus() async throws -> HostStatus
     func listSnapshots() async throws -> SnapshotPage
@@ -650,6 +1103,26 @@ public protocol HostClient: Sendable {
     func runExploration(_ command: ExplorationRunCommand) async throws -> ExplorationOperationRef
     func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord
     func cancelExploration(id: String) async throws -> ExplorationOperationRef
+
+    // Optional Hub collaboration over the local Host; credentials never go
+    // directly from Studio to a remote transport implementation.
+    func getSyncStatus(remote: HubSyncRemote, refNames: [String]?) async throws -> HubSyncStatus
+    func fetchWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor
+    ) async throws -> HubSyncFetchOutcome
+    func pushWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor,
+        message: String?
+    ) async throws -> HubSyncPushOutcome
+    func getSyncActivity(
+        remote: HubSyncRemote,
+        afterSequence: UInt64?,
+        limit: Int?
+    ) async throws -> HubSyncActivityPage
 }
 
 public extension HostClient {
@@ -675,6 +1148,35 @@ public extension HostClient {
         buildID: String
     ) async throws -> ScreenStateDetail {
         try await getScreenState(id: id)
+    }
+
+    func getSyncStatus(remote: HubSyncRemote, refNames: [String]?) async throws -> HubSyncStatus {
+        throw HostClientError.fixtureUnavailable("Hub sync requires a managed production Host.")
+    }
+
+    func fetchWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor
+    ) async throws -> HubSyncFetchOutcome {
+        throw HostClientError.fixtureUnavailable("Hub sync requires a managed production Host.")
+    }
+
+    func pushWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor,
+        message: String?
+    ) async throws -> HubSyncPushOutcome {
+        throw HostClientError.fixtureUnavailable("Hub sync requires a managed production Host.")
+    }
+
+    func getSyncActivity(
+        remote: HubSyncRemote,
+        afterSequence: UInt64?,
+        limit: Int?
+    ) async throws -> HubSyncActivityPage {
+        throw HostClientError.fixtureUnavailable("Hub sync requires a managed production Host.")
     }
 }
 

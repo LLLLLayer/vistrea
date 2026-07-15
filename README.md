@@ -80,9 +80,10 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 1. Add dedicated Studio controls for source suggestions and Knowledge Collection management; Difference promotion and fresh-build recapture verification are implemented.
 2. Run the remaining Android adb physical vertical lane, extend the verified iOS pinned-TLS lane across the broader native tuning matrix, and strengthen the iOS Release artifact boundary.
 3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
-4. Add Hub discovery, subscriptions, versioned collaboration mutations, and
-   user-facing Studio sync on top of the verified project and organization-
-   scoped team permission/audit Beta.
+4. Extend the shipped Studio ref-sync workspace with searchable Hub discovery,
+   subscriptions, versioned collaboration mutations, and guided conflict
+   resolution on top of the verified project and organization-scoped team
+   permission/audit Beta.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
@@ -90,7 +91,7 @@ Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and 
 
 Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 89 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, portable full/thin `.vistrea-pack` exchange, and immutable Knowledge Collection publication with readable Markdown/HTML exports over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 65 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 69 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
 
 The iOS physical-device vertical is verified on an iPhone 14 Pro running iOS
 26.5: its exact-IP TLS 1.3 Runtime listener and leaf-certificate-pinned client
@@ -108,9 +109,13 @@ Administrators can grant, re-role, revoke, and rotate project or team
 principals online. Direct and inherited roles preserve their source and combine
 by effective maximum; team mutations are visible in every child project's
 audit/activity stream. Private atomic role and directory state survive restart
-while all plaintext tokens rotate. Search, subscriptions, organization-wide
-roles, versioned collaboration endpoints, and Studio sync remain follow-up
-work.
+while all plaintext tokens rotate. The Engine, authenticated loopback Host,
+strict CLI, and Studio now share one safe synchronization surface: inspect
+identity and ref relations, discover team projects, fast-forward selected refs
+in either direction, preserve divergence as explicit conflicts, and poll token-free
+project activity. Search, subscriptions, organization-wide roles, multi-team
+sharing, versioned collaboration endpoints, and guided conflict resolution
+remain follow-up work.
 
 Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes, owns a default Application Support Workspace, and can switch Workspaces from its File menu, so a packaged app no longer depends on shell-provided Host credentials. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
 

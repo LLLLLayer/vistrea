@@ -12,10 +12,14 @@ The current executable Hub implements project-namespaced refs and pack sync,
 five dynamically managed roles, durable direct-project and organization-scoped
 team grants, revocable token rotation, an append-only operational audit store,
 and a safe pollable activity projection. Team grants inherit into every
-associated project, while a token remains invalid outside its exact team. It
-does not yet implement search, subscriptions, organization-wide roles,
-multi-team project sharing, or the versioned Review Issue/Design
-Baseline/Knowledge Collection mutation endpoints below.
+associated project, while a token remains invalid outside its exact team. The
+local Engine/Host adapter and its Studio/CLI clients can inspect effective
+identity, discover the projects visible to a team credential, compare selected
+local and remote refs, fetch, fast-forward push, and poll the safe activity
+projection. Hub does not yet implement search, subscriptions,
+organization-wide roles, multi-team project sharing, guided conflict
+resolution, or the versioned Review Issue/Design Baseline/Knowledge Collection
+mutation endpoints below.
 
 The additional executable endpoints are:
 
@@ -91,6 +95,35 @@ POST   /v1/projects/{project_id}/packs:export
 Ref names are carried in request bodies, not raw URL path segments, because names contain `/`. `refs:update` requires the same explicit `RefUpdatePrecondition` as the Data API: `must_match`, `must_not_exist`, or policy-authorized `force`. A mismatch returns `conflict` with the remote target; omission never means force.
 
 `protocol:negotiate` selects manifest and API versions before a sync session. `POST commits` validates canonical identity, parent availability or thin-push policy, object references, and authorization before accepting a manifest.
+
+### 3.1 Implemented local product adapter
+
+Studio and Coding Agents never duplicate Hub pack logic. The Engine owns ref
+comparison and sync orchestration, while the authenticated loopback Host
+accepts the remote credential only in a bounded JSON request body:
+
+```text
+POST /v1/sync/status
+POST /v1/sync/fetch
+POST /v1/sync/push
+POST /v1/sync/activity
+```
+
+Every request carries `remote: { base_url, project_id, bearer_token }`. Status
+may carry `ref_names`; fetch and push require canonical `ref_names` and
+`created_by`; push may include a bounded `message`; activity may include
+`after_sequence` and `limit`. The Host response contains only the sanitized
+remote origin and Project ID, effective identity and permission sources,
+accessible projects, ref relations, transfer reports, conflicts, or safe
+activity. It never contains the bearer token.
+
+The strict CLI reads the remote credential only from `VISTREA_HUB_TOKEN` and
+provides `sync status`, `sync fetch`, `sync push`, and `sync activity`. Studio
+keeps the credential in the current model session, persists only non-secret
+form preferences, and clears the credential on disconnect. Fetch and push
+advance only ancestry-proven fast-forwards under compare-and-set preconditions
+and never force a ref: a non-fast-forward remains `diverged` with both commit
+IDs for a later explicit resolution workflow.
 
 Object negotiation request:
 

@@ -17,7 +17,7 @@ The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/sha
 
 ## 1. Implemented operations
 
-All 65 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 69 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
@@ -110,6 +110,23 @@ All 65 operations below are implemented end to end through the Host Local API an
 | `SuppressValidationFinding` | C | `POST /v1/validation/findings/<id>/suppress` | `validate suppress` |
 | `CompareBuilds` | C | `POST /v1/validation/build-diffs` | `validate build-diff` |
 | `GetBuildDiff` | Q | `GET /v1/validation/build-diffs/<id>` | `validate get-build-diff` |
+
+### Hub synchronization
+
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `GetSyncStatus` | Q | `POST /v1/sync/status` | `sync status` |
+| `FetchWorkspace` | C | `POST /v1/sync/fetch` | `sync fetch` |
+| `PushWorkspace` | C | `POST /v1/sync/push` | `sync push` |
+| `GetSyncActivity` | Q | `POST /v1/sync/activity` | `sync activity` |
+
+These routes use `POST` even for the two queries because the Hub credential
+travels in an authenticated local request body, never in a URL, argv, log, or
+response. Status returns the effective identity and permission sources,
+team-visible projects, and a local/remote relation for each selected ref.
+Fetch and push serialize per Host, transfer immutable packs, return a fresh
+status, and surface conflicts without force. Activity is the Hub's token-free,
+project-local collaboration projection.
 
 ### Portable exchange
 
@@ -217,8 +234,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 |---|---|---|---|---|---|---|---|
 | `CommitWorkingSetAndUpdateRef` | C | `CommitWorkingSetCommand -> CommitAndRefResult` | sync | Versioning / Vr,Obj | object integrity and ref CAS | `version commit` / — | 0B |
 | `CreateTag` | C | `CreateTagCommand -> Tag` | sync | Versioning / Vr | tag policy | `version tag` / — | 0B |
-| `FetchWorkspace` | C | `FetchWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote read policy | `sync fetch` / — | 5 |
-| `PushWorkspace` | C | `PushWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote write policy | `sync push` / — | 5 |
 | `PullWorkspace` | C | `PullWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | conflict policy | `sync pull` / — | 5 |
 | `PublishRef` | C | `PublishRefCommand -> PublishResult` | async | Sync / Vr,Sy,Op | publication policy | `sync publish` | 5 |
 | `SubscribeRef` | C | `SubscribeRefCommand -> Subscription` | sync | Sync / Sy | read permission | `sync subscribe` / — | 5 |
@@ -227,7 +242,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 | `GetRef` | Q | `GetRefQuery -> Ref` | sync | Versioning / Vr | ref visible | `version ref-get` / — | 0B |
 | `ListCommits` | Q | `CommitQuery -> Page<Commit>` | sync | Versioning / Vr | history scope | `version log` / — | 0B |
 | `CompareCommits` | Q | `CompareCommitsQuery -> CommitDiff` | sync | Versioning / Vr | both commits visible | `version diff` / — | 0B |
-| `GetSyncStatus` | Q | `SyncStatusQuery -> SyncStatus` | sync | Sync / Vr,Sy | remote configured | `sync status` | 5 |
 | `ListSyncConflicts` | Q | `SyncConflictQuery -> Page<SyncConflict>` | sync | Sync / Sy | remote configured | `sync conflicts` / — | 5 |
 
 ### Generic operations

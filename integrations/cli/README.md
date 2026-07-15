@@ -64,6 +64,10 @@ vistrea validate get-finding <finding_id>
 vistrea validate suppress <finding_id> --json <command>
 vistrea validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id> [--baseline <tag>]
 vistrea validate get-build-diff <build_diff_id>
+vistrea sync status --url <https-origin> --project <project_id> [--refs a,b]
+vistrea sync fetch --url <https-origin> --project <project_id> --refs a,b [--actor <id>]
+vistrea sync push --url <https-origin> --project <project_id> --refs a,b [--actor <id>] [--message <text>]
+vistrea sync activity --url <https-origin> --project <project_id> [--after-sequence <n>] [--limit <n>]
 vistrea pack export --json <command>
 vistrea pack import --file <path>
 vistrea object get --hash <sha256:...> --output <path>
@@ -106,7 +110,11 @@ export VISTREA_HOST_URL=http://127.0.0.1:43123
 node .build/typescript/integrations/cli/main.js workspace status --format json
 ```
 
-There is intentionally no token command-line option. Do not place the token in argv, command output, shell tracing, or logs. See `../shared/README.md` for timeout and response-limit configuration.
+There is intentionally no token command-line option. Do not place the Host or
+Hub token in argv, command output, shell tracing, or logs. Sync commands read
+the current Hub credential only from `VISTREA_HUB_TOKEN`; their results contain
+the selected origin and project but never echo the credential. See
+`../shared/README.md` for timeout and response-limit configuration.
 
 Phase 0B capture waits for the current Host endpoint and returns its canonical `RuntimeSnapshot` directly. When the durable asynchronous `CaptureSnapshot` operation lifecycle in the Operation Catalog is implemented, this adapter must advance to immediate `OperationRef` plus `GetOperationResult` without changing capture behavior privately.
 
@@ -131,7 +139,8 @@ Ctrl+C. They belong to the `exploration` toolset.
 `VISTREA_CLI_TOOLSETS` selects which named command surfaces the CLI exposes,
 keyed by the first command word: `workspace` (always on), `assets`
 (`snapshot`, `events`, `object`, `pack`), `exploration` (`explore`, `graph`,
-`screen`, `driver`), `knowledge` (`wiki`, `collection`), and `verification` (`design`, `issue`,
+`screen`, `driver`), `knowledge` (`wiki`, `collection`), `collaboration`
+(`sync`), and `verification` (`design`, `issue`,
 `tuning`, `validate`). Unset means every surface. A masked command group
 disappears from `help` and fails closed as `unsupported` (exit 6) at dispatch;
 an unknown set name is `invalid_argument` (exit 2) naming the valid sets.
