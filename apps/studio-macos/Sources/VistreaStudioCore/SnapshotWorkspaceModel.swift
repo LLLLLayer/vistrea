@@ -99,6 +99,24 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var canvasStates: [CanvasLayout.PositionedState] = []
     @Published public private(set) var wikiPhase: EventTimelinePhase = .idle
     @Published public private(set) var wikiNodes: [WikiNodeSummary] = []
+    @Published public internal(set) var knowledgeCollectionsPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var knowledgeCollections: [KnowledgeCollectionSummary] = []
+    @Published public internal(set) var selectedKnowledgeCollectionID: String?
+    @Published public internal(set) var selectedKnowledgeCollection: KnowledgeCollectionSummary?
+    @Published public internal(set) var knowledgeCollectionDetailPhase: SnapshotDetailPhase = .idle
+    @Published public internal(set) var knowledgeCollectionError: String?
+    @Published public internal(set) var knowledgeCollectionConflictNote: String?
+    @Published public internal(set) var isSavingKnowledgeCollection = false
+    @Published public internal(set) var validationPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var lastValidationRun: ValidationRunSummary?
+    @Published public internal(set) var validationFindings: [ValidationFindingSummary] = []
+    @Published public internal(set) var validationError: String?
+    @Published public internal(set) var isValidating = false
+    @Published public internal(set) var suppressingFindingIDs: Set<String> = []
+    @Published public internal(set) var buildDiffPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var lastBuildDiff: BuildDiffSummary?
+    @Published public internal(set) var buildDiffError: String?
+    @Published public internal(set) var isComparingBuilds = false
     @Published public private(set) var layerBoxes: [LayerBox3D] = []
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isCapturing = false
@@ -108,7 +126,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     // authorized Debug Runtime; Studio itself ships no build-time guard.
     @Published public private(set) var tuningPhase: EventTimelinePhase = .idle
     @Published public private(set) var activeTuning: [TuningApplicationSummary] = []
+    @Published public private(set) var lastTuningPatch: TuningPatchSummary?
     @Published public private(set) var lastTuningApplication: TuningApplicationSummary?
+    @Published public private(set) var tuningSourceSuggestionsPhase: EventTimelinePhase = .idle
+    @Published public private(set) var tuningSourceSuggestions: [TuningSourceSuggestionSummary] = []
     @Published public private(set) var tuningError: String?
     @Published public private(set) var isApplyingTuning = false
     @Published public private(set) var revertingTuningIDs: Set<String> = []
@@ -216,9 +237,14 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         try await Task.sleep(nanoseconds: 2_000_000_000)
     }
     private var wikiGeneration = 0
+    var knowledgeCollectionsGeneration = 0
+    var knowledgeCollectionDetailGeneration = 0
+    var validationGeneration = 0
+    var buildDiffGeneration = 0
     private var issuesGeneration = 0
     private var eventsGeneration = 0
     private var tuningGeneration = 0
+    private var tuningSourceSuggestionsGeneration = 0
     private var issueDetailGeneration = 0
     private var wikiEditGeneration = 0
     private var canvasStateGeneration = 0
@@ -255,6 +281,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         contentPhase = .loading
         connectionPhase = .checking
         operationError = nil
+        resetQualityWorkspace()
 
         do {
             connectionPhase = .available(try await client.getStatus())
@@ -264,6 +291,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
 
         await loadEventTimeline()
         await loadWiki(text: nil)
+        await loadKnowledgeCollections(text: nil)
         await loadActiveTuning()
 
         do {
@@ -319,6 +347,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return
         }
         selectedScope = scope
+        resetQualityWorkspace()
         await selectCanvasState(id: nil)
         await loadCanvas(
             projectID: scope.projectID,
@@ -699,6 +728,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         isApplyingTuning = true
         tuningError = nil
+        tuningSourceSuggestionsGeneration += 1
+        lastTuningPatch = nil
+        tuningSourceSuggestions = []
+        tuningSourceSuggestionsPhase = .idle
         defer { isApplyingTuning = false }
         let draft = TuningPatchDraft(
             title: "Studio \(property) preview for \(stableID)",
@@ -720,6 +753,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         )
         do {
             let patch = try await client.createTuningPatch(draft)
+            lastTuningPatch = patch
             lastTuningApplication = try await client.applyTuningPatch(
                 patchID: patch.patchID,
                 previewTTLMilliseconds: nil
@@ -729,6 +763,46 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return
         }
         await loadActiveTuning()
+    }
+
+    /// Generates a source-oriented handoff from the exact persisted Tuning
+    /// Patch that produced the latest preview. The Host explicitly reports
+    /// missing source mapping instead of inventing a file path.
+    public func loadTuningSourceSuggestions() async {
+        guard let patch = lastTuningPatch else {
+            tuningSourceSuggestions = []
+            tuningSourceSuggestionsPhase = .failure(
+                "Apply a tuning preview before preparing a source handoff."
+            )
+            return
+        }
+        tuningSourceSuggestionsGeneration += 1
+        let generation = tuningSourceSuggestionsGeneration
+        tuningSourceSuggestionsPhase = .loading
+        do {
+            let result = try await client.getTuningSourceSuggestions(patchID: patch.patchID)
+            guard generation == tuningSourceSuggestionsGeneration,
+                  lastTuningPatch?.patchID == patch.patchID
+            else {
+                return
+            }
+            guard result.patchID == patch.patchID,
+                  result.patchRevision == patch.revision,
+                  result.targetSnapshotID == patch.targetSnapshotID
+            else {
+                throw HostClientError.decoding(
+                    "The source handoff does not match the selected Tuning Patch."
+                )
+            }
+            tuningSourceSuggestions = result.suggestions
+            tuningSourceSuggestionsPhase = result.suggestions.isEmpty ? .empty : .content
+        } catch {
+            guard generation == tuningSourceSuggestionsGeneration else {
+                return
+            }
+            tuningSourceSuggestions = []
+            tuningSourceSuggestionsPhase = .failure(Self.message(for: error))
+        }
     }
 
     /// Reverts one active tuning preview and refreshes the active list.

@@ -12,6 +12,10 @@ private let issueID = "issue_019f0000-0000-7000-8000-000000000001"
 private let wikiNodeID = "wiki_019f0000-0000-7000-8000-000000000001"
 private let wikiLinkID = "wikilink_019f0000-0000-7000-8000-000000000001"
 private let screenStateID = "screenstate_019f0000-0000-7000-8000-000000000001"
+private let collectionID = "collection_019f0000-0000-7000-8000-000000000001"
+private let validationRunID = "validationrun_019f0000-0000-7000-8000-000000000001"
+private let findingID = "finding_019f0000-0000-7000-8000-000000000001"
+private let buildDiffID = "builddiff_019f0000-0000-7000-8000-000000000001"
 
 final class HostClientWriteTests: XCTestCase {
     private func makeClient(_ transport: WriteRecordingTransport) throws -> HTTPHostClient {
@@ -55,9 +59,21 @@ final class HostClientWriteTests: XCTestCase {
         """#
     }
 
+    private static func sourceSuggestionResponseJSON() -> String {
+        #"""
+        {"patch_id":"\#(patchID)","patch_revision":1,"target_snapshot_id":"\#(snapshotID)",
+         "suggestions":[{"tuning_change_id":"tuningchange_019f0000-0000-7000-8000-000000000001",
+           "property":"alpha","stable_id":"demo.home.open_catalog","status":"needs_source_mapping",
+           "original_value":{"kind":"number","value":1,"unit":"ratio","extensions":{}},
+           "suggested_value":{"kind":"number","value":0.5,"unit":"ratio","extensions":{}},
+           "coding_agent_instructions":["Locate the source element by stable ID."]}]}
+        """#
+    }
+
     func testTuningRoutesEncodeCanonicalCommandsAndDecodeApplications() async throws {
         let transport = WriteRecordingTransport(responses: [
             HostHTTPResponse(statusCode: 201, body: Data(Self.patchResponseJSON().utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(Self.sourceSuggestionResponseJSON().utf8)),
             HostHTTPResponse(statusCode: 201, body: Data(Self.applicationResponseJSON(status: "partially_active").utf8)),
             HostHTTPResponse(statusCode: 200, body: Data(Self.applicationResponseJSON(status: "reverted").utf8)),
             HostHTTPResponse(
@@ -90,6 +106,13 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(patch.patchID, patchID)
         XCTAssertEqual(patch.targetSnapshotID, snapshotID)
 
+        let sourceHandoff = try await client.getTuningSourceSuggestions(patchID: patchID)
+        XCTAssertEqual(sourceHandoff.patchID, patchID)
+        XCTAssertEqual(sourceHandoff.suggestions.map(\.status), ["needs_source_mapping"])
+        XCTAssertEqual(sourceHandoff.suggestions.first?.stableID, "demo.home.open_catalog")
+        XCTAssertTrue(sourceHandoff.suggestions.first?.originalValuePresentation.contains("number") == true)
+        XCTAssertTrue(sourceHandoff.suggestions.first?.suggestedValuePresentation.contains("0.5") == true)
+
         let application = try await client.applyTuningPatch(
             patchID: patchID,
             previewTTLMilliseconds: 30_000
@@ -105,16 +128,18 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(active.items.map(\.status), ["active"])
 
         let requests = await transport.requests
-        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "POST", "POST", "GET"])
+        XCTAssertEqual(requests.map(\.httpMethod), ["POST", "GET", "POST", "POST", "GET"])
         XCTAssertEqual(requests.map { $0.url?.path }, [
             "/v1/tuning-patches",
+            "/v1/tuning-patches/\(patchID)/source-suggestions",
             "/v1/tuning-applications",
             "/v1/tuning-applications/\(applicationID)/revert",
             "/v1/tuning-applications/active",
         ])
-        XCTAssertTrue(requests.prefix(3).allSatisfy {
-            $0.value(forHTTPHeaderField: "Content-Type") == "application/json"
-        })
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertNil(requests[1].value(forHTTPHeaderField: "Content-Type"))
+        XCTAssertEqual(requests[2].value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(requests[3].value(forHTTPHeaderField: "Content-Type"), "application/json")
 
         let patchBody = try bodyObject(of: requests[0])
         XCTAssertEqual(
@@ -141,13 +166,13 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(actor["id"] as? String, "studio")
         XCTAssertNotNil(actor["extensions"])
 
-        let applyBody = try bodyObject(of: requests[1])
+        let applyBody = try bodyObject(of: requests[2])
         XCTAssertEqual(Set(applyBody.keys), ["patch_id", "preview_ttl_ms"])
         XCTAssertEqual(applyBody["patch_id"] as? String, patchID)
         XCTAssertEqual(applyBody["preview_ttl_ms"] as? Int, 30_000)
 
         XCTAssertEqual(
-            String(data: try XCTUnwrap(requests[2].httpBody), encoding: .utf8),
+            String(data: try XCTUnwrap(requests[3].httpBody), encoding: .utf8),
             "{}"
         )
     }
@@ -214,6 +239,222 @@ final class HostClientWriteTests: XCTestCase {
         XCTAssertEqual(transitionBody["expected_revision"] as? Int, 1)
         XCTAssertEqual(transitionBody["to_state"] as? String, "in_progress")
         XCTAssertEqual(transitionBody["reason"] as? String, "Taking this for triage")
+    }
+
+    func testKnowledgeCollectionRoutesEncodeMembershipAndRevision() async throws {
+        let collectionJSON = #"""
+        {"collection_id":"\#(collectionID)","protocol_version":{"major":1,"minor":0},
+         "revision":1,"name":"Runtime guide","summary":"Local product knowledge.",
+         "node_ids":["\#(wikiNodeID)"],"link_ids":[],"entry_node_ids":["\#(wikiNodeID)"],
+         "publication":{"state":"draft","extensions":{}},
+         "created_at":"2026-07-16T00:00:00Z","created_by":{"kind":"human","id":"studio","extensions":{}},
+         "updated_at":"2026-07-16T00:00:00Z","updated_by":{"kind":"human","id":"studio","extensions":{}},
+         "extensions":{}}
+        """#
+        let revisedJSON = collectionJSON.replacingOccurrences(
+            of: #""revision":1,"name":"Runtime guide""#,
+            with: #""revision":2,"name":"Runtime guide v2""#
+        )
+        let transport = WriteRecordingTransport(responses: [
+            HostHTTPResponse(statusCode: 200, body: Data(#"{"items":[\#(collectionJSON)]}"#.utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(collectionJSON.utf8)),
+            HostHTTPResponse(statusCode: 201, body: Data(collectionJSON.utf8)),
+            HostHTTPResponse(statusCode: 200, body: Data(revisedJSON.utf8)),
+        ])
+        let client = try makeClient(transport)
+
+        let page = try await client.listKnowledgeCollections(
+            text: "Runtime",
+            publicationStates: ["draft"]
+        )
+        XCTAssertEqual(page.items.map(\.id), [collectionID])
+        let loaded = try await client.getKnowledgeCollection(id: collectionID)
+        XCTAssertEqual(loaded.name, "Runtime guide")
+
+        _ = try await client.createKnowledgeCollection(
+            KnowledgeCollectionDraft(
+                name: "Runtime guide",
+                summary: "Local product knowledge.",
+                nodeIDs: [wikiNodeID],
+                entryNodeIDs: [wikiNodeID]
+            )
+        )
+        let revised = try await client.reviseKnowledgeCollection(
+            id: collectionID,
+            KnowledgeCollectionRevisionDraft(
+                expectedRevision: 1,
+                name: "Runtime guide v2"
+            )
+        )
+        XCTAssertEqual(revised.revision, 2)
+        XCTAssertEqual(revised.name, "Runtime guide v2")
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "GET", "POST", "POST"])
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/v1/knowledge-collections",
+            "/v1/knowledge-collections/\(collectionID)",
+            "/v1/knowledge-collections",
+            "/v1/knowledge-collections/\(collectionID)/revisions",
+        ])
+        let query = URLComponents(url: try XCTUnwrap(requests[0].url), resolvingAgainstBaseURL: false)
+        XCTAssertEqual(query?.queryItems?.first(where: { $0.name == "text" })?.value, "Runtime")
+        XCTAssertEqual(
+            query?.queryItems?.first(where: { $0.name == "publication_states" })?.value,
+            "draft"
+        )
+        let createBody = try bodyObject(of: requests[2])
+        XCTAssertEqual(createBody["node_ids"] as? [String], [wikiNodeID])
+        XCTAssertEqual(createBody["entry_node_ids"] as? [String], [wikiNodeID])
+        XCTAssertNotNil(createBody["created_by"])
+        let revisionBody = try bodyObject(of: requests[3])
+        XCTAssertEqual(revisionBody["expected_revision"] as? Int, 1)
+        XCTAssertEqual(revisionBody["name"] as? String, "Runtime guide v2")
+        XCTAssertNotNil(revisionBody["updated_by"])
+    }
+
+    func testQualityRoutesEncodeCanonicalCommandsAndDecodeResults() async throws {
+        let runData = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/validation/valid/run-succeeded.json"
+        )
+        let findingData = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/validation/valid/finding-with-evidence.json"
+        )
+        let buildDiffData = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/validation/valid/build-diff.json"
+        )
+        let runObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: runData) as? [String: Any]
+        )
+        let findingObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: findingData) as? [String: Any]
+        )
+        let outcomeData = try JSONSerialization.data(
+            withJSONObject: ["run": runObject, "findings": [findingObject]]
+        )
+        let findingPageData = try JSONSerialization.data(
+            withJSONObject: ["items": [findingObject]]
+        )
+        var suppressedFindingObject = findingObject
+        suppressedFindingObject["status"] = "suppressed"
+        suppressedFindingObject["revision"] = 2
+        let suppressedFindingData = try JSONSerialization.data(withJSONObject: suppressedFindingObject)
+
+        let transport = WriteRecordingTransport(responses: [
+            HostHTTPResponse(statusCode: 201, body: outcomeData),
+            HostHTTPResponse(statusCode: 201, body: outcomeData),
+            HostHTTPResponse(statusCode: 200, body: runData),
+            HostHTTPResponse(statusCode: 200, body: findingPageData),
+            HostHTTPResponse(statusCode: 200, body: suppressedFindingData),
+            HostHTTPResponse(statusCode: 201, body: buildDiffData),
+            HostHTTPResponse(statusCode: 200, body: buildDiffData),
+        ])
+        let client = try makeClient(transport)
+        let projectID = "project_019f0000-0000-7000-8000-000000000001"
+        let leftBuildID = "build_019f0000-0000-7000-8000-000000000001"
+        let rightBuildID = "build_019f0000-0000-7000-8000-000000000002"
+
+        let snapshotOutcome = try await client.validateSnapshot(
+            ValidateSnapshotDraft(
+                snapshotID: snapshotID,
+                categories: ["accessibility", "structural"],
+                configuration: ValidationConfigurationDraft(minimumTouchTargetPoints: 44)
+            )
+        )
+        XCTAssertEqual(snapshotOutcome.run.validationRunID, validationRunID)
+        XCTAssertEqual(snapshotOutcome.findings.map(\.findingID), [findingID])
+
+        let graphOutcome = try await client.validateScreenGraph(
+            ValidateScreenGraphDraft(
+                projectID: projectID,
+                applicationID: "dev.vistrea.demo"
+            )
+        )
+        XCTAssertEqual(graphOutcome.run.findingCounts.open, 1)
+
+        let run = try await client.getValidationRun(id: validationRunID)
+        XCTAssertEqual(run.state, "succeeded")
+        let findings = try await client.listValidationFindings(runID: validationRunID)
+        XCTAssertEqual(findings.items.map(\.ruleID), ["accessibility.minimum-touch-target"])
+        XCTAssertTrue(findings.items.first?.expectedPresentation?.contains("minimum_width") == true)
+        XCTAssertTrue(findings.items.first?.actualPresentation?.contains("width") == true)
+        let suppressed = try await client.suppressValidationFinding(
+            id: findingID,
+            SuppressValidationFindingDraft(
+                expectedFindingRevision: 1,
+                reasonCode: "accepted_risk",
+                justification: "Accepted for the local fixture workflow."
+            )
+        )
+        XCTAssertEqual(suppressed.status, "suppressed")
+        XCTAssertEqual(suppressed.revision, 2)
+
+        let compared = try await client.compareBuilds(
+            BuildDiffCommandDraft(
+                projectID: projectID,
+                applicationID: "dev.vistrea.demo",
+                leftBuildID: leftBuildID,
+                rightBuildID: rightBuildID,
+                baselineTag: "local-beta"
+            )
+        )
+        XCTAssertEqual(compared.buildDiffID, buildDiffID)
+        XCTAssertEqual(compared.entries.map(\.kind), ["regressed"])
+        let loadedDiff = try await client.getBuildDiff(id: buildDiffID)
+        XCTAssertEqual(loadedDiff.summary.regressed, 1)
+
+        let requests = await transport.requests
+        XCTAssertEqual(
+            requests.map(\.httpMethod),
+            ["POST", "POST", "GET", "GET", "POST", "POST", "GET"]
+        )
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/v1/validation/snapshot-runs",
+            "/v1/validation/graph-runs",
+            "/v1/validation/runs/\(validationRunID)",
+            "/v1/validation/findings",
+            "/v1/validation/findings/\(findingID)/suppress",
+            "/v1/validation/build-diffs",
+            "/v1/validation/build-diffs/\(buildDiffID)",
+        ])
+        let findingQuery = URLComponents(
+            url: try XCTUnwrap(requests[3].url),
+            resolvingAgainstBaseURL: false
+        )
+        XCTAssertEqual(
+            findingQuery?.queryItems?.first(where: { $0.name == "validation_run_id" })?.value,
+            validationRunID
+        )
+
+        let snapshotBody = try bodyObject(of: requests[0])
+        XCTAssertEqual(Set(snapshotBody.keys), ["snapshot_id", "categories", "configuration"])
+        XCTAssertEqual(snapshotBody["snapshot_id"] as? String, snapshotID)
+        XCTAssertEqual(snapshotBody["categories"] as? [String], ["accessibility", "structural"])
+        let configuration = try XCTUnwrap(snapshotBody["configuration"] as? [String: Any])
+        XCTAssertEqual(configuration["minimum_touch_target_points"] as? Double, 44)
+
+        let graphBody = try bodyObject(of: requests[1])
+        XCTAssertEqual(Set(graphBody.keys), ["project_id", "application_id"])
+        XCTAssertEqual(graphBody["project_id"] as? String, projectID)
+        XCTAssertEqual(graphBody["application_id"] as? String, "dev.vistrea.demo")
+
+        let suppressionBody = try bodyObject(of: requests[4])
+        XCTAssertEqual(
+            Set(suppressionBody.keys),
+            ["expected_finding_revision", "reason_code", "justification", "created_by"]
+        )
+        XCTAssertEqual(suppressionBody["expected_finding_revision"] as? Int, 1)
+        XCTAssertEqual(suppressionBody["reason_code"] as? String, "accepted_risk")
+        XCTAssertNotNil(suppressionBody["created_by"])
+
+        let compareBody = try bodyObject(of: requests[5])
+        XCTAssertEqual(
+            Set(compareBody.keys),
+            ["project_id", "application_id", "left_build_id", "right_build_id", "baseline_tag"]
+        )
+        XCTAssertEqual(compareBody["left_build_id"] as? String, leftBuildID)
+        XCTAssertEqual(compareBody["right_build_id"] as? String, rightBuildID)
+        XCTAssertEqual(compareBody["baseline_tag"] as? String, "local-beta")
     }
 
     func testBuildScopedCanvasStateAndReviewIssueRoutes() async throws {

@@ -32,15 +32,17 @@ Workspace
 ├── Evidence
 ├── Documents
 ├── Wiki
+├── Quality
 └── Hub
 ```
 
 Canvas owns exploration and the selected Screen State Inspector. Evidence is
 the secondary raw Snapshot library. Documents browses source-repository
-Markdown without importing it. Wiki owns Vistrea knowledge, and Hub owns the
-optional collaboration workflow. Design Review remains implemented behind the
-shared contracts but is intentionally absent from this default navigation and
-Inspector surface.
+Markdown without importing it. Wiki owns Vistrea knowledge. Quality owns
+Snapshot and Screen Graph validation plus same-application Build Diff, and Hub
+owns the optional collaboration workflow. Design Review remains implemented
+behind the shared contracts but is intentionally absent from this default
+navigation and Inspector surface.
 
 ## 3. Main window composition
 
@@ -50,6 +52,7 @@ Inspector surface.
 ├──────────────┬───────────────────────────────────┬─────────────────┤
 │ Navigation   │ Main content                      │ Context panel   │
 │              │ Canvas / Screenshot / Docs / Tree │ Properties      │
+│              │ Quality / Wiki / Hub              │ Findings        │
 │              │                                   │ Issues          │
 │              │                                   │ Evidence        │
 ├──────────────┴───────────────────────────────────┴─────────────────┤
@@ -304,6 +307,9 @@ Rules:
 - Saving a Tuning Patch does not claim the source code changed.
 - A Review Issue becomes verified only after capture from a real later build.
 - Partial patch application lists rejected properties and reasons.
+- Source handoff is generated from the exact persisted Tuning Patch. Studio
+  shows canonical Coding Agent instructions and reports missing source mapping
+  explicitly; it never invents a file path.
 
 ## 10. Workflow: verify a new build
 
@@ -318,6 +324,13 @@ Select baseline build/ref and candidate build/ref
 -> accept or reject candidate baseline
 -> create version Commit
 ```
+
+The current Quality workspace exposes the implemented local subset directly:
+it validates one selected Snapshot or the selected Screen Graph, displays exact
+Finding counts and subjects, and suppresses an open Finding only with a
+canonical reason, justification, and expected revision. Its Build Diff picker
+offers only observed builds from the same project and application. Fewer than
+two builds produces an explicit empty state; Studio never fabricates a diff.
 
 The diff UI distinguishes:
 
@@ -356,6 +369,9 @@ Search screen, route, component, text, issue, or path
 -> inspect backlinks and runtime evidence
 -> navigate to Canvas, Snapshot, issue, code, or design context
 -> edit knowledge and links
+-> switch to Collections
+-> choose an exact member set and explicit entry-node subset
+-> revise against the revision captured when editing began
 -> create Commit
 -> publish selected collection if authorized
 ```
@@ -442,4 +458,4 @@ Every primary screen defines:
 3. reversible allowlisted alpha, color, font, spacing/insets, and corner-radius tuning;
 4. Tuning Patch persistence, source-oriented Agent handoff, and fresh-build re-verification evidence.
 
-Canvas exploration, Deep Wiki editing, build diff, 3D inspection, and the first Hub ref-sync workspace are implemented. Searchable Hub discovery, subscriptions, versioned collaboration editors, guided conflict resolution, and dedicated Coding Agent operation review remain later milestones.
+Canvas exploration, Deep Wiki and Collection editing, Tuning Patch source handoff, local validation and Build Diff, 3D inspection, and the first Hub ref-sync workspace are implemented. Workspace maintenance controls, searchable Hub discovery, subscriptions, versioned collaboration editors, guided conflict resolution, and dedicated Coding Agent operation review remain later milestones.

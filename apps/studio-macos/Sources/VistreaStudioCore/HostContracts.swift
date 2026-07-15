@@ -1042,9 +1042,22 @@ public protocol HostClient: Sendable {
         buildID: String
     ) async throws -> CanvasGraph
     func searchWikiNodes(text: String?) async throws -> WikiNodePage
+    func listKnowledgeCollections(
+        text: String?,
+        publicationStates: [String]?
+    ) async throws -> KnowledgeCollectionPage
+    func getKnowledgeCollection(id: String) async throws -> KnowledgeCollectionSummary
+    func createKnowledgeCollection(
+        _ draft: KnowledgeCollectionDraft
+    ) async throws -> KnowledgeCollectionSummary
+    func reviseKnowledgeCollection(
+        id: String,
+        _ draft: KnowledgeCollectionRevisionDraft
+    ) async throws -> KnowledgeCollectionSummary
 
     // Tuning preview writes (Debug-only Host capability).
     func createTuningPatch(_ draft: TuningPatchDraft) async throws -> TuningPatchSummary
+    func getTuningSourceSuggestions(patchID: String) async throws -> TuningSourceSuggestionResult
     func applyTuningPatch(patchID: String, previewTTLMilliseconds: Int?) async throws -> TuningApplicationSummary
     func revertTuningApplication(id: String) async throws -> TuningApplicationSummary
     func listActiveTuningApplications() async throws -> TuningApplicationPage
@@ -1104,6 +1117,20 @@ public protocol HostClient: Sendable {
     func getExplorationOperation(id: String) async throws -> ExplorationOperationRecord
     func cancelExploration(id: String) async throws -> ExplorationOperationRef
 
+    // Local quality workflows over persisted Snapshot and Screen Graph truth.
+    func validateSnapshot(_ draft: ValidateSnapshotDraft) async throws -> ValidationOutcomeSummary
+    func validateScreenGraph(
+        _ draft: ValidateScreenGraphDraft
+    ) async throws -> ValidationOutcomeSummary
+    func getValidationRun(id: String) async throws -> ValidationRunSummary
+    func listValidationFindings(runID: String?) async throws -> ValidationFindingPage
+    func suppressValidationFinding(
+        id: String,
+        _ draft: SuppressValidationFindingDraft
+    ) async throws -> ValidationFindingSummary
+    func compareBuilds(_ draft: BuildDiffCommandDraft) async throws -> BuildDiffSummary
+    func getBuildDiff(id: String) async throws -> BuildDiffSummary
+
     // Optional Hub collaboration over the local Host; credentials never go
     // directly from Studio to a remote transport implementation.
     func getSyncStatus(remote: HubSyncRemote, refNames: [String]?) async throws -> HubSyncStatus
@@ -1126,6 +1153,75 @@ public protocol HostClient: Sendable {
 }
 
 public extension HostClient {
+    func listKnowledgeCollections(
+        text: String?,
+        publicationStates: [String]?
+    ) async throws -> KnowledgeCollectionPage {
+        KnowledgeCollectionPage(items: [])
+    }
+
+    func getKnowledgeCollection(id: String) async throws -> KnowledgeCollectionSummary {
+        throw HostClientError.fixtureUnavailable(
+            "Knowledge Collection lookup is unavailable from this Host client."
+        )
+    }
+
+    func createKnowledgeCollection(
+        _ draft: KnowledgeCollectionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        throw HostClientError.fixtureUnavailable(
+            "Knowledge Collection creation is unavailable from this Host client."
+        )
+    }
+
+    func reviseKnowledgeCollection(
+        id: String,
+        _ draft: KnowledgeCollectionRevisionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        throw HostClientError.fixtureUnavailable(
+            "Knowledge Collection editing is unavailable from this Host client."
+        )
+    }
+
+    func validateSnapshot(_ draft: ValidateSnapshotDraft) async throws -> ValidationOutcomeSummary {
+        throw HostClientError.fixtureUnavailable("Snapshot validation is unavailable from this Host client.")
+    }
+
+    func validateScreenGraph(
+        _ draft: ValidateScreenGraphDraft
+    ) async throws -> ValidationOutcomeSummary {
+        throw HostClientError.fixtureUnavailable("Screen Graph validation is unavailable from this Host client.")
+    }
+
+    func getValidationRun(id: String) async throws -> ValidationRunSummary {
+        throw HostClientError.fixtureUnavailable("Validation Run lookup is unavailable from this Host client.")
+    }
+
+    func listValidationFindings(runID: String?) async throws -> ValidationFindingPage {
+        ValidationFindingPage(items: [])
+    }
+
+    func suppressValidationFinding(
+        id: String,
+        _ draft: SuppressValidationFindingDraft
+    ) async throws -> ValidationFindingSummary {
+        throw HostClientError.fixtureUnavailable("Finding suppression is unavailable from this Host client.")
+    }
+
+    func compareBuilds(_ draft: BuildDiffCommandDraft) async throws -> BuildDiffSummary {
+        throw HostClientError.fixtureUnavailable("Build Diff is unavailable from this Host client.")
+    }
+
+    func getBuildDiff(id: String) async throws -> BuildDiffSummary {
+        throw HostClientError.fixtureUnavailable("Build Diff lookup is unavailable from this Host client.")
+    }
+
+    func getTuningSourceSuggestions(patchID: String) async throws -> TuningSourceSuggestionResult {
+        throw HostClientError.fixtureUnavailable(
+            "Tuning source suggestions are unavailable from this Host client."
+        )
+    }
+
     func listReviewIssues(
         states: [String]?,
         screenStateID: String?

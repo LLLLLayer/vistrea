@@ -314,6 +314,102 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func listKnowledgeCollections(
+        text: String?,
+        publicationStates: [String]?
+    ) async throws -> KnowledgeCollectionPage {
+        if let text {
+            guard !text.isEmpty, text.utf8.count <= 512 else {
+                throw HostClientError.invalidIdentifier("collection search text")
+            }
+        }
+        if let publicationStates {
+            guard !publicationStates.isEmpty,
+                  publicationStates.count <= 3,
+                  Set(publicationStates).count == publicationStates.count,
+                  publicationStates.allSatisfy({ ["draft", "published", "archived"].contains($0) })
+            else {
+                throw HostClientError.invalidIdentifier("collection publication states")
+            }
+        }
+        var query = text.map { [URLQueryItem(name: "text", value: $0)] } ?? []
+        if let publicationStates {
+            query.append(
+                URLQueryItem(
+                    name: "publication_states",
+                    value: publicationStates.joined(separator: ",")
+                )
+            )
+        }
+        return try await requestJSON(
+            KnowledgeCollectionPage.self,
+            method: "GET",
+            path: ["v1", "knowledge-collections"],
+            query: query
+        )
+    }
+
+    public func getKnowledgeCollection(id: String) async throws -> KnowledgeCollectionSummary {
+        guard Self.isTypedIdentifier(id, prefix: "collection") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            KnowledgeCollectionSummary.self,
+            method: "GET",
+            path: ["v1", "knowledge-collections", id]
+        )
+    }
+
+    public func createKnowledgeCollection(
+        _ draft: KnowledgeCollectionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        try Self.validateKnowledgeCollection(
+            name: draft.name,
+            nodeIDs: draft.nodeIDs,
+            entryNodeIDs: draft.entryNodeIDs
+        )
+        return try await sendJSON(
+            KnowledgeCollectionSummary.self,
+            path: ["v1", "knowledge-collections"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func reviseKnowledgeCollection(
+        id: String,
+        _ draft: KnowledgeCollectionRevisionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        guard Self.isTypedIdentifier(id, prefix: "collection"), draft.expectedRevision >= 1 else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        if let name = draft.name, name.isEmpty || name.count > 256 {
+            throw HostClientError.invalidConfiguration(
+                "A Knowledge Collection name must contain 1 through 256 characters."
+            )
+        }
+        if let nodeIDs = draft.nodeIDs {
+            guard !nodeIDs.isEmpty, Set(nodeIDs).count == nodeIDs.count else {
+                throw HostClientError.invalidConfiguration(
+                    "A Knowledge Collection requires unique member nodes."
+                )
+            }
+        }
+        if let entryNodeIDs = draft.entryNodeIDs {
+            guard !entryNodeIDs.isEmpty, Set(entryNodeIDs).count == entryNodeIDs.count else {
+                throw HostClientError.invalidConfiguration(
+                    "A Knowledge Collection requires unique entry nodes."
+                )
+            }
+        }
+        return try await sendJSON(
+            KnowledgeCollectionSummary.self,
+            path: ["v1", "knowledge-collections", id, "revisions"],
+            body: draft,
+            expectedStatus: 200
+        )
+    }
+
     public func createTuningPatch(_ draft: TuningPatchDraft) async throws -> TuningPatchSummary {
         guard (try? SnapshotID(validating: draft.targetSnapshotID)) != nil else {
             throw HostClientError.invalidIdentifier(draft.targetSnapshotID)
@@ -323,6 +419,19 @@ public struct HTTPHostClient: HostClient, Sendable {
             path: ["v1", "tuning-patches"],
             body: draft,
             expectedStatus: 201
+        )
+    }
+
+    public func getTuningSourceSuggestions(
+        patchID: String
+    ) async throws -> TuningSourceSuggestionResult {
+        guard Self.isTypedIdentifier(patchID, prefix: "patch") else {
+            throw HostClientError.invalidIdentifier(patchID)
+        }
+        return try await requestJSON(
+            TuningSourceSuggestionResult.self,
+            method: "GET",
+            path: ["v1", "tuning-patches", patchID, "source-suggestions"]
         )
     }
 
@@ -761,6 +870,114 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func validateSnapshot(
+        _ draft: ValidateSnapshotDraft
+    ) async throws -> ValidationOutcomeSummary {
+        guard (try? SnapshotID(validating: draft.snapshotID)) != nil else {
+            throw HostClientError.invalidIdentifier(draft.snapshotID)
+        }
+        try Self.validateValidationCategories(draft.categories)
+        return try await sendJSON(
+            ValidationOutcomeSummary.self,
+            path: ["v1", "validation", "snapshot-runs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func validateScreenGraph(
+        _ draft: ValidateScreenGraphDraft
+    ) async throws -> ValidationOutcomeSummary {
+        try Self.validateGraphIdentity(
+            projectID: draft.projectID,
+            applicationID: draft.applicationID
+        )
+        return try await sendJSON(
+            ValidationOutcomeSummary.self,
+            path: ["v1", "validation", "graph-runs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func getValidationRun(id: String) async throws -> ValidationRunSummary {
+        guard Self.isTypedIdentifier(id, prefix: "validationrun") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            ValidationRunSummary.self,
+            method: "GET",
+            path: ["v1", "validation", "runs", id]
+        )
+    }
+
+    public func listValidationFindings(runID: String?) async throws -> ValidationFindingPage {
+        if let runID, !Self.isTypedIdentifier(runID, prefix: "validationrun") {
+            throw HostClientError.invalidIdentifier(runID)
+        }
+        return try await requestJSON(
+            ValidationFindingPage.self,
+            method: "GET",
+            path: ["v1", "validation", "findings"],
+            query: runID.map { [URLQueryItem(name: "validation_run_id", value: $0)] } ?? []
+        )
+    }
+
+    public func suppressValidationFinding(
+        id: String,
+        _ draft: SuppressValidationFindingDraft
+    ) async throws -> ValidationFindingSummary {
+        guard Self.isTypedIdentifier(id, prefix: "finding"),
+              draft.expectedFindingRevision >= 1,
+              ["false_positive", "accepted_risk", "known_issue", "environment_variance", "other"]
+                .contains(draft.reasonCode),
+              !draft.justification.isEmpty,
+              draft.justification.count <= 2_048
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Finding suppression requires a canonical Finding, reason, current revision, and bounded justification."
+            )
+        }
+        return try await sendJSON(
+            ValidationFindingSummary.self,
+            path: ["v1", "validation", "findings", id, "suppress"],
+            body: draft,
+            expectedStatus: 200
+        )
+    }
+
+    public func compareBuilds(_ draft: BuildDiffCommandDraft) async throws -> BuildDiffSummary {
+        try Self.validateGraphIdentity(
+            projectID: draft.projectID,
+            applicationID: draft.applicationID
+        )
+        guard Self.isTypedIdentifier(draft.leftBuildID, prefix: "build"),
+              Self.isTypedIdentifier(draft.rightBuildID, prefix: "build"),
+              draft.leftBuildID != draft.rightBuildID
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Build Diff requires two distinct canonical Build IDs."
+            )
+        }
+        return try await sendJSON(
+            BuildDiffSummary.self,
+            path: ["v1", "validation", "build-diffs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func getBuildDiff(id: String) async throws -> BuildDiffSummary {
+        guard Self.isTypedIdentifier(id, prefix: "builddiff") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            BuildDiffSummary.self,
+            method: "GET",
+            path: ["v1", "validation", "build-diffs", id]
+        )
+    }
+
     public func getSyncStatus(
         remote: HubSyncRemote,
         refNames: [String]?
@@ -1055,6 +1272,38 @@ public struct HTTPHostClient: HostClient, Sendable {
                     "The curation justification must contain 1 through 1024 characters."
                 )
             }
+        }
+    }
+
+    private static func validateKnowledgeCollection(
+        name: String,
+        nodeIDs: [String],
+        entryNodeIDs: [String]
+    ) throws {
+        guard !name.isEmpty,
+              name.count <= 256,
+              !nodeIDs.isEmpty,
+              Set(nodeIDs).count == nodeIDs.count,
+              !entryNodeIDs.isEmpty,
+              Set(entryNodeIDs).count == entryNodeIDs.count,
+              Set(entryNodeIDs).isSubset(of: Set(nodeIDs))
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Knowledge Collection needs a name, unique member nodes, and entry nodes contained in that membership."
+            )
+        }
+    }
+
+    private static func validateValidationCategories(_ categories: [String]?) throws {
+        guard let categories else { return }
+        let allowed = Set(["structural", "visual", "behavioral", "accessibility"])
+        guard !categories.isEmpty,
+              Set(categories).count == categories.count,
+              Set(categories).isSubset(of: allowed)
+        else {
+            throw HostClientError.invalidConfiguration(
+                "Validation categories must be a unique subset of the core rule categories."
+            )
         }
     }
 

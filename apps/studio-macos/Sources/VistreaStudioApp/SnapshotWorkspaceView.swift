@@ -12,6 +12,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
     case evidence = "Evidence"
     case documents = "Documents"
     case wiki = "Wiki"
+    case quality = "Quality"
     case hub = "Hub"
 
     var id: String { rawValue }
@@ -22,6 +23,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
         case .evidence: "camera.on.rectangle"
         case .documents: "doc.text.magnifyingglass"
         case .wiki: "book"
+        case .quality: "checkmark.shield"
         case .hub: "arrow.triangle.2.circlepath.circle"
         }
     }
@@ -87,6 +89,8 @@ struct SnapshotWorkspaceView: View {
                     )
                 if section == .documents {
                     ProjectDocumentsPane(documents: projectDocuments)
+                } else if section == .quality {
+                    QualityWorkspaceView(model: model)
                 } else if section == .hub {
                     HubPane(model: model)
                 } else {
@@ -116,6 +120,8 @@ struct SnapshotWorkspaceView: View {
                     ProjectDocumentsPane(documents: projectDocuments)
                 case .wiki:
                     WikiPane(model: model)
+                case .quality:
+                    QualityWorkspaceView(model: model)
                 case .hub:
                     HubPane(model: model)
                 }
@@ -2273,26 +2279,35 @@ enum LayerSceneBuilder {
 private struct WikiPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var searchText = ""
+    @State private var mode: WikiMode = .nodes
     @State private var isCreating = false
     @State private var editingNode: WikiNodeSummary?
+    @State private var editingCollection: KnowledgeCollectionSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaneHeader(title: "Deep Wiki", systemImage: "book") {
-                Button("New node", systemImage: "plus") {
+                Button(mode == .nodes ? "New node" : "New Collection", systemImage: "plus") {
                     isCreating = true
                 }
-                .disabled(model.isSavingWikiNode)
+                .disabled(model.isSavingWikiNode || model.isSavingKnowledgeCollection)
             }
             Divider()
+            Picker("Knowledge view", selection: $mode) {
+                ForEach(WikiMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
             HStack(spacing: 8) {
-                TextField("Search knowledge…", text: $searchText)
+                TextField(mode == .nodes ? "Search knowledge…" : "Search Collections…", text: $searchText)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
-                    }
+                    .onSubmit { runSearch() }
                 Button("Search") {
-                    Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
+                    runSearch()
                 }
             }
             .padding(8)
@@ -2300,15 +2315,42 @@ private struct WikiPane: View {
             content
         }
         .sheet(isPresented: $isCreating) {
-            WikiNodeCreateSheet(model: model)
+            if mode == .nodes {
+                WikiNodeCreateSheet(model: model)
+            } else {
+                KnowledgeCollectionEditorSheet(model: model, collection: nil)
+            }
         }
         .sheet(item: $editingNode) { node in
             WikiNodeEditSheet(model: model, nodeID: node.id)
+        }
+        .sheet(item: $editingCollection) { collection in
+            KnowledgeCollectionEditorSheet(model: model, collection: collection)
+        }
+        .onChange(of: mode) {
+            searchText = ""
+            if mode == .collections {
+                Task {
+                    await model.loadWiki(text: nil)
+                    await model.loadKnowledgeCollections(text: nil)
+                }
+            } else {
+                Task { await model.loadWiki(text: nil) }
+            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
+        if mode == .nodes {
+            nodeContent
+        } else {
+            collectionContent
+        }
+    }
+
+    @ViewBuilder
+    private var nodeContent: some View {
         switch model.wikiPhase {
         case .idle, .loading:
             ProgressView("Loading the Deep Wiki…")
@@ -2362,6 +2404,220 @@ private struct WikiPane: View {
                 .accessibilityLabel("Wiki node \(node.title), \(node.status)")
             }
             .listStyle(.sidebar)
+        }
+    }
+
+    @ViewBuilder
+    private var collectionContent: some View {
+        switch model.knowledgeCollectionsPhase {
+        case .idle, .loading:
+            ProgressView("Loading Knowledge Collections…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            ContentUnavailableView(
+                "No Knowledge Collections",
+                systemImage: "square.stack.3d.up",
+                description: Text(
+                    model.wikiNodes.isEmpty
+                        ? "Create a Wiki node first, then group published knowledge into a Collection."
+                        : "Create a Collection to define an entry point and a versionable knowledge bundle."
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.knowledgeCollections) { collection in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(collection.name)
+                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 8) {
+                            Text(collection.publication.state)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(
+                                    collection.publication.state == "published"
+                                        ? Color.green
+                                        : Color.secondary
+                                )
+                            Text("\(collection.nodeIDs.count) nodes")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("revision \(collection.revision)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let summary = collection.summary, !summary.isEmpty {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button("Edit") {
+                        model.beginKnowledgeCollectionEdit(collection)
+                        editingCollection = collection
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 3)
+                .accessibilityLabel(
+                    "Knowledge Collection \(collection.name), \(collection.publication.state), \(collection.nodeIDs.count) nodes"
+                )
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    private func runSearch() {
+        let text = searchText.isEmpty ? nil : searchText
+        if mode == .nodes {
+            Task { await model.loadWiki(text: text) }
+        } else {
+            Task { await model.loadKnowledgeCollections(text: text) }
+        }
+    }
+
+    private enum WikiMode: String, CaseIterable, Identifiable {
+        case nodes
+        case collections
+
+        var id: String { rawValue }
+        var label: String { self == .nodes ? "Wiki Nodes" : "Collections" }
+    }
+}
+
+/// Creates or revises one Knowledge Collection from the current Workspace's
+/// Wiki nodes. Entry nodes are an explicit subset of members; Studio never
+/// silently expands or imports source documents.
+private struct KnowledgeCollectionEditorSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let collection: KnowledgeCollectionSummary?
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var summary = ""
+    @State private var memberNodeIDs: Set<String> = []
+    @State private var entryNodeIDs: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(collection == nil ? "New Knowledge Collection" : "Edit Knowledge Collection")
+                .font(.headline)
+            if let collection {
+                Text("\(collection.publication.state) · revision \(collection.revision)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            TextField("Collection name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            TextField("Summary (optional)", text: $summary)
+                .textFieldStyle(.roundedBorder)
+            Text("Members and entry points")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            List(model.wikiNodes) { node in
+                HStack(spacing: 10) {
+                    Toggle(
+                        isOn: Binding(
+                            get: { memberNodeIDs.contains(node.id) },
+                            set: { isMember in
+                                if isMember {
+                                    memberNodeIDs.insert(node.id)
+                                } else {
+                                    memberNodeIDs.remove(node.id)
+                                    entryNodeIDs.remove(node.id)
+                                }
+                            }
+                        )
+                    ) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(node.title)
+                            Text("\(node.kind) · \(node.status)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    Toggle(
+                        "Entry",
+                        isOn: Binding(
+                            get: { entryNodeIDs.contains(node.id) },
+                            set: { isEntry in
+                                if isEntry {
+                                    memberNodeIDs.insert(node.id)
+                                    entryNodeIDs.insert(node.id)
+                                } else {
+                                    entryNodeIDs.remove(node.id)
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.checkbox)
+                    .disabled(!memberNodeIDs.contains(node.id))
+                }
+            }
+            .frame(minHeight: 220)
+            if let note = model.knowledgeCollectionConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = model.knowledgeCollectionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Text("\(memberNodeIDs.count) members · \(entryNodeIDs.count) entries")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(collection == nil ? "Create" : "Save") {
+                    Task {
+                        let saved: Bool
+                        if collection != nil {
+                            saved = await model.updateSelectedKnowledgeCollection(
+                                name: name,
+                                summary: summary,
+                                nodeIDs: Array(memberNodeIDs),
+                                entryNodeIDs: Array(entryNodeIDs)
+                            )
+                        } else {
+                            saved = await model.createKnowledgeCollection(
+                                name: name,
+                                summary: summary,
+                                nodeIDs: Array(memberNodeIDs),
+                                entryNodeIDs: Array(entryNodeIDs)
+                            )
+                        }
+                        if saved { dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.isSavingKnowledgeCollection
+                        || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || memberNodeIDs.isEmpty
+                        || entryNodeIDs.isEmpty
+                )
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 620, minHeight: 520)
+        .onAppear {
+            if let collection {
+                name = collection.name
+                summary = collection.summary ?? ""
+                memberNodeIDs = Set(collection.nodeIDs)
+                entryNodeIDs = Set(collection.entryNodeIDs)
+            }
         }
     }
 }
@@ -3287,6 +3543,9 @@ private struct TuningPreviewControls: View {
             if let outcome = model.lastTuningApplication {
                 TuningOutcomeView(application: outcome)
             }
+            if let patch = model.lastTuningPatch {
+                TuningSourceHandoffView(model: model, patch: patch)
+            }
         }
         .onAppear { resetValues() }
         .onChange(of: node.id) {
@@ -3485,6 +3744,108 @@ private struct TuningPreviewControls: View {
             case .cornerRadius: "Corner radius"
             }
         }
+    }
+}
+
+/// A Coding Agent handoff generated from the exact persisted Tuning Patch.
+/// Missing source mapping remains visible and never turns into a fabricated
+/// file path.
+private struct TuningSourceHandoffView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let patch: TuningPatchSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            HStack {
+                Label("Source Handoff", systemImage: "chevron.left.forwardslash.chevron.right")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button("Prepare") {
+                    Task { await model.loadTuningSourceSuggestions() }
+                }
+                .controlSize(.small)
+                .disabled(isLoading)
+            }
+            Text(patch.title)
+                .font(.caption)
+                .lineLimit(2)
+            Text("Patch \(patch.patchID)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            switch model.tuningSourceSuggestionsPhase {
+            case .idle:
+                Text("Prepare a source-oriented instruction set for a Coding Agent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .loading:
+                ProgressView("Preparing source handoff…")
+                    .controlSize(.small)
+            case .empty:
+                Text("This patch produced no source suggestions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .content:
+                ForEach(model.tuningSourceSuggestions) { suggestion in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(suggestion.property.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.caption.weight(.medium))
+                            Spacer()
+                            Text(suggestion.status == "actionable" ? "Mapped" : "Needs source mapping")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(suggestion.status == "actionable" ? Color.green : Color.orange)
+                        }
+                        if let stableID = suggestion.stableID {
+                            Text(stableID)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let sourceContext = suggestion.sourceContextPresentation {
+                            LabeledContent("Source context") {
+                                Text(sourceContext)
+                                    .font(.caption2.monospaced())
+                                    .textSelection(.enabled)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        LabeledContent("Source value") {
+                            Text(suggestion.originalValuePresentation)
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Suggested value") {
+                            Text(suggestion.suggestedValuePresentation)
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        ForEach(Array(suggestion.codingAgentInstructions.enumerated()), id: \.offset) { _, instruction in
+                            Text("• \(instruction)")
+                                .font(.caption)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(7)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+        }
+    }
+
+    private var isLoading: Bool {
+        if case .loading = model.tuningSourceSuggestionsPhase { return true }
+        return false
     }
 }
 

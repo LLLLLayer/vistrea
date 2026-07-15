@@ -1,4 +1,5 @@
 import Foundation
+import VistreaRuntimeModels
 
 // MARK: - Shared write actor
 
@@ -329,6 +330,93 @@ public struct TuningApplicationPage: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case items
+    }
+}
+
+/// One source-oriented Coding Agent handoff generated from a persisted
+/// Tuning Patch. The Host never fabricates file paths: a missing source
+/// mapping is represented explicitly by `needs_source_mapping`.
+public struct TuningSourceSuggestionSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let tuningChangeID: String
+    public let property: String
+    public let stableID: String?
+    public let sourceContext: [String: JSONValue]?
+    public let status: String
+    public let originalValue: JSONValue
+    public let suggestedValue: JSONValue
+    public let codingAgentInstructions: [String]
+
+    public var id: String { tuningChangeID }
+    public var sourceContextPresentation: String? {
+        sourceContext.map { Self.compactJSON(.object($0)) }
+    }
+    public var originalValuePresentation: String { Self.compactJSON(originalValue) }
+    public var suggestedValuePresentation: String { Self.compactJSON(suggestedValue) }
+
+    public init(
+        tuningChangeID: String,
+        property: String,
+        stableID: String?,
+        sourceContext: [String: JSONValue]?,
+        status: String,
+        originalValue: JSONValue,
+        suggestedValue: JSONValue,
+        codingAgentInstructions: [String]
+    ) {
+        self.tuningChangeID = tuningChangeID
+        self.property = property
+        self.stableID = stableID
+        self.sourceContext = sourceContext
+        self.status = status
+        self.originalValue = originalValue
+        self.suggestedValue = suggestedValue
+        self.codingAgentInstructions = codingAgentInstructions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tuningChangeID = "tuning_change_id"
+        case property
+        case stableID = "stable_id"
+        case sourceContext = "source_context"
+        case status
+        case originalValue = "original_value"
+        case suggestedValue = "suggested_value"
+        case codingAgentInstructions = "coding_agent_instructions"
+    }
+
+    private static func compactJSON(_ value: JSONValue) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value),
+              let text = String(data: data, encoding: .utf8)
+        else { return "Unavailable" }
+        return text
+    }
+}
+
+public struct TuningSourceSuggestionResult: Decodable, Equatable, Sendable {
+    public let patchID: String
+    public let patchRevision: UInt64
+    public let targetSnapshotID: String
+    public let suggestions: [TuningSourceSuggestionSummary]
+
+    public init(
+        patchID: String,
+        patchRevision: UInt64,
+        targetSnapshotID: String,
+        suggestions: [TuningSourceSuggestionSummary]
+    ) {
+        self.patchID = patchID
+        self.patchRevision = patchRevision
+        self.targetSnapshotID = targetSnapshotID
+        self.suggestions = suggestions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patchID = "patch_id"
+        case patchRevision = "patch_revision"
+        case targetSnapshotID = "target_snapshot_id"
+        case suggestions
     }
 }
 

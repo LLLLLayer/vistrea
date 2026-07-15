@@ -79,13 +79,10 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 
 ## Recommended implementation sequence
 
-1. Add dedicated Studio controls for source suggestions and Knowledge Collection management; Difference promotion and fresh-build recapture verification are implemented.
-2. Run the remaining Android adb physical vertical lane, extend the verified iOS pinned-TLS lane across the broader native tuning matrix, and strengthen the iOS Release artifact boundary.
-3. Add real-device crash-injection acceptance and automatic native event observation before introducing AI-assisted exploration planning.
-4. Extend the shipped Studio ref-sync workspace with searchable Hub discovery,
-   subscriptions, versioned collaboration mutations, and guided conflict
-   resolution on top of the verified project and organization-scoped team
-   permission/audit Beta.
+1. Finish packaged local acceptance for Studio's Knowledge Collection, Tuning Patch source-handoff, Validation, and Build Diff workflows.
+2. Promote the verified Workspace backup, restore, migration recovery, and dry-run-first object garbage collection primitives through safe Engine, Host, and Studio maintenance controls.
+3. Add automated keyboard, accessibility, and presentation regression coverage for the local Studio workflows.
+4. Resume physical-device coverage and broader Hub collaboration only when those environments return to scope.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
@@ -120,6 +117,8 @@ sharing, versioned collaboration endpoints, and guided conflict resolution
 remain follow-up work.
 
 Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes and manages local Workspaces through a Welcome/recent/open/create flow, so a packaged app no longer depends on shell-provided Host credentials. It restores the last available Workspace and keeps missing locations recoverable without silently initializing arbitrary folders. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
+
+The local Studio product surface now also manages exact Knowledge Collection membership and entry nodes, prepares source-oriented Coding Agent handoff from persisted Tuning Patches, runs Snapshot or Screen Graph validation with justified Finding suppression, and compares two observed builds from the same application. These workflows use the existing Host contracts and remain usable without Hub; Build Diff honestly requires two persisted builds.
 
 Pull requests run six independent, immutable-revision CI jobs for Node/Host,
 Studio, the iOS SDK, the iOS Demo App, the Android SDK, and the Android Demo
