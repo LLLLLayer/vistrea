@@ -11,6 +11,7 @@ It combines in-app runtime SDKs, real device automation, a macOS workspace, a ve
 - Vistrea Studio for macOS
 - Runtime UI exploration through WDA and UIAutomator
 - Screen State Canvas and versioned UI Deep Wiki
+- Configured, read-only project Markdown browsing
 - Design baseline comparison and review issues
 - Reversible Debug-only UI tuning
 - 2D View Tree and Lookin-style 3D Inspector
@@ -70,6 +71,7 @@ The native iOS UIKit and Android View Demo Apps implement the same 17 required c
 - [Executable Data model coverage](docs/protocol/DATA_MODEL_COVERAGE.md)
 - [Interface specifications](docs/interfaces/README.md)
 - [Studio interaction design](docs/product/STUDIO_INTERACTIONS.md)
+- [Project Markdown documents](docs/product/PROJECT_DOCUMENTS.md)
 - [Studio macOS release](docs/release/STUDIO_MACOS_RELEASE.md)
 - [Development and multi-agent workflow](docs/DEVELOPMENT.md)
 - [Development progress](docs/DEVELOPMENT_PROGRESS.md)
@@ -117,7 +119,7 @@ project activity. Search, subscriptions, organization-wide roles, multi-team
 sharing, versioned collaboration endpoints, and guided conflict resolution
 remain follow-up work.
 
-Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes, owns a default Application Support Workspace, and can switch Workspaces from its File menu, so a packaged app no longer depends on shell-provided Host credentials. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
+Vistrea Studio now has a verified local Universal `.app`, ZIP, and DMG packaging path with pinned Sparkle integration and a tag-driven GitHub release workflow. The application embeds architecture-matched Node.js and production Host runtimes and manages local Workspaces through a Welcome/recent/open/create flow, so a packaged app no longer depends on shell-provided Host credentials. It restores the last available Workspace and keeps missing locations recoverable without silently initializing arbitrary folders. The first real Developer ID notarization, GitHub Pages feed deployment, and installed old-to-new update remain credentialed release acceptance rather than completed product evidence.
 
 Pull requests run six independent, immutable-revision CI jobs for Node/Host,
 Studio, the iOS SDK, the iOS Demo App, the Android SDK, and the Android Demo

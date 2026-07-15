@@ -22,15 +22,38 @@ enum VistreaStudioMain {
 
 @MainActor
 private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
+    private enum WindowContent {
+        case welcome
+        case workspace
+    }
+
     private var model: SnapshotWorkspaceModel
+    private var projectDocuments: StudioProjectDocuments
     private var managedHost: ManagedStudioHost?
+    private let workspaceHistory: StudioWorkspaceHistory
+    private let workspaceManagementEnabled: Bool
+    private var windowContent: WindowContent
+    private var workspaceMessage: String?
     private var updaterController: SPUStandardUpdaterController?
     private var window: NSWindow?
 
     override init() {
-        let composition = StudioComposition.makeInitialClient()
+        let workspaceHistory = StudioWorkspaceHistory()
+        let composition = StudioComposition.makeInitialClient(
+            workspaceHistory: workspaceHistory
+        )
         model = SnapshotWorkspaceModel(client: composition.client)
+        projectDocuments = StudioProjectDocuments(
+            workspaceURL: composition.managedHost?.workspaceURL
+        )
         managedHost = composition.managedHost
+        self.workspaceHistory = workspaceHistory
+        workspaceManagementEnabled = composition.workspaceManagementEnabled
+        windowContent = composition.opensWelcome ? .welcome : .workspace
+        workspaceMessage = composition.startupMessage
+        if let workspaceURL = composition.managedHost?.workspaceURL {
+            workspaceHistory.recordOpened(workspaceURL)
+        }
         super.init()
     }
 
@@ -77,40 +100,145 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
         let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
         let fileMenu = NSMenu(title: "File")
-        let openWorkspaceItem = NSMenuItem(
-            title: "Open Workspace…",
-            action: #selector(openWorkspace(_:)),
-            keyEquivalent: "o"
-        )
-        openWorkspaceItem.target = self
-        fileMenu.addItem(openWorkspaceItem)
-        let revealWorkspaceItem = NSMenuItem(
-            title: "Reveal Workspace in Finder",
-            action: #selector(revealWorkspace(_:)),
-            keyEquivalent: ""
-        )
-        revealWorkspaceItem.target = self
-        revealWorkspaceItem.isEnabled = managedHost != nil
-        fileMenu.addItem(revealWorkspaceItem)
+        if workspaceManagementEnabled {
+            let newWorkspaceItem = NSMenuItem(
+                title: "New Workspace…",
+                action: #selector(newWorkspace(_:)),
+                keyEquivalent: "n"
+            )
+            newWorkspaceItem.target = self
+            fileMenu.addItem(newWorkspaceItem)
+
+            let openWorkspaceItem = NSMenuItem(
+                title: "Open Workspace…",
+                action: #selector(openWorkspace(_:)),
+                keyEquivalent: "o"
+            )
+            openWorkspaceItem.target = self
+            fileMenu.addItem(openWorkspaceItem)
+
+            let recentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+            recentItem.submenu = makeOpenRecentMenu()
+            fileMenu.addItem(recentItem)
+            fileMenu.addItem(.separator())
+
+            let manageWorkspaceItem = NSMenuItem(
+                title: "Manage Workspaces…",
+                action: #selector(showWorkspaceManager(_:)),
+                keyEquivalent: ""
+            )
+            manageWorkspaceItem.target = self
+            fileMenu.addItem(manageWorkspaceItem)
+
+            let revealWorkspaceItem = NSMenuItem(
+                title: "Reveal Workspace in Finder",
+                action: #selector(revealWorkspace(_:)),
+                keyEquivalent: ""
+            )
+            revealWorkspaceItem.target = self
+            revealWorkspaceItem.isEnabled = managedHost != nil
+            fileMenu.addItem(revealWorkspaceItem)
+
+            let closeWorkspaceItem = NSMenuItem(
+                title: "Close Workspace",
+                action: #selector(closeWorkspace(_:)),
+                keyEquivalent: ""
+            )
+            closeWorkspaceItem.target = self
+            closeWorkspaceItem.isEnabled = managedHost != nil
+            fileMenu.addItem(closeWorkspaceItem)
+        }
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
         NSApplication.shared.mainMenu = mainMenu
     }
 
+    private func makeOpenRecentMenu() -> NSMenu {
+        let menu = NSMenu(title: "Open Recent")
+        let recent = workspaceHistory.recentWorkspaces()
+        if recent.isEmpty {
+            let empty = NSMenuItem(title: "No Recent Workspaces", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return menu
+        }
+
+        for workspace in recent {
+            let item = NSMenuItem(
+                title: workspace.displayName,
+                action: #selector(openRecentWorkspace(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = workspace.path
+            item.toolTip = workspace.path
+            item.isEnabled = workspaceHistory.availability(of: workspace.url) == .available
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let clearItem = NSMenuItem(
+            title: "Clear Recent",
+            action: #selector(clearRecentWorkspaces(_:)),
+            keyEquivalent: ""
+        )
+        clearItem.target = self
+        menu.addItem(clearItem)
+        return menu
+    }
+
+    @objc
+    private func newWorkspace(_ sender: Any?) {
+        let panel = NSSavePanel()
+        panel.title = "New Vistrea Workspace"
+        panel.message = "Choose a name and location for the local Workspace."
+        panel.prompt = "Create"
+        panel.nameFieldStringValue = "Untitled.vistrea"
+        panel.canCreateDirectories = true
+        panel.directoryURL = managedHost?.workspaceURL.deletingLastPathComponent() ??
+            (try? StudioWorkspaceLocation.defaultWorkspaceURL().deletingLastPathComponent())
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+
+        let workspaceURL = selectedURL.pathExtension.isEmpty ?
+            selectedURL.appendingPathExtension("vistrea") : selectedURL
+        let availability = workspaceHistory.availability(of: workspaceURL)
+        if availability == .available || !isMissingOrEmptyDirectory(workspaceURL) {
+            presentError(
+                title: "Workspace Could Not Be Created",
+                message: "The selected location already contains data. Open an existing Vistrea Workspace or choose a new empty location."
+            )
+            return
+        }
+        switchWorkspace(to: workspaceURL, creating: true)
+    }
+
     @objc
     private func openWorkspace(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.title = "Open Vistrea Workspace"
-        panel.message = "Choose or create a folder for Vistrea's local Workspace data."
+        panel.message = "Choose an existing Vistrea Workspace folder."
         panel.prompt = "Open"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
+        panel.canCreateDirectories = false
+        panel.treatsFilePackagesAsDirectories = true
         panel.allowsMultipleSelection = false
         panel.directoryURL = managedHost?.workspaceURL.deletingLastPathComponent()
         guard panel.runModal() == .OK, let workspaceURL = panel.url else { return }
-        switchWorkspace(to: workspaceURL)
+        guard workspaceHistory.availability(of: workspaceURL) == .available else {
+            presentError(
+                title: "Not a Vistrea Workspace",
+                message: "This folder has no Vistrea Workspace metadata. Use New Workspace to initialize an empty location."
+            )
+            return
+        }
+        switchWorkspace(to: workspaceURL, creating: false)
+    }
+
+    @objc
+    private func openRecentWorkspace(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        openRecentWorkspace(at: URL(fileURLWithPath: path, isDirectory: true))
     }
 
     @objc
@@ -119,9 +247,68 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
     }
 
-    private func switchWorkspace(to workspaceURL: URL) {
-        let workspace = workspaceURL.standardizedFileURL
-        if managedHost?.workspaceURL.standardizedFileURL == workspace {
+    @objc
+    private func showWorkspaceManager(_ sender: Any?) {
+        guard workspaceManagementEnabled else { return }
+        windowContent = .welcome
+        workspaceMessage = nil
+        replaceWindowContent()
+        updateWindowTitle()
+    }
+
+    @objc
+    private func closeWorkspace(_ sender: Any?) {
+        guard workspaceManagementEnabled, managedHost != nil else { return }
+        model.stopExplorationPolling()
+        managedHost?.stop()
+        managedHost = nil
+        model = SnapshotWorkspaceModel(
+            client: UnavailableHostClient(message: "Open a Workspace to start its local Host.")
+        )
+        workspaceHistory.markWorkspaceClosed()
+        workspaceMessage = nil
+        windowContent = .welcome
+        replaceWindowContent()
+        updateWindowTitle()
+        configureApplicationMenu()
+    }
+
+    @objc
+    private func clearRecentWorkspaces(_ sender: Any?) {
+        workspaceHistory.clearRecentWorkspaces(
+            preserving: managedHost?.workspaceURL
+        )
+        if windowContent == .welcome {
+            replaceWindowContent()
+        }
+        configureApplicationMenu()
+    }
+
+    private func openRecentWorkspace(at workspaceURL: URL) {
+        switch workspaceHistory.availability(of: workspaceURL) {
+        case .available:
+            switchWorkspace(to: workspaceURL, creating: false)
+        case .missing:
+            workspaceMessage = "The Workspace location no longer exists. Remove it from Recent or locate it with Open Workspace."
+            windowContent = .welcome
+            replaceWindowContent()
+            updateWindowTitle()
+        case .unrecognized:
+            workspaceMessage = "The selected folder is not a recognizable Vistrea Workspace. Its files were not modified."
+            windowContent = .welcome
+            replaceWindowContent()
+            updateWindowTitle()
+        }
+    }
+
+    private func switchWorkspace(to workspaceURL: URL, creating: Bool) {
+        let workspace = workspaceHistory.normalizedURL(for: workspaceURL)
+        if let current = managedHost?.workspaceURL,
+           workspaceHistory.normalizedURL(for: current).path == workspace.path {
+            windowContent = .workspace
+            workspaceMessage = nil
+            replaceWindowContent()
+            updateWindowTitle()
             return
         }
         do {
@@ -130,17 +317,38 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             let previousHost = managedHost
             previousModel.stopExplorationPolling()
             model = SnapshotWorkspaceModel(client: nextHost.client)
+            projectDocuments = StudioProjectDocuments(workspaceURL: nextHost.workspaceURL)
             managedHost = nextHost
-            UserDefaults.standard.set(
-                nextHost.workspaceURL.path,
-                forKey: StudioWorkspaceLocation.lastWorkspaceDefaultsKey
-            )
+            workspaceHistory.recordOpened(nextHost.workspaceURL)
+            workspaceMessage = nil
+            windowContent = .workspace
             replaceWindowContent()
             previousHost?.stop()
+            updateWindowTitle()
             configureApplicationMenu()
         } catch {
-            presentError(title: "Workspace Could Not Be Opened", message: error.localizedDescription)
+            let action = creating ? "created" : "opened"
+            workspaceMessage = "The Workspace could not be \(action): \(error.localizedDescription)"
+            if managedHost == nil {
+                windowContent = .welcome
+                replaceWindowContent()
+                updateWindowTitle()
+            } else {
+                presentError(
+                    title: "Workspace Could Not Be \(creating ? "Created" : "Opened")",
+                    message: error.localizedDescription
+                )
+            }
         }
+    }
+
+    private func isMissingOrEmptyDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return true
+        }
+        guard isDirectory.boolValue else { return false }
+        return (try? FileManager.default.contentsOfDirectory(atPath: url.path).isEmpty) == true
     }
 
     private func presentError(title: String, message: String) {
@@ -157,7 +365,6 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         // Every structural width comes from StudioLayoutMetrics so the window
         // minimum stays provably consistent with the panes it must hold.
         let window = NSWindow(contentViewController: makeContentViewController())
-        window.title = "Vistrea Studio"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.minSize = NSSize(
             width: StudioLayoutMetrics.windowMinWidth,
@@ -171,21 +378,134 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         window.center()
-        window.makeKeyAndOrderFront(nil)
         self.window = window
+        updateWindowTitle()
+        window.makeKeyAndOrderFront(nil)
     }
 
     private func replaceWindowContent() {
-        window?.contentViewController = makeContentViewController()
+        guard let window else { return }
+        let frame = window.frame
+        window.contentViewController = makeContentViewController()
+        // Replacing an NSHostingController adopts the new root view's fitting
+        // size. Workspace management is a surface switch, not a window resize.
+        window.setFrame(frame, display: true)
     }
 
     private func makeContentViewController() -> NSViewController {
-        let rootView = SnapshotWorkspaceView(model: model)
-            .frame(
+        let rootView: AnyView
+        if workspaceManagementEnabled, windowContent == .welcome {
+            rootView = AnyView(
+                WorkspaceWelcomeView(
+                    recentWorkspaces: workspaceHistory.recentWorkspaces(),
+                    currentWorkspaceURL: managedHost?.workspaceURL,
+                    message: workspaceMessage,
+                    availability: { [weak self] url in
+                        self?.workspaceHistory.availability(of: url) ?? .missing
+                    },
+                    onNewWorkspace: { [weak self] in
+                        self?.newWorkspace(nil)
+                    },
+                    onOpenWorkspace: { [weak self] in
+                        self?.openWorkspace(nil)
+                    },
+                    onOpenRecent: { [weak self] url in
+                        self?.openRecentWorkspace(at: url)
+                    },
+                    onReveal: { url in
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    },
+                    onRemoveRecent: { [weak self] url in
+                        self?.removeRecentWorkspace(at: url)
+                    },
+                    onClearRecent: { [weak self] in
+                        self?.clearRecentWorkspaces(nil)
+                    },
+                    onReturnToWorkspace: managedHost == nil ? nil : { [weak self] in
+                        self?.returnToWorkspace()
+                    }
+                )
+            )
+        } else {
+            let workspaceName = managedHost.map {
+                StudioRecentWorkspace(path: $0.workspaceURL.path, lastOpenedAt: Date()).displayName
+            }
+            rootView = AnyView(
+                SnapshotWorkspaceView(
+                    model: model,
+                    projectDocuments: projectDocuments,
+                    workspaceName: workspaceName,
+                    onManageWorkspaces: workspaceManagementEnabled ? { [weak self] in
+                        self?.showWorkspaceManager(nil)
+                    } : nil
+                )
+            )
+        }
+
+        return NSHostingController(
+            rootView: rootView.frame(
                 minWidth: StudioLayoutMetrics.windowMinWidth,
                 minHeight: StudioLayoutMetrics.windowMinHeight
             )
-        return NSHostingController(rootView: rootView)
+        )
+    }
+
+    private func removeRecentWorkspace(at workspaceURL: URL) {
+        if let current = managedHost?.workspaceURL,
+           workspaceHistory.normalizedURL(for: current).path ==
+            workspaceHistory.normalizedURL(for: workspaceURL).path {
+            return
+        }
+        workspaceHistory.remove(workspaceURL)
+        if windowContent == .welcome {
+            replaceWindowContent()
+        }
+        configureApplicationMenu()
+    }
+
+    private func returnToWorkspace() {
+        guard managedHost != nil else { return }
+        workspaceMessage = nil
+        windowContent = .workspace
+        replaceWindowContent()
+        updateWindowTitle()
+    }
+
+    private func updateWindowTitle() {
+        guard let window else { return }
+        if windowContent == .workspace, let workspaceURL = managedHost?.workspaceURL {
+            let workspace = StudioRecentWorkspace(
+                path: workspaceURL.path,
+                lastOpenedAt: Date()
+            )
+            window.title = "\(workspace.displayName) — Vistrea Studio"
+            window.representedURL = workspaceURL
+        } else {
+            window.title = "Vistrea Studio"
+            window.representedURL = nil
+        }
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        guard
+            workspaceManagementEnabled,
+            let filename = filenames.first
+        else {
+            sender.reply(toOpenOrPrint: .failure)
+            return
+        }
+
+        let workspaceURL = URL(fileURLWithPath: filename, isDirectory: true)
+        guard workspaceHistory.availability(of: workspaceURL) == .available else {
+            workspaceMessage = "The opened item is not a recognizable Vistrea Workspace."
+            windowContent = .welcome
+            replaceWindowContent()
+            updateWindowTitle()
+            sender.reply(toOpenOrPrint: .failure)
+            return
+        }
+        switchWorkspace(to: workspaceURL, creating: false)
+        sender.reply(toOpenOrPrint: .success)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -229,10 +549,29 @@ private enum StudioComposition {
     struct Result {
         let client: any HostClient
         let managedHost: ManagedStudioHost?
+        let workspaceManagementEnabled: Bool
+        let opensWelcome: Bool
+        let startupMessage: String?
+
+        init(
+            client: any HostClient,
+            managedHost: ManagedStudioHost? = nil,
+            workspaceManagementEnabled: Bool = false,
+            opensWelcome: Bool = false,
+            startupMessage: String? = nil
+        ) {
+            self.client = client
+            self.managedHost = managedHost
+            self.workspaceManagementEnabled = workspaceManagementEnabled
+            self.opensWelcome = opensWelcome
+            self.startupMessage = startupMessage
+        }
     }
 
     @MainActor
-    static func makeInitialClient() -> Result {
+    static func makeInitialClient(
+        workspaceHistory: StudioWorkspaceHistory
+    ) -> Result {
         let environment = ProcessInfo.processInfo.environment
         let hostURL = environment["VISTREA_HOST_URL"]
         let hostToken = environment["VISTREA_HOST_TOKEN"]
@@ -267,17 +606,52 @@ private enum StudioComposition {
         }
 
         if Bundle.main.object(forInfoDictionaryKey: "VistreaEmbeddedHostRuntime") as? Bool == true {
-            do {
-                let host = try makeManagedHost(
-                    workspaceURL: StudioWorkspaceLocation.preferredWorkspaceURL()
+            guard let workspaceURL = workspaceHistory.lastWorkspaceURL() else {
+                return Result(
+                    client: UnavailableHostClient(
+                        message: "Open or create a Workspace to start the packaged local Host."
+                    ),
+                    workspaceManagementEnabled: true,
+                    opensWelcome: true
                 )
-                return Result(client: host.client, managedHost: host)
+            }
+
+            switch workspaceHistory.availability(of: workspaceURL) {
+            case .missing:
+                return Result(
+                    client: UnavailableHostClient(message: "The previous Workspace is missing."),
+                    workspaceManagementEnabled: true,
+                    opensWelcome: true,
+                    startupMessage: "The last Workspace location no longer exists. Choose another recent Workspace or locate it from disk."
+                )
+            case .unrecognized:
+                return Result(
+                    client: UnavailableHostClient(
+                        message: "The previous location is not a Vistrea Workspace."
+                    ),
+                    workspaceManagementEnabled: true,
+                    opensWelcome: true,
+                    startupMessage: "The last location is not a recognizable Vistrea Workspace. No files were modified."
+                )
+            case .available:
+                break
+            }
+
+            do {
+                let host = try makeManagedHost(workspaceURL: workspaceURL)
+                return Result(
+                    client: host.client,
+                    managedHost: host,
+                    workspaceManagementEnabled: true
+                )
             } catch {
                 return Result(
                     client: UnavailableHostClient(
                         message: "The packaged local Host could not start: \(error.localizedDescription)"
                     ),
-                    managedHost: nil
+                    workspaceManagementEnabled: true,
+                    opensWelcome: true,
+                    startupMessage: "The last Workspace could not be opened: \(error.localizedDescription)"
                 )
             }
         }

@@ -28,6 +28,7 @@ vistrea/
 ├── AGENTS.md
 ├── CLAUDE.md -> AGENTS.md
 ├── README.md
+├── vistrea.project.json        # source-owned Markdown roots browsed by Studio
 ├── package.json
 ├── pnpm-lock.yaml
 ├── apps/

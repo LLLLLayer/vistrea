@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import VistreaRuntimeModels
 
@@ -699,6 +700,229 @@ public enum CanvasLayout {
     }
 }
 
+public struct CanvasViewportFit: Sendable {
+    public let zoom: CGFloat
+    public let offset: CGSize
+
+    public init(zoom: CGFloat, offset: CGSize) {
+        self.zoom = zoom
+        self.offset = offset
+    }
+}
+
+/// Projects logical Canvas geometry into the visible viewport without applying
+/// a render transform to SwiftUI text. Final coordinates are aligned to the
+/// display backing scale so card borders and Canvas paths settle on physical
+/// pixels after panning, fitting, or magnification.
+public enum CanvasViewportProjection {
+    public static func point(
+        _ logicalPoint: CGPoint,
+        zoom: CGFloat,
+        offset: CGSize,
+        displayScale: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: snap(logicalPoint.x * zoom + offset.width, displayScale: displayScale),
+            y: snap(logicalPoint.y * zoom + offset.height, displayScale: displayScale)
+        )
+    }
+
+    public static func fit(
+        bounds: CGRect,
+        viewportSize: CGSize,
+        padding: CGFloat,
+        minimumZoom: CGFloat,
+        maximumZoom: CGFloat,
+        displayScale: CGFloat
+    ) -> CanvasViewportFit {
+        guard !bounds.isNull, bounds.width > 0, bounds.height > 0,
+              viewportSize.width > padding * 2,
+              viewportSize.height > padding * 2,
+              minimumZoom > 0,
+              maximumZoom >= minimumZoom
+        else {
+            return CanvasViewportFit(zoom: 1, offset: .zero)
+        }
+
+        let availableWidth = viewportSize.width - padding * 2
+        let availableHeight = viewportSize.height - padding * 2
+        let fitted = min(availableWidth / bounds.width, availableHeight / bounds.height)
+        let zoom = min(max(fitted, minimumZoom), maximumZoom)
+        let offset = CGSize(
+            width: snap(
+                (viewportSize.width - bounds.width * zoom) / 2 - bounds.minX * zoom,
+                displayScale: displayScale
+            ),
+            height: snap(
+                (viewportSize.height - bounds.height * zoom) / 2 - bounds.minY * zoom,
+                displayScale: displayScale
+            )
+        )
+        return CanvasViewportFit(zoom: zoom, offset: offset)
+    }
+
+    private static func snap(_ value: CGFloat, displayScale: CGFloat) -> CGFloat {
+        let scale = displayScale.isFinite && displayScale > 0 ? displayScale : 1
+        return (value * scale).rounded() / scale
+    }
+}
+
+/// One concrete, cycle-free route from a materialized Screen Graph entry to
+/// a selected target state. Parallel Transitions intentionally produce
+/// distinct routes because they may represent different observed actions
+/// even when their endpoint states are identical.
+public struct CanvasRoute: Equatable, Sendable, Identifiable {
+    public let entryStateID: String
+    public let targetStateID: String
+    public let stateIDs: [String]
+    public let transitionIDs: [String]
+
+    public var id: String {
+        if transitionIDs.isEmpty {
+            return "entry:\(entryStateID)"
+        }
+        return transitionIDs.joined(separator: "|")
+    }
+
+    public init(
+        entryStateID: String,
+        targetStateID: String,
+        stateIDs: [String],
+        transitionIDs: [String]
+    ) {
+        self.entryStateID = entryStateID
+        self.targetStateID = targetStateID
+        self.stateIDs = stateIDs
+        self.transitionIDs = transitionIDs
+    }
+}
+
+/// Bounded deterministic route enumeration for the Studio Canvas. This is a
+/// presentation query over the graph returned by the Host; it never invents
+/// transitions or writes layout state back into the materialized graph.
+public enum CanvasPathPlanner {
+    public static func paths(
+        to targetStateID: String,
+        in graph: CanvasGraph,
+        maximumPaths: Int = 24,
+        maximumDepth: Int = 64
+    ) -> [CanvasRoute] {
+        guard maximumPaths > 0, maximumDepth >= 0 else { return [] }
+
+        let knownStateIDs = Set(graph.states.map(\.id))
+        guard knownStateIDs.contains(targetStateID) else { return [] }
+
+        var outgoing: [String: [CanvasTransitionSummary]] = [:]
+        for transition in graph.transitions
+        where knownStateIDs.contains(transition.sourceStateID)
+            && knownStateIDs.contains(transition.targetStateID) {
+            outgoing[transition.sourceStateID, default: []].append(transition)
+        }
+        for sourceStateID in Array(outgoing.keys) {
+            outgoing[sourceStateID]?.sort {
+                if $0.targetStateID != $1.targetStateID {
+                    return $0.targetStateID < $1.targetStateID
+                }
+                return $0.transitionID < $1.transitionID
+            }
+        }
+
+        var entryStateIDs: [String] = []
+        var seenEntries = Set<String>()
+        for entryStateID in graph.entryStateIDs.sorted()
+        where knownStateIDs.contains(entryStateID) && seenEntries.insert(entryStateID).inserted {
+            entryStateIDs.append(entryStateID)
+        }
+
+        var routes: [CanvasRoute] = []
+
+        func walk(
+            entryStateID: String,
+            currentStateID: String,
+            stateIDs: [String],
+            transitionIDs: [String],
+            visitedStateIDs: Set<String>
+        ) {
+            guard routes.count < maximumPaths else { return }
+            if currentStateID == targetStateID {
+                routes.append(
+                    CanvasRoute(
+                        entryStateID: entryStateID,
+                        targetStateID: targetStateID,
+                        stateIDs: stateIDs,
+                        transitionIDs: transitionIDs
+                    )
+                )
+                return
+            }
+            guard transitionIDs.count < maximumDepth else { return }
+
+            for transition in outgoing[currentStateID] ?? [] {
+                guard routes.count < maximumPaths,
+                      !visitedStateIDs.contains(transition.targetStateID)
+                else {
+                    continue
+                }
+                var nextVisited = visitedStateIDs
+                nextVisited.insert(transition.targetStateID)
+                walk(
+                    entryStateID: entryStateID,
+                    currentStateID: transition.targetStateID,
+                    stateIDs: stateIDs + [transition.targetStateID],
+                    transitionIDs: transitionIDs + [transition.transitionID],
+                    visitedStateIDs: nextVisited
+                )
+            }
+        }
+
+        for entryStateID in entryStateIDs where routes.count < maximumPaths {
+            walk(
+                entryStateID: entryStateID,
+                currentStateID: entryStateID,
+                stateIDs: [entryStateID],
+                transitionIDs: [],
+                visitedStateIDs: [entryStateID]
+            )
+        }
+        return routes
+    }
+}
+
+/// Human-facing labels for Canvas cards. Canonical state titles remain intact
+/// in the model and Inspector; the Canvas avoids promoting instrumentation
+/// event names such as `android.debug.inspector.open` to the primary label.
+public enum CanvasStatePresentation {
+    public static func displayTitle(for state: CanvasStateSummary) -> String {
+        guard looksGenerated(state.title) else { return state.title }
+
+        let semanticLabels = state.labels.filter { $0 != "entry" }
+        let genericLabels: Set<String> = ["screen", "storefront", "catalog"]
+        let specificLabels = semanticLabels.filter { !genericLabels.contains($0) }
+        let preferredLabels = specificLabels.isEmpty ? semanticLabels : specificLabels
+        guard !preferredLabels.isEmpty else { return state.title }
+        return preferredLabels.map(humanize).joined(separator: " · ")
+    }
+
+    private static func looksGenerated(_ title: String) -> Bool {
+        let lowered = title.lowercased()
+        return lowered.contains(".debug.")
+            || lowered.contains(".inspector.")
+            || lowered.hasPrefix("runtime.")
+    }
+
+    private static func humanize(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return String(first).uppercased() + String(word.dropFirst())
+            }
+            .joined(separator: " ")
+    }
+}
+
 /// Pure parsing, validation, and counting rules for the Screen State
 /// annotation editor. The Host contract allows unique labels of 1 through
 /// 128 characters and a summary of at most 280 characters; an empty labels
@@ -819,4 +1043,11 @@ public enum StudioLayoutMetrics {
     public static func inspectorArrangement(forWidth width: CGFloat) -> InspectorArrangement {
         width >= inspectorSideBySideMinWidth ? .sideBySide : .compact
     }
+}
+
+/// Product-level visibility policy for implemented but intentionally
+/// non-default Studio surfaces. The capability remains available through the
+/// Engine, Host, CLI, and tests while the primary Inspector stays focused.
+public enum StudioFeaturePolicy {
+    public static let designReviewVisibleByDefault = false
 }

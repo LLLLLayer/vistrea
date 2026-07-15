@@ -1,0 +1,7 @@
+{
+  "format_version": 1,
+  "documents": [
+    { "name": "Project", "path": "README.md" },
+    { "name": "Documentation", "path": "docs" }
+  ]
+}

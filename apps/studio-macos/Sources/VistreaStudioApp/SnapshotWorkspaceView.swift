@@ -2,6 +2,7 @@ import AppKit
 import SceneKit
 import SwiftUI
 import VistreaStudioCore
+import VistreaStudioHostRuntime
 
 /// The primary navigation sections. The Canvas is the landing surface for
 /// the selected Application + Version scope; the flat Snapshot list is the
@@ -9,6 +10,7 @@ import VistreaStudioCore
 enum WorkspaceSection: String, CaseIterable, Identifiable {
     case canvas = "Canvas"
     case evidence = "Evidence"
+    case documents = "Documents"
     case wiki = "Wiki"
     case hub = "Hub"
 
@@ -18,6 +20,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
         switch self {
         case .canvas: "point.3.connected.trianglepath.dotted"
         case .evidence: "camera.on.rectangle"
+        case .documents: "doc.text.magnifyingglass"
         case .wiki: "book"
         case .hub: "arrow.triangle.2.circlepath.circle"
         }
@@ -26,11 +29,30 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
 
 struct SnapshotWorkspaceView: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @ObservedObject var projectDocuments: StudioProjectDocuments
+    let workspaceName: String?
+    let onManageWorkspaces: (() -> Void)?
     @State private var section: WorkspaceSection = .canvas
+
+    init(
+        model: SnapshotWorkspaceModel,
+        projectDocuments: StudioProjectDocuments,
+        workspaceName: String? = nil,
+        onManageWorkspaces: (() -> Void)? = nil
+    ) {
+        self.model = model
+        self.projectDocuments = projectDocuments
+        self.workspaceName = workspaceName
+        self.onManageWorkspaces = onManageWorkspaces
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ContextBar(model: model)
+            ContextBar(
+                model: model,
+                workspaceName: workspaceName,
+                onManageWorkspaces: onManageWorkspaces
+            )
             Divider()
             if let operationError = model.operationError {
                 OperationErrorBanner(message: operationError) {
@@ -63,7 +85,9 @@ struct SnapshotWorkspaceView: View {
                         idealWidth: StudioLayoutMetrics.navigationIdealWidth,
                         maxWidth: StudioLayoutMetrics.navigationMaxWidth
                     )
-                if section == .hub {
+                if section == .documents {
+                    ProjectDocumentsPane(documents: projectDocuments)
+                } else if section == .hub {
                     HubPane(model: model)
                 } else {
                     EmptyWorkspaceView(isCapturing: model.isCapturing) {
@@ -88,6 +112,8 @@ struct SnapshotWorkspaceView: View {
                     CanvasSection(model: model)
                 case .evidence:
                     EvidenceSection(model: model)
+                case .documents:
+                    ProjectDocumentsPane(documents: projectDocuments)
                 case .wiki:
                     WikiPane(model: model)
                 case .hub:
@@ -648,8 +674,10 @@ private struct InspectorPanes: View {
                     .tabItem { Label("Screenshot", systemImage: "photo") }
                 LayerInspector3DPane(model: model)
                     .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
-                DesignReviewPane(model: model)
-                    .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
+                if StudioFeaturePolicy.designReviewVisibleByDefault {
+                    DesignReviewPane(model: model)
+                        .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
+                }
             }
             .frame(minHeight: 280)
             ViewTreePane(model: model)
@@ -692,13 +720,6 @@ private struct CanvasPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var isExploreFormPresented = false
     @State private var isMergeSheetPresented = false
-
-    private static let columnWidth = StudioLayoutMetrics.canvasColumnWidth
-    private static let rowHeight = StudioLayoutMetrics.canvasRowHeight
-    private static let cardSize = CGSize(
-        width: StudioLayoutMetrics.canvasCardWidth,
-        height: StudioLayoutMetrics.canvasCardHeight
-    )
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -753,159 +774,10 @@ private struct CanvasPane: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .content:
-            ScrollView([.horizontal, .vertical]) {
-                canvasContent
-                    .padding(24)
-            }
-            if model.selectedCanvasStateID == nil {
-                Divider()
-                Text("Click a Screen State to open its Inspector. Cmd-click selects states for merging.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            InteractiveScreenStateCanvas(model: model)
         }
     }
 
-    private var canvasContent: some View {
-        let positions = model.canvasStates
-        let graph = model.canvasGraph
-        let entryIDs = Set(graph?.entryStateIDs ?? [])
-        let selectedID = model.selectedCanvasStateID
-        let linkedSelected = !model.relatedWikiNodes.isEmpty
-        let centers = Dictionary(uniqueKeysWithValues: positions.map { positioned in
-            (
-                positioned.id,
-                CGPoint(
-                    x: CGFloat(positioned.column) * Self.columnWidth + Self.cardSize.width / 2,
-                    y: CGFloat(positioned.row) * Self.rowHeight + Self.cardSize.height / 2
-                )
-            )
-        })
-        let width = (positions.map(\.column).max() ?? 0) + 1
-        let height = (positions.map(\.row).max() ?? 0) + 1
-        return ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                for transition in graph?.transitions ?? [] {
-                    guard let source = centers[transition.sourceStateID],
-                          let target = centers[transition.targetStateID]
-                    else {
-                        continue
-                    }
-                    var path = Path()
-                    path.move(to: source)
-                    path.addLine(to: target)
-                    context.stroke(path, with: .color(.secondary.opacity(0.6)), lineWidth: 1.5)
-                }
-            }
-            ForEach(positions) { positioned in
-                let isActive = positioned.state.isActive
-                let isMergeSelected = model.mergeSelectionStateIDs.contains(positioned.id)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(positioned.state.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    Text(positioned.state.kind)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        if !isActive {
-                            Text(positioned.state.status)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-                        if entryIDs.contains(positioned.id) {
-                            Text("entry")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.blue)
-                        }
-                        if isMergeSelected {
-                            Label("merge", systemImage: "checkmark.circle.fill")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.orange)
-                        }
-                        if positioned.id == selectedID, linkedSelected {
-                            Label("linked", systemImage: "book")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.purple)
-                        }
-                    }
-                    if !positioned.state.labels.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(positioned.state.labels.prefix(3), id: \.self) { label in
-                                AnnotationLabelChip(label: label)
-                            }
-                            if positioned.state.labels.count > 3 {
-                                Text("+\(positioned.state.labels.count - 3)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .help(positioned.state.labels.joined(separator: ", "))
-                    }
-                    if let summary = positioned.state.summary {
-                        Text(summary)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .help(summary)
-                    }
-                }
-                .padding(10)
-                .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
-                .clipped()
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            isMergeSelected
-                                ? Color.orange
-                                : positioned.id == selectedID
-                                    ? Color.accentColor
-                                    : entryIDs.contains(positioned.id)
-                                        ? Color.blue
-                                        : Color.secondary.opacity(0.4),
-                            lineWidth: isMergeSelected || positioned.id == selectedID
-                                || entryIDs.contains(positioned.id) ? 2 : 1
-                        )
-                )
-                .opacity(isActive ? 1 : 0.4)
-                .offset(
-                    x: CGFloat(positioned.column) * Self.columnWidth,
-                    y: CGFloat(positioned.row) * Self.rowHeight
-                )
-                .highPriorityGesture(
-                    TapGesture().modifiers(.command).onEnded {
-                        // Cmd-click toggles the merge selection; only active
-                        // states are selectable.
-                        model.toggleMergeSelection(stateID: positioned.id)
-                    }
-                )
-                .onTapGesture {
-                    Task { await model.selectCanvasState(id: positioned.id) }
-                }
-                .help(
-                    isActive
-                        ? "Click for details; Cmd-click to select for merging."
-                        : "This state was \(positioned.state.status) by identity curation."
-                )
-                .accessibilityLabel(
-                    "Screen state \(positioned.state.title), \(positioned.state.status)"
-                )
-            }
-        }
-        .frame(
-            width: CGFloat(width) * Self.columnWidth,
-            height: CGFloat(height) * Self.rowHeight,
-            alignment: .topLeading
-        )
-    }
 }
 
 /// The Canvas identity-curation status line: the changed-elsewhere conflict
@@ -2984,11 +2856,12 @@ private struct EventTimelineStrip: View {
 /// capture entry.
 private struct ContextBar: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    let workspaceName: String?
+    let onManageWorkspaces: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 14) {
-            Label("Vistrea Studio", systemImage: "rectangle.3.group")
-                .font(.headline)
+            workspaceLabel
             Divider()
                 .frame(height: 18)
             scopePicker
@@ -3012,6 +2885,25 @@ private struct ContextBar: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    @ViewBuilder
+    private var workspaceLabel: some View {
+        if let workspaceName, let onManageWorkspaces {
+            Menu {
+                Button("Manage Workspaces…", action: onManageWorkspaces)
+            } label: {
+                Label(workspaceName, systemImage: "folder.fill")
+                    .font(.headline)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Manage local Workspaces")
+            .accessibilityLabel("Current Workspace, \(workspaceName)")
+        } else {
+            Label("Vistrea Studio", systemImage: "rectangle.3.group")
+                .font(.headline)
+        }
     }
 
     @ViewBuilder

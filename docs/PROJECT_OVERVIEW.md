@@ -37,7 +37,7 @@ It connects those capabilities into a persistent Runtime UI Knowledge System.
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                    Vistrea Studio for macOS                  │
-│ Canvas / Deep Wiki / Design Review / Tuning / Inspector     │
+│ Canvas / Documents / Deep Wiki / Tuning / Inspector         │
 └──────────────────────────────┬───────────────────────────────┘
                                │ public use cases
 ┌──────────────────────────────▼───────────────────────────────┐
@@ -161,8 +161,9 @@ It includes:
 - device and Runtime SDK connection;
 - current screenshot and live Snapshot inspection;
 - Screen State Canvas;
+- configured read-only project Markdown documents;
 - versioned Deep Wiki;
-- design review and visual tuning workspace;
+- visual tuning workspace;
 - 2D View/Semantics Tree;
 - Lookin-style 3D View/Layer Inspector;
 - validation and build-diff results;
@@ -170,7 +171,7 @@ It includes:
 
 Studio composes Engine use cases. Views and ViewModels must not access SQLite, object paths, automation implementations, or Hub transport directly.
 
-The current native SwiftUI Studio is Canvas-first: an Application Version + Build scope selects a build-scoped Screen State Canvas, and a selected state resolves that build's canonical Snapshot into screenshot, 2D tree, hierarchy-depth 3D, design comparison, node properties, tuning, annotations, knowledge links, and Screen State-scoped Review Issues, while a secondary Evidence library retains raw Snapshots. Runtime events live in a bottom timeline. Wiki creation/editing, Canvas merge/split curation, state annotations, live exploration progress, Difference-to-Issue promotion, and one-click fresh-build recapture verification are implemented. A recaptured Snapshot joins Evidence and scope discovery without silently replacing the Inspector selection. A packaged Studio owns an embedded production Host, opens its last selected or default Application Support Workspace, and can switch Workspace folders from the File menu; environment-provided Host credentials remain an explicit development integration. Validation/build-diff screens, sync/history, Agent activity, source-suggestion, and Collection-management surfaces remain follow-up work; `apps/studio-macos/README.md` tracks the exact implemented surface.
+The current native SwiftUI Studio is Canvas-first: an Application Version + Build scope selects a build-scoped Screen State Canvas, and a selected state resolves that build's canonical Snapshot into screenshot, 2D tree, hierarchy-depth 3D, node properties, tuning, annotations, knowledge links, and Screen State-scoped Review Issues, while a secondary Evidence library retains raw Snapshots. Runtime events live in a bottom timeline. A separate Documents section associates the Workspace with a local source checkout and browses the Markdown roots declared by the repository-owned `vistrea.project.json`; those read-only files remain outside SQLite and the Deep Wiki. Wiki creation/editing, Canvas merge/split curation, state annotations, and live exploration progress are implemented. The implemented design comparison, Difference-to-Issue promotion, and fresh-build verification stack remains available through Engine, Host, CLI, and tests, but Design Review is intentionally absent from the default Studio Inspector. A packaged Studio owns an embedded production Host and manages local Workspaces through a Welcome and recent-location surface with explicit create, open, switch, reveal, and close actions. It restores the last available Workspace, reports missing or unrecognized locations without modifying them, and lets registered `.vistrea` directory packages reopen through Finder; environment-provided Host credentials remain an explicit development integration. Validation/build-diff screens, sync/history, Agent activity, source-suggestion, and Collection-management surfaces remain follow-up work; `apps/studio-macos/README.md` tracks the exact implemented surface.
 
 Studio distribution remains outside the product-layer boundary: a release tool assembles the SwiftPM executable into a Universal app, embeds pinned architecture-specific Node.js and production Host runtimes plus the pinned Sparkle updater, and produces ZIP/DMG artifacts. The GitHub workflow requires a strictly newer semantic version, Developer ID signing, Apple notarization, and a signed update archive and feed. It publishes the GitHub Release before atomically switching the public GitHub Pages feed, so the feed never points at draft assets; the workflow refuses to replace an already published release. Local ad-hoc packaging and a real packaged-app launch/clean-quit loop are verified; the first credentialed old-to-new installed update remains release acceptance.
 

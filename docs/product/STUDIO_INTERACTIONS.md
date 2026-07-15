@@ -28,36 +28,19 @@ Primary navigation:
 
 ```text
 Workspace
-├── Overview
-├── Live
-│   ├── Devices
-│   ├── Current Screen
-│   └── Event Timeline
-├── Explore
-│   ├── Screen State Canvas
-│   ├── Exploration Runs
-│   └── Paths
-├── Inspect
-│   ├── 2D Tree
-│   ├── 3D View/Layer
-│   └── Properties
-├── Design
-│   ├── References
-│   ├── Review Issues
-│   └── Tuning Patches
-├── Verify
-│   ├── Validation Runs
-│   ├── Findings
-│   └── Build Diff
+├── Canvas
+├── Evidence
+├── Documents
 ├── Wiki
-│   ├── Knowledge Graph
-│   ├── Search
-│   └── Published Collections
-└── Sync
-    ├── Local History
-    ├── Remotes
-    └── Conflicts
+└── Hub
 ```
+
+Canvas owns exploration and the selected Screen State Inspector. Evidence is
+the secondary raw Snapshot library. Documents browses source-repository
+Markdown without importing it. Wiki owns Vistrea knowledge, and Hub owns the
+optional collaboration workflow. Design Review remains implemented behind the
+shared contracts but is intentionally absent from this default navigation and
+Inspector surface.
 
 ## 3. Main window composition
 
@@ -66,7 +49,7 @@ Workspace
 │ Workspace / Project / Ref / Build     Device     Sync     Agent    │
 ├──────────────┬───────────────────────────────────┬─────────────────┤
 │ Navigation   │ Main content                      │ Context panel   │
-│              │ Canvas / Screenshot / Diff / Tree │ Properties      │
+│              │ Canvas / Screenshot / Docs / Tree │ Properties      │
 │              │                                   │ Issues          │
 │              │                                   │ Evidence        │
 ├──────────────┴───────────────────────────────────┴─────────────────┤
@@ -94,7 +77,6 @@ The right panel follows selection:
 
 - Screen State summary;
 - UI Node properties;
-- design expected versus actual values;
 - Review Issues;
 - validation findings;
 - incoming and outgoing paths;
@@ -124,9 +106,9 @@ The main content has explicit modes rather than one overloaded canvas:
 | Live | Current screenshot and runtime selection | Capture, device action, open Inspector |
 | Explore | Screen State Canvas and operation progress | Start/pause/resume/cancel exploration, curate identity |
 | Inspect | Screenshot plus 2D/3D structure | Select node, inspect properties, attach notes |
-| Review | Design comparison and issues | Map design, create/update/verify issues |
 | Tune | Runtime preview and property editor | Apply/revert allowlisted preview values |
 | Verify | Findings and build/graph diff | Run validation, inspect evidence, accept baseline |
+| Documents | Repository-owned Markdown | Choose project, filter, preview, and open configuration |
 | Wiki | Linked knowledge and search | Edit notes, links, collections, and publication metadata |
 
 Mode changes preserve selected Screen State and node when the target mode supports them.
@@ -135,12 +117,28 @@ Mode changes preserve selected Screen State and node when the target mode suppor
 
 ```text
 Launch Studio
--> open recent Workspace or create local Workspace
+-> restore the last available Workspace, otherwise show Welcome
+-> choose a recent Workspace, open an existing Workspace, or create a new one
 -> run Workspace health and migration check
 -> display local refs and optional remote status
 -> choose project/ref/build context
 -> enter Overview
 ```
+
+The packaged application keeps Workspace selection separate from product
+content. Welcome lists recent locations with their full path, last-opened time,
+current marker, and available, missing, or unrecognized state. Opening accepts
+only an existing Workspace; creating initializes only a new or empty location.
+Invalid locations remain untouched and can be removed from Recent. A failed
+switch leaves the current Workspace and Host usable. The current Workspace is
+visible in the window title and persistent context bar, and `.vistrea`
+directory packages can reopen through Finder. Closing a Workspace returns to
+Welcome and disables automatic restore until another Workspace is opened.
+
+Recent preferences contain only normalized paths and timestamps. Tokens,
+connection descriptors, Workspace metadata, and Hub credentials are excluded.
+The managed Host remains responsible for creation, health, migration, locking,
+and recovery; the Welcome UI never reads SQLite or initializes storage itself.
 
 Engine mapping:
 
@@ -196,6 +194,9 @@ Select start state and scope
 -> pause for manual intervention if required
 -> resume or cancel
 -> review state identity suggestions
+-> select a destination Screen State
+-> choose one recorded entry-to-destination path when alternatives exist
+-> inspect the highlighted states and directional transitions
 -> create Commit and update selected ref
 ```
 
@@ -207,6 +208,20 @@ The Canvas distinguishes:
 - blocked dangerous actions;
 - states missing in the selected build;
 - uncertain identity matches requiring review.
+
+The Canvas viewport supports background panning, magnification and explicit
+zoom controls, and local card repositioning. These presentation coordinates
+are session UI state and never rewrite Screen State identity or Transition
+evidence. Zoom must lay out cards and text at their final size rather than
+transforming a composited graph layer. Final positions snap to the display
+backing scale, low zoom progressively removes secondary card detail, and
+Reset-to-fit restores the deterministic layered layout without enlarging it
+beyond 100%. Selecting a destination keeps the same state selected in the
+Inspector, enumerates a bounded set of cycle-free routes from every recorded
+entry, and highlights the chosen route's states and directional transitions.
+Alternative routes are explicit choices rather than lines highlighted all at
+once. A state with no recorded entry route reports that absence instead of
+inventing reachability.
 
 Engine mapping:
 
@@ -220,6 +235,11 @@ Engine mapping:
 - `CommitWorkingSetAndUpdateRef`
 
 ## 8. Workflow: design review
+
+This workflow remains implemented through Engine, Host, CLI, persistence, and
+tests, but its dedicated Studio workbench is not part of the default product
+surface. `StudioFeaturePolicy.designReviewVisibleByDefault` records that
+decision so hiding the UI does not delete or fork the underlying capability.
 
 ```text
 Open Screen State
@@ -310,7 +330,25 @@ The diff UI distinguishes:
 - unresolved identity;
 - unchanged and content-deduplicated.
 
-## 11. Workflow: Deep Wiki
+## 11. Workflow: project Markdown documents
+
+```text
+Open Documents
+-> choose the local source project for this Workspace
+-> load vistrea.project.json, or use README.md and docs/
+-> filter by title, relative path, or configured source
+-> select any Markdown file
+-> read rendered content or inspect source text
+-> open the project configuration in the normal system editor when needed
+```
+
+The project commits `vistrea.project.json`; Studio preferences retain only the
+machine-local project-folder association for each Workspace. Configured paths
+must remain inside the project root. Browsing is read-only and never imports
+the files into SQLite, the Object Store, Commits, Hub, or the Deep Wiki. Exact
+format, fallback, and safety bounds live in `PROJECT_DOCUMENTS.md`.
+
+## 12. Workflow: Deep Wiki
 
 ```text
 Search screen, route, component, text, issue, or path
@@ -324,7 +362,7 @@ Search screen, route, component, text, issue, or path
 
 Wiki editing must not duplicate runtime truth into manually maintained fields when a query or reference is sufficient.
 
-## 12. Workflow: Coding Agent
+## 13. Workflow: Coding Agent
 
 Studio shows Agent operations as reviewable activities:
 
@@ -337,7 +375,7 @@ Studio shows Agent operations as reviewable activities:
 
 An Agent never gains broader device, tuning, publication, or deletion authority merely because it runs inside Studio.
 
-## 13. Offline and synchronization behavior
+## 14. Offline and synchronization behavior
 
 - Offline status is explicit but does not block local capture, review, tuning, Wiki edits, or commits.
 - Local changes appear ahead or diverged from a remote ref.
@@ -351,7 +389,7 @@ An Agent never gains broader device, tuning, publication, or deletion authority 
 - Artifact upload progress is separate from metadata/ref publication.
 - Restricted or redacted artifacts show explicit placeholders.
 
-## 14. Undo and history
+## 15. Undo and history
 
 - UI navigation undo is local UI state.
 - Tuning undo reverts active runtime preview changes.
@@ -359,7 +397,7 @@ An Agent never gains broader device, tuning, publication, or deletion authority 
 - Ref rollback moves a ref with authorization and audit; it does not delete commits.
 - Object deletion is not a user-facing undo mechanism.
 
-## 15. Empty, loading, and failure states
+## 16. Empty, loading, and failure states
 
 Every primary screen defines:
 
@@ -376,7 +414,7 @@ Every primary screen defines:
 - remote unavailable but local data present;
 - version conflict.
 
-## 16. Accessibility and keyboard behavior
+## 17. Accessibility and keyboard behavior
 
 - Every Canvas and tree action has a non-pointer alternative.
 - Selection, focus, and current mode are exposed to accessibility APIs.
@@ -385,7 +423,7 @@ Every primary screen defines:
 - Long operations announce progress without stealing focus.
 - Reduced-motion settings disable blink and large 3D transitions.
 
-## 17. Studio milestones
+## 18. Studio milestones
 
 ### M1: SDK-to-Snapshot vertical loop
 
