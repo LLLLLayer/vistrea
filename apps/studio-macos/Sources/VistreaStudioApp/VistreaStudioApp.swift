@@ -25,6 +25,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     private enum WindowContent {
         case welcome
         case workspace
+        case workspaceManager
     }
 
     private var model: SnapshotWorkspaceModel
@@ -33,8 +34,13 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     private let launchConfiguration: StudioLaunchConfiguration
     private let workspaceHistory: StudioWorkspaceHistory
     private let workspaceManagementEnabled: Bool
+    private let workspaceMaintenanceModel: WorkspaceMaintenanceViewModel
     private var windowContent: WindowContent
     private var workspaceMessage: String?
+    private var selectedManagerWorkspaceURL: URL?
+    private var maintenanceWorkspacePath: String?
+    private var offlineRepairEligibleWorkspaceURL: URL?
+    private var offlineRepairMessage: String?
     private var updaterController: SPUStandardUpdaterController?
     private var window: NSWindow?
 
@@ -53,8 +59,16 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         self.launchConfiguration = launchConfiguration
         self.workspaceHistory = workspaceHistory
         workspaceManagementEnabled = composition.workspaceManagementEnabled
+        workspaceMaintenanceModel = WorkspaceMaintenanceViewModel(
+            client: composition.managedHost?.client
+        )
         windowContent = composition.opensWelcome ? .welcome : .workspace
         workspaceMessage = composition.startupMessage
+        selectedManagerWorkspaceURL = composition.managedHost?.workspaceURL ??
+            workspaceHistory.lastWorkspaceURL()
+        maintenanceWorkspacePath = composition.managedHost?.workspaceURL.standardizedFileURL.path
+        offlineRepairEligibleWorkspaceURL = composition.failedWorkspaceURL
+        offlineRepairMessage = composition.failedWorkspaceURL == nil ? nil : composition.startupMessage
         if let workspaceURL = composition.managedHost?.workspaceURL {
             workspaceHistory.recordOpened(workspaceURL)
         }
@@ -113,6 +127,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                 keyEquivalent: "n"
             )
             newWorkspaceItem.target = self
+            newWorkspaceItem.isEnabled = !workspaceMaintenanceModel.isBusy
             fileMenu.addItem(newWorkspaceItem)
 
             let openWorkspaceItem = NSMenuItem(
@@ -121,6 +136,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                 keyEquivalent: "o"
             )
             openWorkspaceItem.target = self
+            openWorkspaceItem.isEnabled = !workspaceMaintenanceModel.isBusy
             fileMenu.addItem(openWorkspaceItem)
 
             let recentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
@@ -134,6 +150,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                 keyEquivalent: ""
             )
             manageWorkspaceItem.target = self
+            manageWorkspaceItem.isEnabled = !workspaceMaintenanceModel.isBusy
             fileMenu.addItem(manageWorkspaceItem)
 
             let revealWorkspaceItem = NSMenuItem(
@@ -142,7 +159,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                 keyEquivalent: ""
             )
             revealWorkspaceItem.target = self
-            revealWorkspaceItem.isEnabled = managedHost != nil
+            revealWorkspaceItem.isEnabled = managedHost != nil && !workspaceMaintenanceModel.isBusy
             fileMenu.addItem(revealWorkspaceItem)
 
             let closeWorkspaceItem = NSMenuItem(
@@ -151,7 +168,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                 keyEquivalent: ""
             )
             closeWorkspaceItem.target = self
-            closeWorkspaceItem.isEnabled = managedHost != nil
+            closeWorkspaceItem.isEnabled = managedHost != nil && !workspaceMaintenanceModel.isBusy
             fileMenu.addItem(closeWorkspaceItem)
         }
         fileMenuItem.submenu = fileMenu
@@ -204,7 +221,8 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             item.representedObject = workspace.path
             item.toolTip = workspace.path
-            item.isEnabled = workspaceHistory.availability(of: workspace.url) == .available
+            item.isEnabled = workspaceHistory.availability(of: workspace.url) == .available &&
+                !workspaceMaintenanceModel.isBusy
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -214,12 +232,14 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         )
         clearItem.target = self
+        clearItem.isEnabled = !workspaceMaintenanceModel.isBusy
         menu.addItem(clearItem)
         return menu
     }
 
     @objc
     private func newWorkspace(_ sender: Any?) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         let panel = NSSavePanel()
         panel.title = "New Vistrea Workspace"
         panel.message = "Choose a name and location for the local Workspace."
@@ -245,6 +265,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func openWorkspace(_ sender: Any?) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Open Vistrea Workspace"
         panel.message = "Choose an existing Vistrea Workspace folder."
@@ -274,14 +295,19 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func revealWorkspace(_ sender: Any?) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         guard let workspaceURL = managedHost?.workspaceURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
     }
 
     @objc
     private func showWorkspaceManager(_ sender: Any?) {
-        guard workspaceManagementEnabled else { return }
-        windowContent = .welcome
+        guard workspaceManagementEnabled, !workspaceMaintenanceModel.isBusy else { return }
+        let selected = managedHost?.workspaceURL ?? offlineRepairEligibleWorkspaceURL ??
+            selectedManagerWorkspaceURL ?? workspaceHistory.recentWorkspaces().first?.url
+        selectedManagerWorkspaceURL = selected
+        configureMaintenanceForSelectedWorkspace()
+        windowContent = .workspaceManager
         workspaceMessage = nil
         replaceWindowContent()
         updateWindowTitle()
@@ -289,10 +315,17 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func closeWorkspace(_ sender: Any?) {
-        guard workspaceManagementEnabled, managedHost != nil else { return }
+        guard workspaceManagementEnabled,
+              managedHost != nil,
+              !workspaceMaintenanceModel.isBusy
+        else { return }
         model.stopExplorationPolling()
         managedHost?.stop()
         managedHost = nil
+        workspaceMaintenanceModel.configure(client: nil)
+        maintenanceWorkspacePath = nil
+        offlineRepairEligibleWorkspaceURL = nil
+        offlineRepairMessage = nil
         model = SnapshotWorkspaceModel(
             client: UnavailableHostClient(message: "Open a Workspace to start its local Host.")
         )
@@ -306,16 +339,24 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func clearRecentWorkspaces(_ sender: Any?) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         workspaceHistory.clearRecentWorkspaces(
             preserving: managedHost?.workspaceURL
         )
-        if windowContent == .welcome {
+        if managedHost == nil {
+            selectedManagerWorkspaceURL = nil
+            offlineRepairEligibleWorkspaceURL = nil
+            offlineRepairMessage = nil
+            configureMaintenanceForSelectedWorkspace(force: true)
+        }
+        if windowContent == .welcome || windowContent == .workspaceManager {
             replaceWindowContent()
         }
         configureApplicationMenu()
     }
 
     private func openRecentWorkspace(at workspaceURL: URL) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         switch workspaceHistory.availability(of: workspaceURL) {
         case .available:
             switchWorkspace(to: workspaceURL, creating: false)
@@ -332,11 +373,20 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func switchWorkspace(to workspaceURL: URL, creating: Bool) {
+    private func switchWorkspace(
+        to workspaceURL: URL,
+        creating: Bool,
+        managingAfterOpen: Bool = false
+    ) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         let workspace = workspaceHistory.normalizedURL(for: workspaceURL)
         if let current = managedHost?.workspaceURL,
            workspaceHistory.normalizedURL(for: current).path == workspace.path {
-            windowContent = .workspace
+            offlineRepairEligibleWorkspaceURL = nil
+            offlineRepairMessage = nil
+            selectedManagerWorkspaceURL = current
+            configureMaintenanceForSelectedWorkspace(force: true)
+            windowContent = managingAfterOpen ? .workspaceManager : .workspace
             workspaceMessage = nil
             replaceWindowContent()
             updateWindowTitle()
@@ -350,18 +400,27 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             model = SnapshotWorkspaceModel(client: nextHost.client)
             projectDocuments = StudioProjectDocuments(workspaceURL: nextHost.workspaceURL)
             managedHost = nextHost
+            offlineRepairEligibleWorkspaceURL = nil
+            offlineRepairMessage = nil
             workspaceHistory.recordOpened(nextHost.workspaceURL)
+            selectedManagerWorkspaceURL = nextHost.workspaceURL
+            configureMaintenanceForSelectedWorkspace(force: true)
             workspaceMessage = nil
-            windowContent = .workspace
+            windowContent = managingAfterOpen ? .workspaceManager : .workspace
             replaceWindowContent()
             previousHost?.stop()
             updateWindowTitle()
             configureApplicationMenu()
         } catch {
             let action = creating ? "created" : "opened"
-            workspaceMessage = "The Workspace could not be \(action): \(error.localizedDescription)"
+            let failureMessage = "The Workspace could not be \(action): \(error.localizedDescription)"
+            workspaceMessage = failureMessage
             if managedHost == nil {
-                windowContent = .welcome
+                selectedManagerWorkspaceURL = workspace
+                offlineRepairEligibleWorkspaceURL = workspace
+                offlineRepairMessage = failureMessage
+                configureMaintenanceForSelectedWorkspace(force: true)
+                windowContent = managingAfterOpen ? .workspaceManager : .welcome
                 replaceWindowContent()
                 updateWindowTitle()
             } else {
@@ -445,6 +504,14 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                     onOpenRecent: { [weak self] url in
                         self?.openRecentWorkspace(at: url)
                     },
+                    onManageRecent: { [weak self] url in
+                        self?.selectedManagerWorkspaceURL = url
+                        self?.configureMaintenanceForSelectedWorkspace(force: true)
+                        self?.windowContent = .workspaceManager
+                        self?.workspaceMessage = nil
+                        self?.replaceWindowContent()
+                        self?.updateWindowTitle()
+                    },
                     onReveal: { url in
                         NSWorkspace.shared.activateFileViewerSelecting([url])
                     },
@@ -455,7 +522,56 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
                         self?.clearRecentWorkspaces(nil)
                     },
                     onReturnToWorkspace: managedHost == nil ? nil : { [weak self] in
-                        self?.returnToWorkspace()
+                        self?.closeWorkspaceManager()
+                    }
+                )
+            )
+        } else if workspaceManagementEnabled, windowContent == .workspaceManager {
+            let selectedPath = selectedManagerWorkspaceURL?.standardizedFileURL.path
+            let currentPath = managedHost?.workspaceURL.standardizedFileURL.path
+            let repairPath = offlineRepairEligibleWorkspaceURL?.standardizedFileURL.path
+            let allowsMaintenance = WorkspaceMaintenanceSelectionPolicy.allowsMaintenance(
+                selectedPath: selectedPath,
+                currentPath: currentPath,
+                recoveryEligiblePath: repairPath
+            )
+            rootView = AnyView(
+                WorkspaceManagerView(
+                    recentWorkspaces: workspaceHistory.recentWorkspaces(),
+                    currentWorkspaceURL: managedHost?.workspaceURL,
+                    selectedWorkspaceURL: selectedManagerWorkspaceURL,
+                    availability: { [weak self] url in
+                        self?.workspaceHistory.availability(of: url) ?? .missing
+                    },
+                    maintenanceModel: workspaceMaintenanceModel,
+                    allowsMaintenance: allowsMaintenance,
+                    canRetryOpen: managedHost == nil && selectedPath == repairPath,
+                    onSelect: { [weak self] url in
+                        self?.selectWorkspaceForManagement(url)
+                    },
+                    onNewWorkspace: { [weak self] in
+                        self?.newWorkspace(nil)
+                    },
+                    onOpenWorkspace: { [weak self] in
+                        self?.openWorkspace(nil)
+                    },
+                    onOpenToManage: { [weak self] url in
+                        self?.openWorkspaceForManagement(url)
+                    },
+                    onReveal: { url in
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    },
+                    onRemoveRecent: { [weak self] url in
+                        self?.removeRecentWorkspace(at: url)
+                    },
+                    onClose: { [weak self] in
+                        self?.closeWorkspaceManager()
+                    },
+                    onOfflineMaintenance: { [weak self] action in
+                        self?.performWorkspaceMaintenance(action)
+                    },
+                    onRetryOpen: { [weak self] in
+                        self?.retryOpenManagedWorkspace()
                     }
                 )
             )
@@ -484,24 +600,326 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func removeRecentWorkspace(at workspaceURL: URL) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
         if let current = managedHost?.workspaceURL,
            workspaceHistory.normalizedURL(for: current).path ==
             workspaceHistory.normalizedURL(for: workspaceURL).path {
             return
         }
         workspaceHistory.remove(workspaceURL)
-        if windowContent == .welcome {
+        if offlineRepairEligibleWorkspaceURL?.standardizedFileURL.path ==
+            workspaceURL.standardizedFileURL.path {
+            offlineRepairEligibleWorkspaceURL = nil
+            offlineRepairMessage = nil
+        }
+        if selectedManagerWorkspaceURL?.standardizedFileURL.path ==
+            workspaceURL.standardizedFileURL.path {
+            selectedManagerWorkspaceURL = workspaceHistory.recentWorkspaces().first?.url
+            configureMaintenanceForSelectedWorkspace(force: true)
+        }
+        if windowContent == .welcome || windowContent == .workspaceManager {
             replaceWindowContent()
         }
         configureApplicationMenu()
     }
 
-    private func returnToWorkspace() {
-        guard managedHost != nil else { return }
-        workspaceMessage = nil
-        windowContent = .workspace
+    private func closeWorkspaceManager() {
+        guard !workspaceMaintenanceModel.isBusy else { return }
+        workspaceMessage = managedHost == nil ? offlineRepairMessage : nil
+        windowContent = managedHost == nil ? .welcome : .workspace
         replaceWindowContent()
         updateWindowTitle()
+    }
+
+    private func selectWorkspaceForManagement(_ workspaceURL: URL) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
+        selectedManagerWorkspaceURL = workspaceHistory.normalizedURL(for: workspaceURL)
+        configureMaintenanceForSelectedWorkspace()
+        replaceWindowContent()
+        updateWindowTitle()
+    }
+
+    private func openWorkspaceForManagement(_ workspaceURL: URL) {
+        guard !workspaceMaintenanceModel.isBusy else { return }
+        switchWorkspace(
+            to: workspaceURL,
+            creating: false,
+            managingAfterOpen: true
+        )
+    }
+
+    private func configureMaintenanceForSelectedWorkspace(force: Bool = false) {
+        let selectedPath = selectedManagerWorkspaceURL?.standardizedFileURL.path
+        guard force || selectedPath != maintenanceWorkspacePath else { return }
+        maintenanceWorkspacePath = selectedPath
+        let currentPath = managedHost?.workspaceURL.standardizedFileURL.path
+        let client: (any WorkspaceMaintenanceClient)? = selectedPath == currentPath ?
+            managedHost?.client : nil
+        workspaceMaintenanceModel.configure(client: client)
+        let repairPath = offlineRepairEligibleWorkspaceURL?.standardizedFileURL.path
+        if let message = WorkspaceMaintenanceSelectionPolicy.recoveryFailureMessage(
+            selectedPath: selectedPath,
+            recoveryEligiblePath: repairPath,
+            message: offlineRepairMessage
+        ) {
+            workspaceMaintenanceModel.recordWorkspaceOpenFailure(message: message)
+        }
+    }
+
+    private func performWorkspaceMaintenance(_ action: WorkspaceOfflineMaintenanceAction) {
+        guard workspaceManagementEnabled,
+              !workspaceMaintenanceModel.isBusy,
+              let workspaceURL = selectedManagerWorkspaceURL,
+              workspaceHistory.availability(of: workspaceURL) == .available
+        else { return }
+
+        let selectedPath = workspaceURL.standardizedFileURL.path
+        let currentPath = managedHost?.workspaceURL.standardizedFileURL.path
+        let repairPath = offlineRepairEligibleWorkspaceURL?.standardizedFileURL.path
+        guard WorkspaceMaintenanceSelectionPolicy.allowsMaintenance(
+            selectedPath: selectedPath,
+            currentPath: currentPath,
+            recoveryEligiblePath: repairPath
+        ) else {
+            workspaceMaintenanceModel.failOfflineMaintenance(
+                message: "Open this Workspace before running maintenance.",
+                workspaceReopened: true
+            )
+            return
+        }
+
+        workspaceMaintenanceModel.beginOfflineMaintenance(action)
+        configureApplicationMenu()
+        Task { [weak self] in
+            await self?.runWorkspaceMaintenance(action, workspaceURL: workspaceURL)
+        }
+    }
+
+    private func runWorkspaceMaintenance(
+        _ action: WorkspaceOfflineMaintenanceAction,
+        workspaceURL: URL
+    ) async {
+        let maintenance: ManagedWorkspaceMaintenance
+        do {
+            guard let resourceURL = Bundle.main.resourceURL else {
+                throw ManagedWorkspaceMaintenanceError.embeddedRuntimeUnavailable
+            }
+            maintenance = try ManagedWorkspaceMaintenance(resourceURL: resourceURL)
+        } catch {
+            workspaceMaintenanceModel.failOfflineMaintenance(
+                message: error.localizedDescription,
+                workspaceReopened: managedHost != nil
+            )
+            configureApplicationMenu()
+            return
+        }
+
+        let hostToStop = managedHost
+        model.stopCanvasWatch()
+        model.stopExplorationPolling()
+        let stopHost: (() async -> Void)?
+        if let hostToStop {
+            stopHost = { [weak self] in
+                await hostToStop.stopAsync()
+                guard let self else { return }
+                if self.managedHost === hostToStop {
+                    self.managedHost = nil
+                }
+            }
+        } else {
+            stopHost = nil
+        }
+
+        let outcome = await WorkspaceMaintenanceCoordinator().run(
+            stopHost: stopHost,
+            execute: { [weak self] in
+                guard let self else {
+                    throw ManagedWorkspaceMaintenanceError.launchFailed
+                }
+                self.workspaceMaintenanceModel.replaceOnlineClient(nil)
+                self.model = SnapshotWorkspaceModel(
+                    client: UnavailableHostClient(
+                        message: "Workspace maintenance is in progress."
+                    )
+                )
+                self.configureApplicationMenu()
+                return try await self.executeWorkspaceMaintenance(
+                    action,
+                    workspaceURL: workspaceURL,
+                    maintenance: maintenance
+                )
+            },
+            reopen: { [weak self] in
+                guard let self else {
+                    throw ManagedWorkspaceMaintenanceError.launchFailed
+                }
+                try await self.reopenManagedWorkspace(workspaceURL)
+            },
+            onStage: { [weak self] stage in
+                guard let self else { return }
+                switch stage {
+                case .stoppingHost:
+                    self.workspaceMaintenanceModel.markHostStopping()
+                case .runningMaintenance:
+                    self.workspaceMaintenanceModel.markOfflineMaintenanceRunning(action.operation)
+                case .reopeningWorkspace:
+                    self.workspaceMaintenanceModel.markWorkspaceReopening()
+                }
+            }
+        )
+
+        switch outcome {
+        case let .succeeded(summary):
+            workspaceMaintenanceModel.completeOfflineMaintenance(
+                message: summary.message,
+                garbageResult: summary.garbageResult
+            )
+            await workspaceMaintenanceModel.loadRecoveryPoints()
+        case let .maintenanceFailed(operationError):
+            workspaceMaintenanceModel.failOfflineMaintenance(
+                message: "Maintenance failed: \(operationError.localizedDescription). The Workspace reopened successfully.",
+                workspaceReopened: true
+            )
+            await workspaceMaintenanceModel.loadRecoveryPoints()
+        case let .reopenFailed(summary, reopenError):
+            recordWorkspaceReopenFailure(reopenError, workspaceURL: workspaceURL)
+            workspaceMaintenanceModel.recordMaintenanceSucceededButReopenFailed(
+                successMessage: summary.message,
+                reopenMessage: "Maintenance succeeded, but the Workspace could not reopen: \(reopenError.localizedDescription)"
+            )
+        case let .maintenanceAndReopenFailed(operationError, reopenError):
+            recordWorkspaceReopenFailure(reopenError, workspaceURL: workspaceURL)
+            workspaceMaintenanceModel.failOfflineMaintenance(
+                message: "Maintenance failed: \(operationError.localizedDescription). Reopening also failed: \(reopenError.localizedDescription)",
+                workspaceReopened: false
+            )
+        }
+        configureApplicationMenu()
+    }
+
+    private func recordWorkspaceReopenFailure(_ error: Error, workspaceURL: URL) {
+        managedHost = nil
+        offlineRepairEligibleWorkspaceURL = workspaceURL
+        offlineRepairMessage = "The Workspace could not reopen: \(error.localizedDescription)"
+        workspaceMaintenanceModel.replaceOnlineClient(nil)
+        model = SnapshotWorkspaceModel(
+            client: UnavailableHostClient(
+                message: "The Workspace could not reopen: \(error.localizedDescription)"
+            )
+        )
+        projectDocuments = StudioProjectDocuments(workspaceURL: workspaceURL)
+        selectedManagerWorkspaceURL = workspaceURL
+        maintenanceWorkspacePath = workspaceURL.standardizedFileURL.path
+        windowContent = .workspaceManager
+        replaceWindowContent()
+        updateWindowTitle()
+        configureApplicationMenu()
+    }
+
+    private func executeWorkspaceMaintenance(
+        _ action: WorkspaceOfflineMaintenanceAction,
+        workspaceURL: URL,
+        maintenance: ManagedWorkspaceMaintenance
+    ) async throws -> WorkspaceMaintenanceExecutionSummary {
+        switch action {
+        case let .restore(recoveryPointID):
+            let result = try await maintenance.restore(
+                workspaceURL: workspaceURL,
+                command: RestoreWorkspaceCommand(backupHash: recoveryPointID)
+            )
+            return WorkspaceMaintenanceExecutionSummary(
+                message: "Restored schema \(result.restoredSchemaVersion), generation \(result.restoredGeneration). Previous metadata was preserved as recovery evidence \(result.recoveryID)."
+            )
+        case let .analyzeGarbage(minimumAgeSeconds):
+            let result = try await maintenance.collectGarbage(
+                workspaceURL: workspaceURL,
+                command: CollectWorkspaceGarbageCommand(
+                    dryRun: true,
+                    minimumAgeSeconds: minimumAgeSeconds
+                )
+            )
+            return WorkspaceMaintenanceExecutionSummary(
+                message: "Storage analysis completed: \(result.candidateObjects) object(s), \(result.candidateBytes) byte(s), and \(result.staleCatalogEntries) stale catalog record(s) are eligible.",
+                garbageResult: result
+            )
+        case let .applyGarbage(minimumAgeSeconds, planDigest):
+            let result = try await maintenance.collectGarbage(
+                workspaceURL: workspaceURL,
+                command: CollectWorkspaceGarbageCommand(
+                    dryRun: false,
+                    minimumAgeSeconds: minimumAgeSeconds,
+                    expectedPlanDigest: planDigest
+                )
+            )
+            return WorkspaceMaintenanceExecutionSummary(
+                message: "Storage cleanup completed: deleted \(result.deletedObjects) object(s) and \(result.deletedBytes) byte(s); removed \(result.removedCatalogEntries) stale catalog record(s).",
+                garbageResult: result
+            )
+        case .recoverInterruptedRestore:
+            let result = try await maintenance.recoverInterruptedRestore(
+                workspaceURL: workspaceURL
+            )
+            return WorkspaceMaintenanceExecutionSummary(
+                message: "Interrupted restore recovered as \(result.recoveryID). Restored original files: \(result.restoredOriginalFiles.joined(separator: ", "))."
+            )
+        case .recoverStaleLock:
+            let result = try await maintenance.recoverStaleLock(
+                workspaceURL: workspaceURL
+            )
+            return WorkspaceMaintenanceExecutionSummary(
+                message: "Recovered stale Host lock for process \(result.recoveredProcessID) as \(result.recoveryID)."
+            )
+        }
+    }
+
+    private func reopenManagedWorkspace(_ workspaceURL: URL) async throws {
+        let nextHost = try await StudioComposition.makeManagedHostAsync(
+            workspaceURL: workspaceURL
+        )
+        model = SnapshotWorkspaceModel(client: nextHost.client)
+        projectDocuments = StudioProjectDocuments(workspaceURL: nextHost.workspaceURL)
+        managedHost = nextHost
+        offlineRepairEligibleWorkspaceURL = nil
+        offlineRepairMessage = nil
+        workspaceHistory.recordOpened(nextHost.workspaceURL)
+        selectedManagerWorkspaceURL = nextHost.workspaceURL
+        maintenanceWorkspacePath = nextHost.workspaceURL.standardizedFileURL.path
+        workspaceMaintenanceModel.replaceOnlineClient(nextHost.client)
+        workspaceMessage = nil
+        windowContent = .workspaceManager
+        replaceWindowContent()
+        updateWindowTitle()
+        configureApplicationMenu()
+    }
+
+    private func retryOpenManagedWorkspace() {
+        guard managedHost == nil,
+              !workspaceMaintenanceModel.isBusy,
+              let workspaceURL = selectedManagerWorkspaceURL,
+              workspaceURL.standardizedFileURL.path ==
+                offlineRepairEligibleWorkspaceURL?.standardizedFileURL.path,
+              workspaceHistory.availability(of: workspaceURL) == .available
+        else { return }
+        workspaceMaintenanceModel.markWorkspaceReopening()
+        configureApplicationMenu()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.reopenManagedWorkspace(workspaceURL)
+                self.workspaceMaintenanceModel.completeOfflineMaintenance(
+                    message: "The Workspace reopened successfully."
+                )
+                await self.workspaceMaintenanceModel.loadRecoveryPoints()
+            } catch {
+                self.offlineRepairMessage =
+                    "The Workspace could not reopen: \(error.localizedDescription)"
+                self.workspaceMaintenanceModel.failOfflineMaintenance(
+                    message: self.offlineRepairMessage ?? "The Workspace could not reopen.",
+                    workspaceReopened: false
+                )
+            }
+            self.configureApplicationMenu()
+        }
     }
 
     private func updateWindowTitle() {
@@ -513,6 +931,9 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             )
             window.title = "\(workspace.displayName) — Vistrea Studio"
             window.representedURL = workspaceURL
+        } else if windowContent == .workspaceManager {
+            window.title = "Workspace Manager — Vistrea Studio"
+            window.representedURL = selectedManagerWorkspaceURL
         } else {
             window.title = "Vistrea Studio"
             window.representedURL = nil
@@ -522,6 +943,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
         guard
             workspaceManagementEnabled,
+            !workspaceMaintenanceModel.isBusy,
             let filename = filenames.first
         else {
             sender.reply(toOpenOrPrint: .failure)
@@ -545,10 +967,22 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !workspaceMaintenanceModel.isBusy else {
+            presentError(
+                title: "Workspace Maintenance Is Running",
+                message: "Wait for the current maintenance operation and Workspace reopen to finish before quitting Vistrea Studio."
+            )
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // The workspace itself is going away, so the exploration poll loop is
         // torn down here — never on a tab switch. The Host-side Operation
         // keeps running and stays cancellable from the next session.
+        model.stopCanvasWatch()
         model.stopExplorationPolling()
         managedHost?.stop()
     }
@@ -585,19 +1019,22 @@ private enum StudioComposition {
         let workspaceManagementEnabled: Bool
         let opensWelcome: Bool
         let startupMessage: String?
+        let failedWorkspaceURL: URL?
 
         init(
             client: any HostClient,
             managedHost: ManagedStudioHost? = nil,
             workspaceManagementEnabled: Bool = false,
             opensWelcome: Bool = false,
-            startupMessage: String? = nil
+            startupMessage: String? = nil,
+            failedWorkspaceURL: URL? = nil
         ) {
             self.client = client
             self.managedHost = managedHost
             self.workspaceManagementEnabled = workspaceManagementEnabled
             self.opensWelcome = opensWelcome
             self.startupMessage = startupMessage
+            self.failedWorkspaceURL = failedWorkspaceURL
         }
     }
 
@@ -719,7 +1156,8 @@ private enum StudioComposition {
                     ),
                     workspaceManagementEnabled: true,
                     opensWelcome: true,
-                    startupMessage: "The last Workspace could not be opened: \(error.localizedDescription)"
+                    startupMessage: "The last Workspace could not be opened: \(error.localizedDescription)",
+                    failedWorkspaceURL: workspaceURL
                 )
             }
         }
@@ -749,6 +1187,17 @@ private enum StudioComposition {
             throw ManagedStudioHostError.embeddedRuntimeUnavailable
         }
         return try ManagedStudioHost.start(
+            workspaceURL: workspaceURL,
+            resourceURL: resourceURL
+        )
+    }
+
+    @MainActor
+    static func makeManagedHostAsync(workspaceURL: URL) async throws -> ManagedStudioHost {
+        guard let resourceURL = Bundle.main.resourceURL else {
+            throw ManagedStudioHostError.embeddedRuntimeUnavailable
+        }
+        return try await ManagedStudioHost.startAsync(
             workspaceURL: workspaceURL,
             resourceURL: resourceURL
         )

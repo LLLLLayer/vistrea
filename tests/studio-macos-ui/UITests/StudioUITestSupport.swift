@@ -9,6 +9,19 @@ class StudioUITestCase: XCTestCase {
         static let welcomeOpenWorkspace = "studio.welcome.open-workspace"
         static let welcomeRecentWorkspaces = "studio.welcome.recent-workspaces"
 
+        static let workspaceManager = "studio.workspace-manager"
+        static let workspaceManagerList = "studio.workspace-manager.list"
+        static let workspaceManagerDetail = "studio.workspace-manager.detail"
+        static let workspaceManagerClose = "studio.workspace-manager.close"
+        static let workspaceMaintenance = "studio.workspace.maintenance"
+        static let workspaceMaintenanceCreateRecoveryPoint =
+            "studio.workspace.maintenance.create-recovery-point"
+        static let workspaceMaintenanceGarbage = "studio.workspace.maintenance.gc"
+        static let workspaceMaintenanceRecoverInterruptedRestore =
+            "studio.workspace.maintenance.recover-interrupted-restore"
+        static let workspaceMaintenanceRecoverStaleLock =
+            "studio.workspace.maintenance.recover-stale-lock"
+
         static let workspace = "studio.workspace"
         static let sectionNavigation = "studio.section-navigation"
         static let canvas = "studio.canvas"

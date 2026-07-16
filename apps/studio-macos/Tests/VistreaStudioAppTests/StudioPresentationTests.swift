@@ -37,6 +37,24 @@ final class StudioPresentationTests: XCTestCase {
             StudioAccessibilityID.welcomeNewWorkspace,
             StudioAccessibilityID.welcomeOpenWorkspace,
             StudioAccessibilityID.welcomeRecentWorkspaces,
+            StudioAccessibilityID.workspaceManager,
+            StudioAccessibilityID.workspaceManagerList,
+            StudioAccessibilityID.workspaceManagerDetail,
+            StudioAccessibilityID.workspaceMaintenance,
+            StudioAccessibilityID.workspaceMaintenanceStatus,
+            StudioAccessibilityID.workspaceMaintenanceProgress,
+            StudioAccessibilityID.workspaceMaintenanceResult,
+            StudioAccessibilityID.workspaceMaintenanceError,
+            StudioAccessibilityID.workspaceMaintenanceRecoveryPoints,
+            StudioAccessibilityID.workspaceMaintenanceCreateRecoveryPoint,
+            StudioAccessibilityID.workspaceMaintenanceRestoreConfirmation,
+            StudioAccessibilityID.workspaceMaintenanceGarbage,
+            StudioAccessibilityID.workspaceMaintenanceGarbagePreview,
+            StudioAccessibilityID.workspaceMaintenanceGarbageApply,
+            StudioAccessibilityID.workspaceMaintenanceGarbageConfirmation,
+            StudioAccessibilityID.workspaceMaintenanceRecoverInterruptedRestore,
+            StudioAccessibilityID.workspaceMaintenanceRecoverStaleLock,
+            StudioAccessibilityID.workspaceMaintenanceRetryOpen,
             StudioAccessibilityID.workspace,
             StudioAccessibilityID.workspaceLoading,
             StudioAccessibilityID.workspaceEmpty,
@@ -76,6 +94,8 @@ final class StudioPresentationTests: XCTestCase {
                 StudioAccessibilityID.canvasState("fixture-state"),
                 StudioAccessibilityID.tuningPreview("alpha"),
                 StudioAccessibilityID.tuningRevert("fixture-application"),
+                StudioAccessibilityID.workspaceMaintenanceRecoveryPoint("sha256:fixture"),
+                StudioAccessibilityID.workspaceMaintenanceRestore("sha256:fixture"),
             ]
 
         XCTAssertEqual(Set(identifiers).count, identifiers.count)
@@ -168,6 +188,7 @@ final class StudioPresentationTests: XCTestCase {
             onNewWorkspace: {},
             onOpenWorkspace: {},
             onOpenRecent: { _ in },
+            onManageRecent: { _ in },
             onReveal: { _ in },
             onRemoveRecent: { _ in },
             onClearRecent: {},
@@ -190,6 +211,44 @@ final class StudioPresentationTests: XCTestCase {
             named: "studio-welcome-light",
             logicalSize: CGSize(width: 1_200, height: 760)
         )
+    }
+
+    func testWorkspaceManagerProducesANonBlankPresentationSnapshot() throws {
+        let workspaceURL = URL(
+            fileURLWithPath: "/tmp/Acceptance.vistrea",
+            isDirectory: true
+        )
+        let recent = StudioRecentWorkspace(
+            path: workspaceURL.path,
+            lastOpenedAt: Date(timeIntervalSince1970: 1_752_710_400)
+        )
+        let model = WorkspaceMaintenanceViewModel(client: nil)
+        let view = WorkspaceManagerView(
+            recentWorkspaces: [recent],
+            currentWorkspaceURL: nil,
+            selectedWorkspaceURL: workspaceURL,
+            availability: { _ in .available },
+            maintenanceModel: model,
+            allowsMaintenance: true,
+            canRetryOpen: true,
+            onSelect: { _ in },
+            onNewWorkspace: {},
+            onOpenWorkspace: {},
+            onOpenToManage: { _ in },
+            onReveal: { _ in },
+            onRemoveRecent: { _ in },
+            onClose: {},
+            onOfflineMaintenance: { _ in },
+            onRetryOpen: {}
+        )
+        .environment(\.colorScheme, .light)
+        .environment(\.locale, Locale(identifier: "en_US_POSIX"))
+
+        let snapshot = try render(view, size: CGSize(width: 1_200, height: 760))
+        let png = try XCTUnwrap(snapshot.representation(using: .png, properties: [:]))
+
+        XCTAssertGreaterThan(png.count, 20_000)
+        XCTAssertGreaterThan(sampledColorRange(in: snapshot), 0.12)
     }
 
     func testCanvasAndSelectedInspectorProducePresentationSnapshots() async throws {

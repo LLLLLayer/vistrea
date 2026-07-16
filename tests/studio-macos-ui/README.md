@@ -32,6 +32,9 @@ or connect to a device.
 ## Covered acceptance
 
 - Welcome, New Workspace, Open Workspace, and Recent Workspaces AX contracts;
+- Welcome to Workspace Manager to Back navigation, including the empty no-Host
+  state that must not expose recovery-point, garbage-collection, or repair
+  actions without an eligible Workspace;
 - Command-1 through Command-6 navigation across Canvas, Evidence, Documents,
   Wiki, Quality, and the optional Hub entry surface;
 - Canvas state selection, selected entry path presentation, and Inspector AX

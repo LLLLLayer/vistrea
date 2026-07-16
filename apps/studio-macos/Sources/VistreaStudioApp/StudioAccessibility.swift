@@ -52,6 +52,32 @@ enum StudioAccessibilityID {
     static let welcomeOpenWorkspace = "studio.welcome.open-workspace"
     static let welcomeRecentWorkspaces = "studio.welcome.recent-workspaces"
 
+    static let workspaceManager = "studio.workspace-manager"
+    static let workspaceManagerList = "studio.workspace-manager.list"
+    static let workspaceManagerDetail = "studio.workspace-manager.detail"
+    static let workspaceManagerClose = "studio.workspace-manager.close"
+    static let workspaceMaintenance = "studio.workspace.maintenance"
+    static let workspaceMaintenanceStatus = "studio.workspace.maintenance.status"
+    static let workspaceMaintenanceProgress = "studio.workspace.maintenance.progress"
+    static let workspaceMaintenanceResult = "studio.workspace.maintenance.result"
+    static let workspaceMaintenanceError = "studio.workspace.maintenance.error"
+    static let workspaceMaintenanceRecoveryPoints =
+        "studio.workspace.maintenance.recovery-points"
+    static let workspaceMaintenanceCreateRecoveryPoint =
+        "studio.workspace.maintenance.create-recovery-point"
+    static let workspaceMaintenanceRestoreConfirmation =
+        "studio.workspace.maintenance.restore-confirmation"
+    static let workspaceMaintenanceGarbage = "studio.workspace.maintenance.gc"
+    static let workspaceMaintenanceGarbagePreview = "studio.workspace.maintenance.gc-preview"
+    static let workspaceMaintenanceGarbageApply = "studio.workspace.maintenance.gc-apply"
+    static let workspaceMaintenanceGarbageConfirmation =
+        "studio.workspace.maintenance.gc-confirmation"
+    static let workspaceMaintenanceRecoverInterruptedRestore =
+        "studio.workspace.maintenance.recover-interrupted-restore"
+    static let workspaceMaintenanceRecoverStaleLock =
+        "studio.workspace.maintenance.recover-stale-lock"
+    static let workspaceMaintenanceRetryOpen = "studio.workspace.maintenance.retry-open"
+
     static let workspace = "studio.workspace"
     static let workspaceLoading = "studio.workspace.loading"
     static let workspaceEmpty = "studio.workspace.empty"
@@ -104,6 +130,18 @@ enum StudioAccessibilityID {
 
     static func tuningPreview(_ property: String) -> String {
         "studio.inspector.tuning-preview.\(property)"
+    }
+
+    static func workspaceMaintenanceRecoveryPoint(_ recoveryPointID: String) -> String {
+        "studio.workspace.maintenance.recovery-point.\(recoveryPointID)"
+    }
+
+    static func workspaceMaintenanceRestore(_ recoveryPointID: String) -> String {
+        "studio.workspace.maintenance.restore.\(recoveryPointID)"
+    }
+
+    static func workspaceManagerRow(_ workspacePath: String) -> String {
+        "studio.workspace-manager.row.\(workspacePath)"
     }
 }
 

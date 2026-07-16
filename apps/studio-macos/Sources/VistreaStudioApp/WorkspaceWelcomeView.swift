@@ -9,6 +9,7 @@ struct WorkspaceWelcomeView: View {
     let onNewWorkspace: () -> Void
     let onOpenWorkspace: () -> Void
     let onOpenRecent: (URL) -> Void
+    let onManageRecent: (URL) -> Void
     let onReveal: (URL) -> Void
     let onRemoveRecent: (URL) -> Void
     let onClearRecent: () -> Void
@@ -130,6 +131,7 @@ struct WorkspaceWelcomeView: View {
                                 status: availability(recent.url),
                                 isCurrent: isCurrent(recent.url),
                                 onOpen: { onOpenRecent(recent.url) },
+                                onManage: { onManageRecent(recent.url) },
                                 onReveal: { onReveal(recent.url) },
                                 onRemove: { onRemoveRecent(recent.url) }
                             )
@@ -199,6 +201,7 @@ private struct RecentWorkspaceRow: View {
     let status: StudioWorkspaceAvailability
     let isCurrent: Bool
     let onOpen: () -> Void
+    let onManage: () -> Void
     let onReveal: () -> Void
     let onRemove: () -> Void
 
@@ -212,6 +215,8 @@ private struct RecentWorkspaceRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
+                Button("Manage…", action: onManage)
+                    .disabled(status != .available)
                 Button("Open", action: onOpen)
                     .disabled(status != .available)
                 Button("Reveal in Finder", action: onReveal)
@@ -243,6 +248,8 @@ private struct RecentWorkspaceRow: View {
                 )
         }
         .contextMenu {
+            Button("Manage…", action: onManage)
+                .disabled(status != .available)
             Button("Open", action: onOpen)
                 .disabled(status != .available)
             Button("Reveal in Finder", action: onReveal)
