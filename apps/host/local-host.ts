@@ -123,6 +123,7 @@ export async function startLocalHost(options: StartLocalHostOptions): Promise<Lo
                 : new WdaAutomationProvider({ baseUrl: options.automation.baseUrl }),
           }),
       workspace: workspace.data,
+      maintenance: workspace,
       objects: workspace.objects,
       validator: options.validator,
     });

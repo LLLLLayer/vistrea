@@ -184,6 +184,60 @@ export class HostLocalApiClient {
         const value = await this.#request("GET", "/v1/status", undefined, 200, options);
         return validateWorkspaceStatus(value);
       }
+      case "CreateWorkspaceRecoveryPoint": {
+        const command = assertExactObject(input, ["reason"], "Create recovery point input");
+        const reason = command["reason"];
+        if (
+          typeof reason !== "string" ||
+          reason.trim().length === 0 ||
+          reason.length > 1_024
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/workspace/recovery-points",
+          command,
+          201,
+          options,
+        );
+        return validateWorkspaceRecoveryPoint(value);
+      }
+      case "ListWorkspaceRecoveryPoints": {
+        assertExactObject(input, [], "List recovery points input");
+        const value = await this.#request(
+          "GET",
+          "/v1/workspace/recovery-points",
+          undefined,
+          200,
+          options,
+        );
+        return validateWorkspaceRecoveryPointPage(value);
+      }
+      case "ReleaseWorkspaceRecoveryPoint": {
+        const command = assertExactObject(
+          input,
+          ["recovery_point_id", "retention_policy_id"],
+          "Release recovery point input",
+        );
+        if (
+          typeof command["recovery_point_id"] !== "string" ||
+          !OBJECT_HASH_PATTERN.test(command["recovery_point_id"]) ||
+          typeof command["retention_policy_id"] !== "string" ||
+          command["retention_policy_id"].length === 0 ||
+          command["retention_policy_id"].length > 256
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/workspace/recovery-points/release",
+          command,
+          200,
+          options,
+        );
+        return validateWorkspaceRecoveryPoint(value);
+      }
       case "CaptureSnapshot": {
         const command = normalizeCaptureInput(input);
         const value = await this.#request("POST", "/v1/captures", command, 201, options);
@@ -2521,6 +2575,98 @@ function validateWorkspaceStatus(value: JsonValue): JsonObject {
     }
   }
   return status;
+}
+
+function validateWorkspaceRecoveryPointPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["recovery_points"]);
+  const points = page["recovery_points"];
+  if (!Array.isArray(points) || points.length > 10_000) {
+    throw invalidHostResult();
+  }
+  for (const point of points) {
+    validateWorkspaceRecoveryPoint(point as JsonValue);
+  }
+  return page;
+}
+
+function validateWorkspaceRecoveryPoint(value: JsonValue): JsonObject {
+  const point = requireObject(value);
+  assertKeys(point, [
+    "recovery_point_id",
+    "backup",
+    "source",
+    "reason",
+    "created_at",
+    "schema_version",
+    "generation",
+    "retention_policies",
+    "active_retention_policy_ids",
+  ]);
+  const recoveryPointID = point["recovery_point_id"];
+  const backup = validateObjectRef(point["backup"] as JsonValue);
+  const policies = point["retention_policies"];
+  const activePolicyIDs = point["active_retention_policy_ids"];
+  if (
+    typeof recoveryPointID !== "string" ||
+    !OBJECT_HASH_PATTERN.test(recoveryPointID) ||
+    backup["hash"] !== recoveryPointID ||
+    backup["media_type"] !==
+      "application/vnd.vistrea.workspace-metadata-backup+sqlite3" ||
+    backup["compression"] !== "none" ||
+    (point["source"] !== "manual" && point["source"] !== "pre_migration") ||
+    typeof point["reason"] !== "string" ||
+    point["reason"].length === 0 ||
+    point["reason"].length > 1_024 ||
+    typeof point["created_at"] !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(
+      point["created_at"],
+    ) ||
+    !Number.isFinite(Date.parse(point["created_at"])) ||
+    !Number.isSafeInteger(point["schema_version"]) ||
+    (point["schema_version"] as number) < 1 ||
+    !Number.isSafeInteger(point["generation"]) ||
+    (point["generation"] as number) < 0 ||
+    !Array.isArray(policies) ||
+    !Array.isArray(activePolicyIDs)
+  ) {
+    throw invalidHostResult();
+  }
+  const knownPolicies = new Set<string>();
+  for (const value of policies) {
+    const policy = requireObject(value as JsonValue);
+    assertKeys(policy, ["policy_id", "retain_until", "reason"], true);
+    if (
+      typeof policy["policy_id"] !== "string" ||
+      policy["policy_id"].length === 0 ||
+      policy["policy_id"].length > 256 ||
+      typeof policy["reason"] !== "string" ||
+      policy["reason"].length === 0 ||
+      policy["reason"].length > 1_024 ||
+      (policy["retain_until"] !== undefined &&
+        (typeof policy["retain_until"] !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(
+            policy["retain_until"],
+          ) ||
+          !Number.isFinite(Date.parse(policy["retain_until"])))) ||
+      knownPolicies.has(policy["policy_id"])
+    ) {
+      throw invalidHostResult();
+    }
+    knownPolicies.add(policy["policy_id"]);
+  }
+  const active = new Set<string>();
+  for (const policyID of activePolicyIDs) {
+    if (
+      typeof policyID !== "string" ||
+      !knownPolicies.has(policyID) ||
+      active.has(policyID)
+    ) {
+      throw invalidHostResult();
+    }
+    active.add(policyID);
+  }
+  return point;
 }
 
 function normalizeEventTimelineInput(value: unknown): JsonObject {

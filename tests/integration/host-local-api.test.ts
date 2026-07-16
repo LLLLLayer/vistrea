@@ -10,9 +10,13 @@ import {
   DataError,
   isDataError,
   PROTOCOL_SCHEMA_IDS,
+  type BackupWorkspaceCommand,
   type ObjectRef,
   type ProtocolValidator,
+  type ReleaseWorkspaceRecoveryPointCommand,
   type RuntimeSnapshot,
+  type WorkspaceMaintenancePort,
+  type WorkspaceRecoveryPoint,
 } from "../../data/api/index.js";
 import { createRepositoryProtocolValidator, MemoryDataStore } from "../../data/memory/index.js";
 import { FileObjectStore } from "../../data/objects/index.js";
@@ -47,6 +51,62 @@ class RecordingRuntimeCapturePort implements RuntimeCapturePort {
     this.captureCount += 1;
     this.command = structuredClone(command);
     return await this.delegate.captureSnapshot(command, options);
+  }
+}
+
+class RecordingWorkspaceMaintenancePort implements WorkspaceMaintenancePort {
+  createCommand: BackupWorkspaceCommand | undefined;
+  releaseCommand: ReleaseWorkspaceRecoveryPointCommand | undefined;
+  #point: WorkspaceRecoveryPoint | undefined;
+
+  async createRecoveryPoint(
+    command: BackupWorkspaceCommand,
+  ): Promise<WorkspaceRecoveryPoint> {
+    this.createCommand = structuredClone(command);
+    this.#point = {
+      recovery_point_id: `sha256:${"a".repeat(64)}`,
+      backup: {
+        hash: `sha256:${"a".repeat(64)}`,
+        media_type: "application/vnd.vistrea.workspace-metadata-backup+sqlite3",
+        byte_size: 4_096,
+        compression: "none",
+        logical_name: "workspace-backup.sqlite",
+        extensions: {},
+      } as ObjectRef,
+      source: command.source ?? "manual",
+      reason: command.reason,
+      created_at: "2026-07-17T08:00:00.000Z",
+      schema_version: 1,
+      generation: 7,
+      retention_policies: [command.retention],
+      active_retention_policy_ids: [command.retention.policy_id],
+    };
+    return this.#point;
+  }
+
+  async listRecoveryPoints(): Promise<readonly WorkspaceRecoveryPoint[]> {
+    return this.#point === undefined ? [] : [this.#point];
+  }
+
+  async releaseRecoveryPoint(
+    command: ReleaseWorkspaceRecoveryPointCommand,
+  ): Promise<WorkspaceRecoveryPoint> {
+    this.releaseCommand = structuredClone(command);
+    const point = this.#point;
+    if (
+      point === undefined ||
+      point.recovery_point_id !== command.recovery_point_id ||
+      !point.active_retention_policy_ids.includes(command.retention_policy_id)
+    ) {
+      throw new DataError("not_found", "The recovery-point retention policy does not exist.");
+    }
+    this.#point = {
+      ...point,
+      active_retention_policy_ids: point.active_retention_policy_ids.filter(
+        (policyId) => policyId !== command.retention_policy_id,
+      ),
+    };
+    return this.#point;
   }
 }
 
@@ -111,6 +171,17 @@ test("Host Local API exposes canonical fixture capture, list, object, and error 
   assert.deepEqual(await statusResponse.json(), {
     status: "ready",
     runtime_connected: true,
+  });
+
+  const unconfiguredMaintenance = await authorizedFetch(
+    api,
+    "/v1/workspace/recovery-points",
+  );
+  assert.equal(unconfiguredMaintenance.status, 501);
+  await assertErrorBody(unconfiguredMaintenance, {
+    code: "unsupported",
+    message: "Workspace maintenance is not configured on this Host.",
+    retryable: false,
   });
 
   const captureResponse = await authorizedFetch(api, "/v1/captures", {
@@ -392,6 +463,107 @@ test("Host Local API exposes canonical fixture capture, list, object, and error 
     message: "The request was rejected as invalid.",
     retryable: false,
   });
+});
+
+test("Host Local API authenticates and strictly parses Workspace recovery-point routes", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-maintenance-");
+  const fixture = await captureFixture(validator);
+  const workspace = new MemoryDataStore({ validator });
+  const objects = await FileObjectStore.open({ workspaceRoot });
+  const runtime = new FixtureRuntimeCapturePort({
+    snapshot: fixture.snapshot,
+    objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+  });
+  const maintenance = new RecordingWorkspaceMaintenancePort();
+  const api = await startHostLocalApi({
+    host: "127.0.0.1",
+    runtime,
+    workspace,
+    maintenance,
+    objects,
+    validator,
+  });
+  t.after(() => api.close());
+
+  const unauthenticated = await fetch(`${api.baseUrl}/v1/workspace/recovery-points`);
+  assert.equal(unauthenticated.status, 401);
+
+  const empty = await authorizedFetch(api, "/v1/workspace/recovery-points");
+  assert.equal(empty.status, 200);
+  assert.deepEqual(await empty.json(), { recovery_points: [] });
+
+  const createdResponse = await authorizedFetch(api, "/v1/workspace/recovery-points", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "Before a risky local edit." }),
+  });
+  assert.equal(createdResponse.status, 201);
+  const created = (await createdResponse.json()) as WorkspaceRecoveryPoint;
+  assert.equal(created.reason, "Before a risky local edit.");
+  assert.equal(created.source, "manual");
+  assert.match(created.active_retention_policy_ids[0] ?? "", /^workspace-recovery:recovery_/);
+  assert.equal(maintenance.createCommand?.reason, "Before a risky local edit.");
+  assert.equal(maintenance.createCommand?.source, "manual");
+
+  const listedResponse = await authorizedFetch(api, "/v1/workspace/recovery-points");
+  assert.equal(listedResponse.status, 200);
+  assert.deepEqual(await listedResponse.json(), { recovery_points: [created] });
+
+  const retentionPolicyId = created.active_retention_policy_ids[0];
+  assert.ok(retentionPolicyId !== undefined);
+  const releasedResponse = await authorizedFetch(
+    api,
+    "/v1/workspace/recovery-points/release",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recovery_point_id: created.recovery_point_id,
+        retention_policy_id: retentionPolicyId,
+      }),
+    },
+  );
+  assert.equal(releasedResponse.status, 200);
+  const released = (await releasedResponse.json()) as WorkspaceRecoveryPoint;
+  assert.deepEqual(released.active_retention_policy_ids, []);
+  assert.deepEqual(maintenance.releaseCommand, {
+    recovery_point_id: created.recovery_point_id,
+    retention_policy_id: retentionPolicyId,
+  });
+
+  const invalidRequests: readonly [string, string][] = [
+    ["/v1/workspace/recovery-points", '{}'],
+    ["/v1/workspace/recovery-points", '{"reason":"one","reason":"two"}'],
+    ["/v1/workspace/recovery-points", '{"reason":"valid","unknown":true}'],
+    ["/v1/workspace/recovery-points", '{"reason":7}'],
+    [
+      "/v1/workspace/recovery-points/release",
+      JSON.stringify({ recovery_point_id: "not-a-hash", retention_policy_id: "policy" }),
+    ],
+    [
+      "/v1/workspace/recovery-points/release",
+      JSON.stringify({
+        recovery_point_id: created.recovery_point_id,
+        retention_policy_id: "policy",
+        unknown: true,
+      }),
+    ],
+  ];
+  for (const [route, body] of invalidRequests) {
+    const response = await authorizedFetch(api, route, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    assert.equal(response.status, 400, `${route} should reject ${body}`);
+  }
+
+  const queryResponse = await authorizedFetch(
+    api,
+    "/v1/workspace/recovery-points?unexpected=1",
+  );
+  assert.equal(queryResponse.status, 400);
 });
 
 test("Host Local API drives the design review flow from asset to verified issue", async (t) => {

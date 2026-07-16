@@ -15,6 +15,7 @@ import {
 const MAXIMUM_DEADLINE_MILLISECONDS = 300_000;
 const MAXIMUM_JSON_FILE_BYTES = 2 * 1024 * 1024;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
+const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 /**
  * Named command surfaces a composition may expose, keyed by the first command
@@ -119,6 +120,9 @@ export async function runVistreaCli(
       writeEnvelope(runtime, context, {
         commands: [
           "workspace status",
+          "workspace recovery-point create --reason <text>",
+          "workspace recovery-point list",
+          "workspace recovery-point release <sha256:...> --policy <policy_id>",
           "snapshot capture",
           "snapshot list",
           "snapshot get <snapshot_id>",
@@ -306,6 +310,57 @@ function parseArguments(
   }
   if (command[0] === "workspace" && command[1] === "status" && command.length === 2) {
     return invocation("GetWorkspaceStatus", {}, timeoutMilliseconds);
+  }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "create"
+  ) {
+    const values = parseOptionPairs(command.slice(3));
+    if (values.size !== 1 || !values.has("--reason")) {
+      throw invalidArguments();
+    }
+    const reason = requireOption(values, "--reason");
+    if (reason.trim().length === 0 || reason.length > 1_024) {
+      throw invalidArguments();
+    }
+    return invocation("CreateWorkspaceRecoveryPoint", { reason }, timeoutMilliseconds);
+  }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "list" &&
+    command.length === 3
+  ) {
+    return invocation("ListWorkspaceRecoveryPoints", {}, timeoutMilliseconds);
+  }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "release" &&
+    command.length >= 6
+  ) {
+    const recoveryPointID = command[3] as string;
+    const values = parseOptionPairs(command.slice(4));
+    if (
+      !OBJECT_HASH_PATTERN.test(recoveryPointID) ||
+      values.size !== 1 ||
+      !values.has("--policy")
+    ) {
+      throw invalidArguments();
+    }
+    const retentionPolicyID = requireOption(values, "--policy");
+    if (retentionPolicyID.length === 0 || retentionPolicyID.length > 256) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "ReleaseWorkspaceRecoveryPoint",
+      {
+        recovery_point_id: recoveryPointID,
+        retention_policy_id: retentionPolicyID,
+      },
+      timeoutMilliseconds,
+    );
   }
   if (command[0] === "snapshot" && command[1] === "capture") {
     return invocation("CaptureSnapshot", parseCaptureOptions(command.slice(2)), timeoutMilliseconds);

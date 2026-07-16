@@ -43,6 +43,7 @@ import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index
 import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
 import { HubPackSync } from "../../data/sync/index.js";
 import { WorkspaceSyncEngine, type WorkspaceSyncRemote } from "../../engine/sync/index.js";
+import { WorkspaceMaintenanceEngine } from "../../engine/workspace/index.js";
 import type {
   HostLocalApiBindAddress,
   HostLocalApiDependencies,
@@ -163,6 +164,10 @@ export async function startHostLocalApi(
       validator: options.validator,
     }),
   });
+  const maintenance =
+    options.maintenance === undefined
+      ? undefined
+      : new WorkspaceMaintenanceEngine({ maintenance: options.maintenance });
   // Version tagging freezes the materialized graph; it drives no device, so
   // it must work on a Host with no automation provider configured.
   const explorationCapture = {
@@ -235,6 +240,7 @@ export async function startHostLocalApi(
         buildDiffs,
         exchange,
         sync,
+        ...(maintenance === undefined ? {} : { maintenance }),
         exploration: tagging,
         ...(explorationOperations === undefined ? {} : { explorationOperations }),
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
@@ -308,6 +314,7 @@ interface RequestHandlerContext {
   readonly buildDiffs: BuildDiffEngine;
   readonly exchange: PackExchangeService;
   readonly sync: WorkspaceSyncEngine;
+  readonly maintenance?: WorkspaceMaintenanceEngine;
   readonly exploration: ExplorationEngine;
   readonly explorationOperations?: ExplorationOperationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
@@ -339,6 +346,35 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       ...(reversions === undefined ? {} : { tuning_reversions: reversions }),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
+    return;
+  }
+
+  if (pathname === "/v1/workspace/recovery-points") {
+    const maintenance = requireWorkspaceMaintenance(context);
+    assertNoSearchParameters(url);
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      writeJson(response, 200, {
+        recovery_points: await maintenance.listRecoveryPoints(),
+      });
+      return;
+    }
+    assertMethod(request, "POST");
+    const command = parseCreateRecoveryPointCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+    );
+    writeJson(response, 201, await maintenance.createRecoveryPoint(command));
+    return;
+  }
+
+  if (pathname === "/v1/workspace/recovery-points/release") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const maintenance = requireWorkspaceMaintenance(context);
+    const command = parseReleaseRecoveryPointCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+    );
+    writeJson(response, 200, await maintenance.releaseRecoveryPoint(command));
     return;
   }
 
@@ -1878,6 +1914,58 @@ function requireRuntimeTuning(context: RequestHandlerContext): RuntimeTuningPort
   return context.runtimeTuning;
 }
 
+function requireWorkspaceMaintenance(
+  context: RequestHandlerContext,
+): WorkspaceMaintenanceEngine {
+  if (context.maintenance === undefined) {
+    throw new RequestError({
+      status: 501,
+      code: "unsupported",
+      message: "Workspace maintenance is not configured on this Host.",
+      retryable: false,
+    });
+  }
+  return context.maintenance;
+}
+
+function parseCreateRecoveryPointCommand(input: unknown): { readonly reason: string } {
+  const command = parseCommandObject(input, ["reason"], ["reason"], {
+    reason: "string",
+  });
+  const reason = command["reason"] as string;
+  if (reason.trim().length === 0 || reason.length > 1_024) {
+    throw invalidArgument("reason must contain 1 through 1024 characters.");
+  }
+  return { reason };
+}
+
+function parseReleaseRecoveryPointCommand(input: unknown): {
+  readonly recovery_point_id: string;
+  readonly retention_policy_id: string;
+} {
+  const command = parseCommandObject(
+    input,
+    ["recovery_point_id", "retention_policy_id"],
+    ["recovery_point_id", "retention_policy_id"],
+    {
+      recovery_point_id: "string",
+      retention_policy_id: "string",
+    },
+  );
+  const recoveryPointId = command["recovery_point_id"] as string;
+  const retentionPolicyId = command["retention_policy_id"] as string;
+  if (!OBJECT_HASH_PATTERN.test(recoveryPointId)) {
+    throw invalidArgument("recovery_point_id must be a canonical SHA-256 Object hash.");
+  }
+  if (retentionPolicyId.length === 0 || retentionPolicyId.length > 256) {
+    throw invalidArgument("retention_policy_id must contain 1 through 256 characters.");
+  }
+  return {
+    recovery_point_id: recoveryPointId,
+    retention_policy_id: retentionPolicyId,
+  };
+}
+
 /** Structural command parsing; protocol-value validation stays in the Engine. */
 /** The command field shapes the Host checks before it trusts a body. */
 type CommandFieldType = "string" | "string_array" | "integer" | "object";
@@ -2860,7 +2948,11 @@ function assertDependencies(options: HostLocalApiDependencies): void {
     typeof options.objects?.put !== "function" ||
     typeof options.objects?.stat !== "function" ||
     typeof options.objects?.open !== "function" ||
-    typeof options.validator?.assert !== "function"
+    typeof options.validator?.assert !== "function" ||
+    (options.maintenance !== undefined &&
+      (typeof options.maintenance?.createRecoveryPoint !== "function" ||
+        typeof options.maintenance?.listRecoveryPoints !== "function" ||
+        typeof options.maintenance?.releaseRecoveryPoint !== "function"))
   ) {
     throw new DataError("invalid_argument", "Host Local API dependencies are incomplete.");
   }

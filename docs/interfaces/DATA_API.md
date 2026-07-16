@@ -36,6 +36,12 @@ interface WorkspaceRepository {
   compact(command: CompactWorkspaceCommand): CompactWorkspaceResult;
   restore(command: RestoreWorkspaceCommand): Promise<WorkspaceRestoreResult>;
 }
+
+interface WorkspaceMaintenancePort {
+  createRecoveryPoint(command: BackupWorkspaceCommand): Promise<WorkspaceRecoveryPoint>;
+  listRecoveryPoints(): Promise<WorkspaceRecoveryPoint[]>;
+  releaseRecoveryPoint(command: ReleaseWorkspaceRecoveryPointCommand): Promise<WorkspaceRecoveryPoint>;
+}
 ```
 
 - `create` atomically initializes the Workspace Manifest, a parentless genesis Commit, and the configured default ref. Its returned descriptor includes the genesis Commit ID and resolved default Ref.
@@ -50,6 +56,13 @@ interface WorkspaceRepository {
 - Revisioned creates and updates follow the shared `1`, `N`, `N + 1` rule in `COMMON_CONTRACTS.md`; repositories reject stale preconditions and submitted revision jumps.
 
 ### Workspace lifecycle maintenance
+
+`WorkspaceMaintenancePort` is the online-safe Engine boundary for manual and
+pre-migration recovery points. A `WorkspaceRecoveryPoint` projects the backup
+ObjectRef, source, reason, creation time, schema version, metadata generation,
+and complete retention-policy state without exposing Object Store sidecars or
+paths. Releasing a policy changes retention only; a later plan-bound GC decides
+whether the backup and its otherwise unreachable closure are collectible.
 
 The production local composition implements the lifecycle boundary through
 `LocalDataWorkspace` while the manifest/bootstrap portion of the complete

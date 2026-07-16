@@ -17,10 +17,18 @@ import {
   type ProtocolValidator,
   type RecoverWorkspaceLockResult,
   type RecoverWorkspaceRestoreResult,
+  type ReleaseWorkspaceRecoveryPointCommand,
   type RetentionPolicy,
+  type WorkspaceRecoveryPoint,
+  type WorkspaceRecoveryPointSource,
   type WorkspaceRestoreResult,
 } from "../api/models.js";
-import type { ExchangeService, ObjectStore, WorkspaceDataSource } from "../api/ports.js";
+import type {
+  ExchangeService,
+  ObjectStore,
+  WorkspaceDataSource,
+  WorkspaceMaintenancePort,
+} from "../api/ports.js";
 import { PackExchangeService } from "../exchange/index.js";
 import { canonicalizeIdentityJson } from "../internal/support.js";
 import {
@@ -33,7 +41,7 @@ import {
   type MigrationAuthorization,
   type SQLiteMigration,
 } from "../metadata/index.js";
-import { FileObjectStore } from "../objects/index.js";
+import { FileObjectStore, type ObjectLifecycleInspection } from "../objects/index.js";
 
 const LOCK_FILENAME = ".host.lock";
 const METADATA_FILENAME = "metadata.sqlite";
@@ -106,7 +114,7 @@ export interface RecoverLocalWorkspaceOptions {
  * maintenance is exposed only as offline static operations that acquire the
  * same ownership lock as the Host.
  */
-export class LocalDataWorkspace {
+export class LocalDataWorkspace implements WorkspaceMaintenancePort {
   readonly workspaceRoot: string;
   readonly data: WorkspaceDataSource;
   readonly objects: ObjectStore;
@@ -191,6 +199,7 @@ export class LocalDataWorkspace {
             sqlite: preflight,
             objects,
             reason: `Automatic backup before schema migration ${existing.schemaVersion} -> ${targetVersion}.`,
+            source: "pre_migration",
             retention: {
               policy_id: `workspace-migration:${existing.schemaVersion}:${targetVersion}`,
               reason:
@@ -269,11 +278,77 @@ export class LocalDataWorkspace {
         sqlite: this.#sqlite,
         objects: this.#fileObjects,
         reason: command.reason,
+        source: normalizeRecoveryPointSource(command.source),
         retention: command.retention,
       });
     } finally {
       this.#maintenanceActive = false;
     }
+  }
+
+  /** Creates and projects one online-safe, retained recovery point. */
+  async createRecoveryPoint(command: BackupWorkspaceCommand): Promise<WorkspaceRecoveryPoint> {
+    const backup = await this.backup(command);
+    return await this.#recoveryPoint(backup);
+  }
+
+  /** Lists every canonical Workspace backup, including released historical points. */
+  async listRecoveryPoints(): Promise<readonly WorkspaceRecoveryPoint[]> {
+    this.#assertPublicDataOperationAllowed("list recovery points");
+    const points: WorkspaceRecoveryPoint[] = [];
+    for await (const object of this.#fileObjects.inventory({
+      media_types: [WORKSPACE_BACKUP_MEDIA_TYPE],
+    })) {
+      points.push(await this.#recoveryPoint(object));
+    }
+    return points.sort(
+      (left, right) =>
+        right.created_at.localeCompare(left.created_at) ||
+        left.recovery_point_id.localeCompare(right.recovery_point_id),
+    );
+  }
+
+  /** Releases exactly one named retention policy without deleting any bytes. */
+  async releaseRecoveryPoint(
+    command: ReleaseWorkspaceRecoveryPointCommand,
+  ): Promise<WorkspaceRecoveryPoint> {
+    this.#assertPublicDataOperationAllowed("release a recovery point");
+    if (!OBJECT_HASH_PATTERN.test(command.recovery_point_id)) {
+      throw new DataError(
+        "invalid_argument",
+        "recovery_point_id must be a canonical Workspace backup hash.",
+      );
+    }
+    if (
+      typeof command.retention_policy_id !== "string" ||
+      command.retention_policy_id.length === 0 ||
+      command.retention_policy_id.length > 256
+    ) {
+      throw new DataError(
+        "invalid_argument",
+        "retention_policy_id must contain 1 to 256 characters.",
+      );
+    }
+    const point = await this.#recoveryPoint(
+      await this.#fileObjects.stat(command.recovery_point_id),
+    );
+    if (
+      !point.retention_policies.some(
+        (policy) => policy.policy_id === command.retention_policy_id,
+      )
+    ) {
+      throw new DataError("not_found", "The recovery-point retention policy does not exist.", {
+        details: {
+          recovery_point_id: command.recovery_point_id,
+          retention_policy_id: command.retention_policy_id,
+        },
+      });
+    }
+    await this.#fileObjects.unpin(
+      command.recovery_point_id,
+      command.retention_policy_id,
+    );
+    return await this.#recoveryPoint(point.backup);
   }
 
   /**
@@ -657,6 +732,18 @@ export class LocalDataWorkspace {
       });
     }
   }
+
+  async #recoveryPoint(object: ObjectRef): Promise<WorkspaceRecoveryPoint> {
+    const lifecycle = await this.#fileObjects.inspectLifecycle(object.hash);
+    if (canonicalizeIdentityJson(lifecycle.object) !== canonicalizeIdentityJson(object)) {
+      throw new DataError(
+        "integrity_error",
+        "The Workspace recovery-point metadata conflicts with its stored ObjectRef.",
+        { details: { hash: object.hash } },
+      );
+    }
+    return parseWorkspaceRecoveryPoint(lifecycle);
+  }
 }
 
 class WorkspaceLock {
@@ -778,6 +865,7 @@ async function createBackupObject(options: {
   readonly sqlite: SQLiteDataStore;
   readonly objects: FileObjectStore;
   readonly reason: string;
+  readonly source: WorkspaceRecoveryPointSource;
   readonly retention: RetentionPolicy;
 }): Promise<ObjectRef> {
   assertBackupReason(options.reason);
@@ -801,6 +889,7 @@ async function createBackupObject(options: {
           generation: backup.generation,
           created_at: createdAt,
           reason: options.reason,
+          source: options.source,
         },
       },
     });
@@ -810,6 +899,79 @@ async function createBackupObject(options: {
   } finally {
     await fs.rm(temporaryDirectory, { recursive: true, force: true });
   }
+}
+
+function parseWorkspaceRecoveryPoint(
+  lifecycle: ObjectLifecycleInspection,
+): WorkspaceRecoveryPoint {
+  const object = lifecycle.object;
+  if (
+    object.media_type !== WORKSPACE_BACKUP_MEDIA_TYPE ||
+    object.compression !== "none"
+  ) {
+    throw new DataError("integrity_error", "The recovery point is not a Workspace backup.", {
+      details: { hash: object.hash },
+    });
+  }
+  const raw = object.extensions["vistrea.workspace_backup"];
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new DataError(
+      "integrity_error",
+      "The Workspace backup has no canonical recovery-point metadata.",
+      { details: { hash: object.hash } },
+    );
+  }
+  const extension = raw as Readonly<Record<string, unknown>>;
+  const schemaVersion = extension["schema_version"];
+  const generation = extension["generation"];
+  const createdAt = extension["created_at"];
+  const reason = extension["reason"];
+  if (
+    extension["format_version"] !== 1 ||
+    !Number.isSafeInteger(schemaVersion) ||
+    (schemaVersion as number) < 1 ||
+    !Number.isSafeInteger(generation) ||
+    (generation as number) < 0 ||
+    typeof createdAt !== "string" ||
+    !isCanonicalUtcTimestamp(createdAt) ||
+    typeof reason !== "string" ||
+    reason.trim().length === 0 ||
+    reason.length > 1_024
+  ) {
+    throw new DataError(
+      "integrity_error",
+      "The Workspace backup recovery-point metadata is invalid.",
+      { details: { hash: object.hash } },
+    );
+  }
+  const storedSource = extension["source"];
+  let source: WorkspaceRecoveryPointSource;
+  if (storedSource === undefined) {
+    source = lifecycle.retention_policies.some((policy) =>
+      policy.policy_id.startsWith("workspace-migration:"),
+    )
+      ? "pre_migration"
+      : "manual";
+  } else if (storedSource === "manual" || storedSource === "pre_migration") {
+    source = storedSource;
+  } else {
+    throw new DataError(
+      "integrity_error",
+      "The Workspace backup recovery-point source is invalid.",
+      { details: { hash: object.hash } },
+    );
+  }
+  return {
+    recovery_point_id: object.hash,
+    backup: object,
+    source,
+    reason,
+    created_at: createdAt,
+    schema_version: schemaVersion as number,
+    generation: generation as number,
+    retention_policies: lifecycle.retention_policies.map((policy) => ({ ...policy })),
+    active_retention_policy_ids: [...lifecycle.active_retention_policy_ids],
+  };
 }
 
 async function inspectStoredWorkspaceBackup(options: {
@@ -1066,6 +1228,18 @@ function assertBackupReason(reason: string): void {
   }
 }
 
+function normalizeRecoveryPointSource(
+  source: WorkspaceRecoveryPointSource | undefined,
+): WorkspaceRecoveryPointSource {
+  if (source === undefined) {
+    return "manual";
+  }
+  if (source !== "manual" && source !== "pre_migration") {
+    throw new DataError("invalid_argument", "Recovery-point source is invalid.");
+  }
+  return source;
+}
+
 function sumObjectBytes(objects: readonly ObjectRef[]): number {
   let total = 0;
   for (const object of objects) {
@@ -1081,14 +1255,17 @@ function sumObjectBytes(objects: readonly ObjectRef[]): number {
 }
 
 function requireUtcTimestamp(value: string, label: string): string {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) ||
-    !Number.isFinite(Date.parse(value))
-  ) {
+  if (typeof value !== "string" || !isCanonicalUtcTimestamp(value)) {
     throw new DataError("invalid_argument", `The ${label} returned a non-canonical UTC timestamp.`);
   }
   return value;
+}
+
+function isCanonicalUtcTimestamp(value: string): boolean {
+  return (
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
 }
 
 async function resolveWorkspaceRoot(requested: string): Promise<string> {

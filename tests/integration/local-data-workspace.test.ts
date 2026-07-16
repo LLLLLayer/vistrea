@@ -232,6 +232,46 @@ test("a WAL-aware backup restores exact metadata and preserves pre-restore evide
   await workspace.close();
 });
 
+test("the recovery-point catalog projects and releases exact retention policies", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  const workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  await commitPayload(workspace, "recovery catalog", "teams/recovery/main");
+  const created = await workspace.createRecoveryPoint({
+    reason: "Manual checkpoint before tuning the catalog.",
+    retention: {
+      policy_id: "workspace-recovery:test-catalog",
+      reason: "Keep the catalog checkpoint until this test releases it.",
+    },
+  });
+  assert.equal(created.recovery_point_id, created.backup.hash);
+  assert.equal(created.source, "manual");
+  assert.equal(created.reason, "Manual checkpoint before tuning the catalog.");
+  assert.equal(created.schema_version, 1);
+  assert.ok(created.generation > 0);
+  assert.deepEqual(created.active_retention_policy_ids, ["workspace-recovery:test-catalog"]);
+
+  const listed = await workspace.listRecoveryPoints();
+  assert.deepEqual(listed, [created]);
+  await assert.rejects(
+    workspace.releaseRecoveryPoint({
+      recovery_point_id: created.recovery_point_id,
+      retention_policy_id: "workspace-recovery:missing",
+    }),
+    (error: unknown) => isDataError(error, "not_found"),
+  );
+  const released = await workspace.releaseRecoveryPoint({
+    recovery_point_id: created.recovery_point_id,
+    retention_policy_id: "workspace-recovery:test-catalog",
+  });
+  assert.deepEqual(released.active_retention_policy_ids, []);
+  assert.deepEqual(
+    released.retention_policies.map((policy) => policy.policy_id),
+    [],
+  );
+  await workspace.close();
+});
+
 test("restore rejects a non-database backup without changing current metadata", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryWorkspace(t);
@@ -348,6 +388,11 @@ test("automatic migration recovery points root their pre-migration object closur
   workspace = await LocalDataWorkspace.open({ workspaceRoot, validator, migrations });
   const migrationBackup = workspace.migrationResult.backup;
   assert.ok(migrationBackup);
+  const [migrationPoint] = await workspace.listRecoveryPoints();
+  assert.ok(migrationPoint);
+  assert.equal(migrationPoint.recovery_point_id, migrationBackup.hash);
+  assert.equal(migrationPoint.source, "pre_migration");
+  assert.deepEqual(migrationPoint.active_retention_policy_ids, ["workspace-migration:1:2"]);
   await replaceRefWithUnrelatedPayload(
     workspace,
     "post migration history",

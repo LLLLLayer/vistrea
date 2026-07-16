@@ -2,6 +2,7 @@ import type {
   ObjectStore,
   ProtocolValidator,
   WorkspaceDataSource,
+  WorkspaceMaintenancePort,
 } from "../../data/api/index.js";
 import type { AutomationProviderPort } from "../../engine/automation/index.js";
 import type {
@@ -30,6 +31,11 @@ export interface HostLocalApiDependencies {
    */
   readonly automationProvider?: AutomationProviderPort;
   readonly workspace: WorkspaceDataSource;
+  /**
+   * Online-safe recovery-point operations. Fixture-only compositions may omit
+   * this port; the corresponding routes then fail closed as unsupported.
+   */
+  readonly maintenance?: WorkspaceMaintenancePort;
   readonly objects: ObjectStore;
   readonly validator: ProtocolValidator;
 }

@@ -17,13 +17,16 @@ The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/sha
 
 ## 1. Implemented operations
 
-All 69 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 72 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
 | Operation | Kind | Host route | CLI |
 |---|---|---|---|
 | `GetWorkspaceStatus` | Q | `GET /v1/status` | `workspace status` |
+| `CreateWorkspaceRecoveryPoint` | C | `POST /v1/workspace/recovery-points` | `workspace recovery-point create` |
+| `ListWorkspaceRecoveryPoints` | Q | `GET /v1/workspace/recovery-points` | `workspace recovery-point list` |
+| `ReleaseWorkspaceRecoveryPoint` | C | `POST /v1/workspace/recovery-points/release` | `workspace recovery-point release` |
 | `CaptureSnapshot` | C | `POST /v1/captures` | `snapshot capture` |
 | `ListSnapshots` | Q | `GET /v1/snapshots` | `snapshot list` |
 | `GetSnapshot` | Q | `GET /v1/snapshots/<id>` | `snapshot get` |

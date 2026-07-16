@@ -50,7 +50,9 @@ import type {
   ResolveSyncConflictCommand,
   ResourceRef,
   RestoreWorkspaceCommand,
+  ReleaseWorkspaceRecoveryPointCommand,
   WorkspaceRestoreResult,
+  WorkspaceRecoveryPoint,
   ReviewIssue,
   ReviewIssueQuery,
   ReviewVerificationRecord,
@@ -305,6 +307,15 @@ export interface WorkspaceRepository extends WorkspaceDataSource {
   backup(command: BackupWorkspaceCommand): Promise<ObjectRef>;
   compact(command: CompactWorkspaceCommand): CompactWorkspaceResult;
   restore(command: RestoreWorkspaceCommand): Promise<WorkspaceRestoreResult>;
+}
+
+/** Online-safe recovery-point operations exposed to Engine composition roots. */
+export interface WorkspaceMaintenancePort {
+  createRecoveryPoint(command: BackupWorkspaceCommand): Promise<WorkspaceRecoveryPoint>;
+  listRecoveryPoints(): Promise<readonly WorkspaceRecoveryPoint[]>;
+  releaseRecoveryPoint(
+    command: ReleaseWorkspaceRecoveryPointCommand,
+  ): Promise<WorkspaceRecoveryPoint>;
 }
 
 export type ByteStream = AsyncIterable<Uint8Array>;

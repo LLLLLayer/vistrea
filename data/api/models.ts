@@ -875,6 +875,29 @@ export interface MigrationResult {
 export interface BackupWorkspaceCommand {
   readonly reason: string;
   readonly retention: RetentionPolicy;
+  /** Defaults to manual; migration code records pre_migration explicitly. */
+  readonly source?: WorkspaceRecoveryPointSource;
+}
+
+export type WorkspaceRecoveryPointSource = "manual" | "pre_migration";
+
+/** One retained, verified metadata backup presented as a product recovery point. */
+export interface WorkspaceRecoveryPoint {
+  /** Stable local identity; currently the content-addressed backup hash. */
+  readonly recovery_point_id: string;
+  readonly backup: ObjectRef;
+  readonly source: WorkspaceRecoveryPointSource;
+  readonly reason: string;
+  readonly created_at: string;
+  readonly schema_version: number;
+  readonly generation: number;
+  readonly retention_policies: readonly RetentionPolicy[];
+  readonly active_retention_policy_ids: readonly string[];
+}
+
+export interface ReleaseWorkspaceRecoveryPointCommand {
+  readonly recovery_point_id: string;
+  readonly retention_policy_id: string;
 }
 
 export interface CompactWorkspaceCommand {

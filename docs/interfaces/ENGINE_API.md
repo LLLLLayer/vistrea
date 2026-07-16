@@ -14,6 +14,9 @@ The examples below define semantic operation names, not a programming-language A
 - `OpenWorkspace`
 - `CloseWorkspace`
 - `UpgradeWorkspace`
+- `CreateWorkspaceRecoveryPoint`
+- `ReleaseWorkspaceRecoveryPoint`
+- `RestoreWorkspaceRecoveryPoint`
 - `ImportPack`
 - `ExportPack`
 - `CollectWorkspaceGarbage`
@@ -23,9 +26,16 @@ The examples below define semantic operation names, not a programming-language A
 ### Queries
 
 - `GetWorkspaceStatus`
+- `ListWorkspaceRecoveryPoints`
 - `ListWorkspaceRefs`
 - `GetStorageUsage`
 - `CheckWorkspaceHealth`
+
+Creating, listing, and releasing recovery points are online-safe Engine use
+cases exposed through the authenticated Host. Restore, interrupted-restore
+recovery, stale-lock recovery, and plan-bound garbage collection are offline
+maintenance operations: Studio stops the owning Host, invokes the strict
+one-shot maintenance adapter, and opens a fresh Host/client/model composition.
 
 ## 3. Device and connection use cases
 

@@ -6,6 +6,9 @@ The CLI is a deterministic JSON adapter over the authenticated Host Local API. I
 
 ```text
 vistrea workspace status
+vistrea workspace recovery-point create --reason <text>
+vistrea workspace recovery-point list
+vistrea workspace recovery-point release <sha256:...> --policy <policy_id>
 vistrea snapshot capture [--include <field>]... [--screenshot none|reference] [--reason <reason>]
 vistrea snapshot list [--limit <1..500>] [--cursor <opaque>]
 vistrea snapshot get <snapshot_id>

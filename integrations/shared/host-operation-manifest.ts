@@ -13,6 +13,9 @@ export interface HostOperationDescriptor {
  */
 export const HOST_OPERATION_MANIFEST = [
   { operation: "GetWorkspaceStatus", kind: "Q", method: "GET", route: "/v1/status", cli: "workspace status" },
+  { operation: "CreateWorkspaceRecoveryPoint", kind: "C", method: "POST", route: "/v1/workspace/recovery-points", cli: "workspace recovery-point create" },
+  { operation: "ListWorkspaceRecoveryPoints", kind: "Q", method: "GET", route: "/v1/workspace/recovery-points", cli: "workspace recovery-point list" },
+  { operation: "ReleaseWorkspaceRecoveryPoint", kind: "C", method: "POST", route: "/v1/workspace/recovery-points/release", cli: "workspace recovery-point release" },
   { operation: "CaptureSnapshot", kind: "C", method: "POST", route: "/v1/captures", cli: "snapshot capture" },
   { operation: "ListSnapshots", kind: "Q", method: "GET", route: "/v1/snapshots", cli: "snapshot list" },
   { operation: "GetSnapshot", kind: "Q", method: "GET", route: "/v1/snapshots/<id>", cli: "snapshot get" },
