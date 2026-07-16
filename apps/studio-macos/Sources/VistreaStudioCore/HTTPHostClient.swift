@@ -80,7 +80,7 @@ public final class URLSessionHostHTTPTransport: HostHTTPTransport, @unchecked Se
     }
 }
 
-public struct HTTPHostClient: HostClient, Sendable {
+public struct HTTPHostClient: HostClient, WorkspaceMaintenanceClient, Sendable {
     static let maximumJSONResponseBytes = 64 * 1_024 * 1_024
     static let maximumObjectResponseBytes = 256 * 1_024 * 1_024
 
@@ -122,6 +122,47 @@ public struct HTTPHostClient: HostClient, Sendable {
 
     public func getStatus() async throws -> HostStatus {
         try await requestJSON(HostStatus.self, method: "GET", path: ["v1", "status"])
+    }
+
+    public func listRecoveryPoints() async throws -> WorkspaceRecoveryPointPage {
+        try await requestJSON(
+            WorkspaceRecoveryPointPage.self,
+            method: "GET",
+            path: ["v1", "workspace", "recovery-points"]
+        )
+    }
+
+    public func createRecoveryPoint(reason: String) async throws -> WorkspaceRecoveryPoint {
+        try Self.validateRecoveryPointReason(reason)
+        return try await sendJSON(
+            WorkspaceRecoveryPoint.self,
+            path: ["v1", "workspace", "recovery-points"],
+            body: CreateWorkspaceRecoveryPointBody(reason: reason),
+            expectedStatus: 201
+        )
+    }
+
+    public func releaseRecoveryPoint(
+        recoveryPointID: String,
+        retentionPolicyID: String
+    ) async throws -> WorkspaceRecoveryPoint {
+        guard Self.isCanonicalSHA256Reference(recoveryPointID) else {
+            throw HostClientError.invalidIdentifier(recoveryPointID)
+        }
+        guard !retentionPolicyID.contains("\0"), (1...256).contains(retentionPolicyID.utf16.count) else {
+            throw HostClientError.invalidConfiguration(
+                "A retention policy ID must contain 1 through 256 characters."
+            )
+        }
+        return try await sendJSON(
+            WorkspaceRecoveryPoint.self,
+            path: ["v1", "workspace", "recovery-points", "release"],
+            body: ReleaseWorkspaceRecoveryPointBody(
+                recoveryPointID: recoveryPointID,
+                retentionPolicyID: retentionPolicyID
+            ),
+            expectedStatus: 200
+        )
     }
 
     public func listSnapshots() async throws -> SnapshotPage {
@@ -1201,6 +1242,17 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    private static func validateRecoveryPointReason(_ reason: String) throws {
+        guard !reason.contains("\0"),
+              !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              reason.utf16.count <= 1_024
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A recovery-point reason must contain 1 through 1024 characters."
+            )
+        }
+    }
+
     private static func validateHubRemote(_ remote: HubSyncRemote) throws {
         guard isTypedIdentifier(remote.projectID, prefix: "project"),
               remote.bearerToken.range(
@@ -1420,3 +1472,17 @@ private struct TuningApplicationRequestBody: Encodable {
 
 /// An explicit empty JSON object body for parameterless POST routes.
 private struct EmptyJSONBody: Encodable {}
+
+private struct CreateWorkspaceRecoveryPointBody: Encodable {
+    let reason: String
+}
+
+private struct ReleaseWorkspaceRecoveryPointBody: Encodable {
+    let recoveryPointID: String
+    let retentionPolicyID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case recoveryPointID = "recovery_point_id"
+        case retentionPolicyID = "retention_policy_id"
+    }
+}

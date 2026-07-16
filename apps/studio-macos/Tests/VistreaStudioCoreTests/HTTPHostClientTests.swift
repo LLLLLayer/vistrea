@@ -68,6 +68,124 @@ final class HTTPHostClientTests: XCTestCase {
         ])
     }
 
+    func testWorkspaceMaintenanceRoutesBodiesAndDecoding() async throws {
+        let active = try workspaceRecoveryPointJSONObject(active: true)
+        let released = try workspaceRecoveryPointJSONObject(active: false)
+        let transport = RecordingTransport(responses: [
+            HostHTTPResponse(
+                statusCode: 200,
+                body: try JSONSerialization.data(withJSONObject: ["recovery_points": [active]])
+            ),
+            HostHTTPResponse(
+                statusCode: 201,
+                body: try JSONSerialization.data(withJSONObject: active)
+            ),
+            HostHTTPResponse(
+                statusCode: 200,
+                body: try JSONSerialization.data(withJSONObject: released)
+            ),
+        ])
+        let client = try HTTPHostClient(
+            baseURL: URL(string: "http://127.0.0.1:47831")!,
+            bearerToken: validBearerToken,
+            transport: transport
+        )
+
+        let page = try await client.listRecoveryPoints()
+        XCTAssertEqual(page.recoveryPoints.count, 1)
+        XCTAssertEqual(page.recoveryPoints[0].recoveryPointID, workspaceRecoveryPointHash)
+        XCTAssertEqual(page.recoveryPoints[0].source, .manual)
+        XCTAssertEqual(page.recoveryPoints[0].activeRetentionPolicyIDs, ["workspace-recovery:test"])
+        let created = try await client.createRecoveryPoint(reason: "Before local tuning.")
+        XCTAssertEqual(created.reason, "Before local tuning.")
+        let afterRelease = try await client.releaseRecoveryPoint(
+            recoveryPointID: workspaceRecoveryPointHash,
+            retentionPolicyID: "workspace-recovery:test"
+        )
+        XCTAssertTrue(afterRelease.activeRetentionPolicyIDs.isEmpty)
+
+        let requests = await transport.requests
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "POST", "POST"])
+        XCTAssertEqual(requests.map { $0.url?.path }, [
+            "/v1/workspace/recovery-points",
+            "/v1/workspace/recovery-points",
+            "/v1/workspace/recovery-points/release",
+        ])
+        XCTAssertNil(requests[0].httpBody)
+        XCTAssertEqual(
+            try jsonDictionary(requests[1].httpBody),
+            ["reason": "Before local tuning."]
+        )
+        XCTAssertEqual(
+            try jsonDictionary(requests[2].httpBody),
+            [
+                "recovery_point_id": workspaceRecoveryPointHash,
+                "retention_policy_id": "workspace-recovery:test",
+            ]
+        )
+        XCTAssertEqual(
+            requests.dropFirst().map { $0.value(forHTTPHeaderField: "Content-Type") },
+            ["application/json", "application/json"]
+        )
+    }
+
+    func testWorkspaceMaintenanceRejectsInvalidInputAndUnknownResponseFields() async throws {
+        let emptyTransport = RecordingTransport(responses: [])
+        let client = try HTTPHostClient(
+            baseURL: URL(string: "http://127.0.0.1:47831")!,
+            bearerToken: validBearerToken,
+            transport: emptyTransport
+        )
+        await XCTAssertThrowsErrorAsync(try await client.createRecoveryPoint(reason: " \n ")) { error in
+            guard case HostClientError.invalidConfiguration = error else {
+                return XCTFail("Expected local reason validation, received \(error)")
+            }
+        }
+        await XCTAssertThrowsErrorAsync(
+            try await client.releaseRecoveryPoint(
+                recoveryPointID: "sha256:" + String(repeating: "０", count: 64),
+                retentionPolicyID: "workspace-recovery:test"
+            )
+        ) { error in
+            guard case HostClientError.invalidIdentifier = error else {
+                return XCTFail("Expected canonical recovery-point identity validation, received \(error)")
+            }
+        }
+        await XCTAssertThrowsErrorAsync(
+            try await client.releaseRecoveryPoint(
+                recoveryPointID: workspaceRecoveryPointHash,
+                retentionPolicyID: ""
+            )
+        ) { error in
+            guard case HostClientError.invalidConfiguration = error else {
+                return XCTFail("Expected retention policy validation, received \(error)")
+            }
+        }
+        let invalidRequests = await emptyTransport.requests
+        XCTAssertTrue(invalidRequests.isEmpty)
+
+        var invalidPage: [String: Any] = [
+            "recovery_points": [try workspaceRecoveryPointJSONObject(active: true)],
+        ]
+        invalidPage["unexpected"] = true
+        let invalidTransport = RecordingTransport(responses: [
+            HostHTTPResponse(
+                statusCode: 200,
+                body: try JSONSerialization.data(withJSONObject: invalidPage)
+            ),
+        ])
+        let invalidClient = try HTTPHostClient(
+            baseURL: URL(string: "http://127.0.0.1:47831")!,
+            bearerToken: validBearerToken,
+            transport: invalidTransport
+        )
+        await XCTAssertThrowsErrorAsync(try await invalidClient.listRecoveryPoints()) { error in
+            guard case HostClientError.decoding = error else {
+                return XCTFail("Expected strict recovery-point decoding, received \(error)")
+            }
+        }
+    }
+
     func testDecodesFrozenErrorEnvelope() async throws {
         let transport = RecordingTransport(responses: [
             HostHTTPResponse(
@@ -377,4 +495,39 @@ private func XCTAssertThrowsErrorAsync<T>(
     } catch {
         errorHandler(error)
     }
+}
+
+private let workspaceRecoveryPointHash = "sha256:" + String(repeating: "a", count: 64)
+
+private func workspaceRecoveryPointJSONObject(active: Bool) throws -> [String: Any] {
+    [
+        "recovery_point_id": workspaceRecoveryPointHash,
+        "backup": [
+            "hash": workspaceRecoveryPointHash,
+            "media_type": "application/vnd.vistrea.workspace-metadata-backup+sqlite3",
+            "byte_size": 128,
+            "compression": "none",
+            "logical_name": "metadata-schema-v1.sqlite",
+            "extensions": [:],
+        ],
+        "source": "manual",
+        "reason": "Before local tuning.",
+        "created_at": "2026-07-17T08:00:00.000Z",
+        "schema_version": 1,
+        "generation": 4,
+        "retention_policies": [[
+            "policy_id": "workspace-recovery:test",
+            "reason": "Keep this recovery point.",
+        ]],
+        "active_retention_policy_ids": active ? ["workspace-recovery:test"] : [],
+    ]
+}
+
+private func jsonDictionary(_ data: Data?) throws -> [String: String] {
+    guard let data,
+          let object = try JSONSerialization.jsonObject(with: data) as? [String: String]
+    else {
+        throw HostClientError.decoding("Expected a string-valued JSON object in the test request.")
+    }
+    return object
 }

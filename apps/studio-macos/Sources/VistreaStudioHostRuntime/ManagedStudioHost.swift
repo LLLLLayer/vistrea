@@ -97,7 +97,7 @@ public final class ManagedStudioHost {
     private let descriptorURL: URL
     private var stopped = false
 
-    private init(
+    init(
         client: HTTPHostClient,
         workspaceURL: URL,
         process: Process,
@@ -109,7 +109,7 @@ public final class ManagedStudioHost {
         self.descriptorURL = descriptorURL
     }
 
-    public static var architectureDirectoryName: String? {
+    nonisolated public static var architectureDirectoryName: String? {
 #if arch(arm64)
         "arm64"
 #elseif arch(x86_64)
@@ -119,7 +119,7 @@ public final class ManagedStudioHost {
 #endif
     }
 
-    public static func runtimeURL(resourceURL: URL) throws -> URL {
+    nonisolated public static func runtimeURL(resourceURL: URL) throws -> URL {
         guard let architectureDirectoryName else {
             throw ManagedStudioHostError.unsupportedArchitecture
         }
@@ -145,6 +145,56 @@ public final class ManagedStudioHost {
         applicationSupportURL: URL? = nil,
         fileManager: FileManager = .default
     ) throws -> ManagedStudioHost {
+        let launch = try launch(
+            workspaceURL: workspaceURL,
+            resourceURL: resourceURL,
+            applicationSupportURL: applicationSupportURL,
+            fileManager: fileManager
+        )
+        return ManagedStudioHost(
+            client: launch.client,
+            workspaceURL: launch.workspaceURL,
+            process: launch.process,
+            descriptorURL: launch.descriptorURL
+        )
+    }
+
+    /// Starts the managed Host without launching the process or polling its
+    /// descriptor on MainActor. The returned instance remains MainActor-owned.
+    public static func startAsync(
+        workspaceURL: URL,
+        resourceURL: URL,
+        applicationSupportURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) async throws -> ManagedStudioHost {
+        let context = ManagedStudioHostStartContext(
+            workspaceURL: workspaceURL,
+            resourceURL: resourceURL,
+            applicationSupportURL: applicationSupportURL,
+            fileManager: fileManager
+        )
+        let launch = try await Task.detached(priority: .userInitiated) {
+            try Self.launch(
+                workspaceURL: context.workspaceURL,
+                resourceURL: context.resourceURL,
+                applicationSupportURL: context.applicationSupportURL,
+                fileManager: context.fileManager
+            )
+        }.value
+        return ManagedStudioHost(
+            client: launch.client,
+            workspaceURL: launch.workspaceURL,
+            process: launch.process,
+            descriptorURL: launch.descriptorURL
+        )
+    }
+
+    nonisolated private static func launch(
+        workspaceURL: URL,
+        resourceURL: URL,
+        applicationSupportURL: URL?,
+        fileManager: FileManager
+    ) throws -> ManagedStudioHostLaunchResult {
         let runtime = try runtimeURL(resourceURL: resourceURL)
         let requestedWorkspace = workspaceURL.standardizedFileURL
         guard requestedWorkspace.isFileURL, requestedWorkspace.path.hasPrefix("/") else {
@@ -213,7 +263,7 @@ public final class ManagedStudioHost {
                 baseURL: connection.baseURL,
                 bearerToken: connection.token
             )
-            return ManagedStudioHost(
+            return ManagedStudioHostLaunchResult(
                 client: client,
                 workspaceURL: workspace,
                 process: process,
@@ -231,7 +281,26 @@ public final class ManagedStudioHost {
         Self.stop(process: process, descriptorURL: descriptorURL, fileManager: fileManager)
     }
 
-    private static func waitForDescriptor(
+    /// Stops the managed Host without performing process waits on MainActor.
+    /// App termination and deinitialization retain the synchronous path above.
+    public func stopAsync(fileManager: FileManager = .default) async {
+        guard !stopped else { return }
+        stopped = true
+        let context = ManagedStudioHostStopContext(
+            process: process,
+            descriptorURL: descriptorURL,
+            fileManager: fileManager
+        )
+        await Task.detached(priority: .userInitiated) {
+            Self.stop(
+                process: context.process,
+                descriptorURL: context.descriptorURL,
+                fileManager: context.fileManager
+            )
+        }.value
+    }
+
+    nonisolated private static func waitForDescriptor(
         at descriptorURL: URL,
         process: Process,
         workspaceURL: URL,
@@ -307,5 +376,55 @@ public final class ManagedStudioHost {
                 fileManager: .default
             )
         }
+    }
+}
+
+private final class ManagedStudioHostStartContext: @unchecked Sendable {
+    let workspaceURL: URL
+    let resourceURL: URL
+    let applicationSupportURL: URL?
+    let fileManager: FileManager
+
+    init(
+        workspaceURL: URL,
+        resourceURL: URL,
+        applicationSupportURL: URL?,
+        fileManager: FileManager
+    ) {
+        self.workspaceURL = workspaceURL
+        self.resourceURL = resourceURL
+        self.applicationSupportURL = applicationSupportURL
+        self.fileManager = fileManager
+    }
+}
+
+private final class ManagedStudioHostLaunchResult: @unchecked Sendable {
+    let client: HTTPHostClient
+    let workspaceURL: URL
+    let process: Process
+    let descriptorURL: URL
+
+    init(
+        client: HTTPHostClient,
+        workspaceURL: URL,
+        process: Process,
+        descriptorURL: URL
+    ) {
+        self.client = client
+        self.workspaceURL = workspaceURL
+        self.process = process
+        self.descriptorURL = descriptorURL
+    }
+}
+
+private final class ManagedStudioHostStopContext: @unchecked Sendable {
+    let process: Process
+    let descriptorURL: URL
+    let fileManager: FileManager
+
+    init(process: Process, descriptorURL: URL, fileManager: FileManager) {
+        self.process = process
+        self.descriptorURL = descriptorURL
+        self.fileManager = fileManager
     }
 }
