@@ -11,7 +11,8 @@ regenerates and verifies the checked-in project.
 `release/` assembles the SwiftPM Studio executable into a Universal macOS app,
 prepares architecture-matched pinned Node.js and production Host runtimes,
 proves the embedded Host can open and release a temporary Workspace before and
-after signing, signs all nested Host and Sparkle code, produces ZIP/DMG
-artifacts, validates monotonic release versions, and generates the signed
-appcast used by the GitHub release workflow. It composes product runtime modules
-but does not own product logic.
+after local ad-hoc signing, signs all nested Host and Sparkle code, and produces
+local ZIP/DMG artifacts and checksums. Guarded formal-distribution and update
+helpers remain dormant; there is no active publication workflow or public
+update feed. The tooling composes product runtime modules but does not own
+product logic.

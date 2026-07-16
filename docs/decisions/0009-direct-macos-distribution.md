@@ -1,9 +1,15 @@
 # ADR 0009: Direct macOS distribution uses Developer ID and Sparkle
 
-- Status: Accepted
+- Status: Deferred
 - Date: 2026-07-14
 - Owners: Studio and release infrastructure owners
 - Related contracts: `apps/studio-macos/README.md`, `docs/release/STUDIO_MACOS_RELEASE.md`
+
+Formal direct distribution is not an active project capability. The release
+workflow and credential setup described by the original proposal have been
+removed from current operations. Credential-free local ad-hoc packaging
+remains supported; this ADR must be reviewed again before any public release
+or automatic-update channel is activated.
 
 ## Context
 
@@ -17,11 +23,11 @@ Direct distribution executes privileged local development workflows and is not
 currently sandboxed. A release therefore needs explicit provenance, Gatekeeper
 compatibility, update-archive authenticity, and a stable HTTPS update feed.
 
-## Decision
+## Deferred proposal
 
-1. Vistrea Studio is distributed directly from GitHub Releases as a Universal
-   macOS application supporting `arm64` and `x86_64`; the Mac App Store is not
-   the initial channel.
+1. A future Vistrea Studio release would be distributed directly from GitHub
+   Releases as a Universal macOS application supporting `arm64` and `x86_64`;
+   the Mac App Store would not be the initial channel.
 2. `tools/release/package-studio-macos.sh` remains the single composition path
    from the SwiftPM executable to the `.app`, ZIP, and DMG. It embeds pinned
    architecture-specific Node.js 22.14.0 runtimes, the emitted production Host
@@ -34,22 +40,25 @@ compatibility, update-archive authenticity, and a stable HTTPS update feed.
    library-validation exemptions. Local ad-hoc packages add a narrowly scoped
    library-validation exemption to Studio and Node because ad-hoc signatures
    have no shared Team ID; the distribution branch never receives it.
-3. Public releases use a Developer ID Application certificate, Hardened
-   Runtime, a secure timestamp, Apple notarization through `notarytool`, and
-   stapled tickets. Missing credentials fail a tag release before publication.
-4. Sparkle 2 is the in-app updater. Updates use an HTTPS appcast, an embedded
-   Ed25519 public key, signed archives, and a signed feed with verification
-   before extraction. The private key is available only as a GitHub Actions
-   secret and is passed to Sparkle tooling through standard input.
-5. A canonical `studio-vX.Y.Z` tag supplies both
-   `CFBundleShortVersionString` and `CFBundleVersion`. A release must be
-   semantically greater than every published Studio release; tags do not
+3. A future public release would require a Developer ID Application
+   certificate, Hardened Runtime, a secure timestamp, Apple notarization
+   through `notarytool`, and stapled tickets. Missing credentials would fail a
+   tag release before publication.
+4. The proposed in-app updater is Sparkle 2. Updates would use an HTTPS
+   appcast, an embedded Ed25519 public key, signed archives, and a signed feed
+   with verification before extraction. The private key would be available
+   only as a GitHub Actions secret and passed to Sparkle tooling through
+   standard input.
+5. A future canonical `studio-vX.Y.Z` tag would supply both
+   `CFBundleShortVersionString` and `CFBundleVersion`. A release would need to
+   be semantically greater than every published Studio release; tags would not
    accept prerelease syntax until a channel policy exists.
-6. The workflow creates a draft GitHub Release, publishes it so immutable tag
-   assets are publicly downloadable, and only then switches the signed appcast
-   on GitHub Pages. All tags share one non-cancelling concurrency group because
-   they update one feed. Manual workflow runs create an ad-hoc-signed package
-   without update metadata and cannot publish a Release.
+6. A restored workflow would create a draft GitHub Release, publish it so
+   immutable tag assets are publicly downloadable, and only then switch the
+   signed appcast on GitHub Pages. All tags would share one non-cancelling
+   concurrency group because they update one feed. Manual workflow runs would
+   create an ad-hoc-signed package without update metadata and could not
+   publish a Release.
 7. SwiftPM remains the source development and test boundary. The release
    bundle is generated output and must not be committed.
 8. A packaged Studio owns the embedded Host process and its private descriptor.
@@ -78,11 +87,11 @@ generated project now would add build ownership and synchronization cost
 without changing application behavior. The packaging script keeps that option
 open if Studio later needs extensions or App Sandbox entitlements.
 
-## Consequences
+## Consequences if accepted
 
 ### Positive
 
-- One tag can produce downloadable, notarized, self-updating artifacts.
+- One tag could produce downloadable, notarized, self-updating artifacts.
 - Local SwiftPM development remains unchanged.
 - Manual packaging remains useful before Apple and Sparkle credentials exist.
 - Release-first feed switching prevents the public feed from referencing draft
@@ -90,9 +99,9 @@ open if Studio later needs extensions or App Sandbox entitlements.
 
 ### Negative
 
-- Release owners must protect two independent trust roots: Developer ID and the
-  Sparkle Ed25519 key.
-- GitHub Pages must be enabled with GitHub Actions as its publishing source.
+- Release owners would need to protect two independent trust roots: Developer
+  ID and the Sparkle Ed25519 key.
+- GitHub Pages would need to use GitHub Actions as its publishing source.
 - The manual bundle composition path needs explicit verification whenever the
   embedded framework layout changes.
 
@@ -110,12 +119,13 @@ open if Studio later needs extensions or App Sandbox entitlements.
 
 ## Compatibility and migration
 
-This decision changes no Runtime Snapshot, Engine, Data, or Host contract.
-Packaged builds add an application-owned Host composition and Workspace
+This proposal would change no Runtime Snapshot, Engine, Data, or Host contract.
+Packaged builds already add an application-owned Host composition and Workspace
 selection boundary; `swift run` launches contain neither embedded Host nor
 release metadata, so they retain fixture/external-Host mode and disable the
-updater. The first installed GitHub build establishes the initial Sparkle trust
-root; earlier source-built executables are not automatically migrated.
+updater. A first installed GitHub build would establish the initial Sparkle
+trust root; earlier source-built executables would not be automatically
+migrated.
 
 ## Validation
 
@@ -129,6 +139,7 @@ root; earlier source-built executables are not automatically migrated.
 - nested `codesign --verify --deep --strict` verification;
 - Info.plist version and update-key inspection;
 - signed appcast generation with an archive signature and signed-feed trailer;
-- first credentialed `studio-vX.Y.Z` tag: Developer ID, notarization, stapling,
-  Gatekeeper assessment, Pages deployment, GitHub Release publication, and an
-  installed old-to-new update acceptance.
+- if the proposal is resumed, a first credentialed `studio-vX.Y.Z` tag would
+  require Developer ID, notarization, stapling, Gatekeeper assessment, Pages
+  deployment, GitHub Release publication, and an installed old-to-new update
+  acceptance.

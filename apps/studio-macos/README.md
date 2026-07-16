@@ -46,13 +46,14 @@ Writes that the Host contract stamps with the Studio actor `{"kind": "human", "i
 
 Runtime product presentation depends on the `HostClient` abstraction and does not access SQLite, Object Store paths, or Runtime transports directly. The application composition root alone selects the user-visible Workspace folder and owns the embedded Host process. Project Documents are a deliberate read-only workspace-shell surface: `StudioProjectDocumentLibrary` owns bounded source-project filesystem access and gives SwiftUI immutable summaries and Markdown content; it never reads or constructs Vistrea artifact paths. Reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
 
-## Package and update
+## Local packaging
 
 The SwiftPM executable is the development source of truth. The release helper
 builds both supported architectures, assembles `Vistrea Studio.app`, embeds
 architecture-matched pinned Node.js 22.14.0 runtimes, the emitted production
 Host, exact protocol and migration resources, and the exact Sparkle dependency,
-then signs nested code in dependency order and produces ZIP and DMG archives:
+then ad-hoc signs nested code in dependency order and produces local ZIP and
+DMG archives:
 
 ```bash
 pnpm build:host
@@ -66,14 +67,13 @@ Packaging starts the embedded Host against a temporary Workspace, performs an
 authenticated status request, and repeats that probe after signing to verify
 clean descriptor and lock removal. That local path is ad-hoc signed, uses a
 local-only library-validation exemption for its Team-ID-less components, and
-intentionally has no update feed. A
-`studio-vX.Y.Z` tag drives the public GitHub workflow, which fails closed unless
-Developer ID, notarization, and Sparkle signing credentials are configured. A
-packaged public app exposes **Vistrea Studio > Check for Updates…**; `swift run`
+intentionally has no update feed. The pinned Sparkle dependency and guarded
+distribution code remain available for future review, but formal distribution,
+automatic updates, and tag-triggered publication are deferred. `swift run`
 does not create an updater because it has no release Info.plist metadata.
 
-See [the macOS release runbook](../../docs/release/STUDIO_MACOS_RELEASE.md) and
-[ADR-0009](../../docs/decisions/0009-direct-macos-distribution.md).
+See [the macOS local packaging guide](../../docs/release/STUDIO_MACOS_RELEASE.md)
+and the deferred [ADR-0009](../../docs/decisions/0009-direct-macos-distribution.md).
 
 ## Run with the canonical fixture
 

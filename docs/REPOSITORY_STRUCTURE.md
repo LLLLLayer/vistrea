@@ -21,8 +21,7 @@ The repository structure must ensure:
 vistrea/
 ├── .github/
 │   └── workflows/
-│       ├── pull-request-ci.yml  # six independent Node and native PR gates
-│       └── studio-macos-release.yml # tag packaging, notarization, Release, and update feed
+│       └── pull-request-ci.yml  # six independent Node and native PR gates
 ├── .gitignore
 ├── .node-version
 ├── AGENTS.md
@@ -213,7 +212,7 @@ vistrea/
 │   │   ├── semantic-checks.mjs
 │   │   ├── strict-json.mjs
 │   │   └── validate-fixtures.mjs
-│   └── release/                  # Studio Host runtime, bundle, appcast, and release-site tooling
+│   └── release/                  # Studio Host runtime and local bundle tooling
 └── docs/
     ├── README.md
     ├── PROJECT_OVERVIEW.md
@@ -379,8 +378,8 @@ The first implementation keeps the language-neutral contracts while using toolch
 - a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
 Future SwiftUI-native capture, Compose rendering-side visual adapters,
-automatic physical-device discovery and hardware acceptance, credentialed
-release acceptance, and Hub deployment projects must preserve the documented
+automatic physical-device discovery and hardware acceptance, formal macOS
+distribution, and Hub deployment projects must preserve the documented
 public boundaries. Toolchain-specific layouts must not create competing
 protocol, Engine, or Data models.
 

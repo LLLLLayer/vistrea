@@ -1,78 +1,28 @@
-# Vistrea Studio macOS Release
+# Vistrea Studio macOS Local Packaging
 
-Vistrea Studio is packaged as a Universal macOS application and published from
-the `Vistrea Studio macOS release` GitHub Actions workflow. Public releases are
-Developer ID signed, notarized, distributed as ZIP and DMG assets, and exposed
-to the in-app Sparkle updater through a signed GitHub Pages appcast.
+Vistrea Studio currently supports credential-free local packaging for
+development and product acceptance. Formal macOS distribution is deferred:
+there is no active tag-triggered release workflow, public update feed,
+notarized download, or automated GitHub Release publication.
 
-The release boundary is intentionally fail closed: a `studio-vX.Y.Z` tag cannot
-publish an ad-hoc-signed build, an unnotarized build, or an unsigned update.
+Do not create a `studio-vX.Y.Z` tag expecting release automation. ADR-0009 is
+deferred and must be reconsidered before a public distribution channel is
+activated.
 
-## Release outputs
+## Local outputs
 
-- `Vistrea Studio.app`: Universal `arm64` and `x86_64` application bundle with
-  architecture-matched pinned Node.js and production Host runtimes;
-- `Vistrea-Studio-X.Y.Z.zip`: Sparkle update archive and direct download;
-- `Vistrea-Studio-X.Y.Z.dmg`: user-facing disk image with an Applications link;
-- `SHA256SUMS`: SHA-256 digests for the ZIP and DMG;
-- `appcast.xml`: signed Sparkle update feed deployed to GitHub Pages and also
-  attached to the Release.
+The local packaging helper produces:
 
-Generated release output belongs outside the repository and is never committed.
+- `Vistrea Studio.app`: a Universal `arm64` and `x86_64` application bundle;
+- `Vistrea-Studio-X.Y.Z.zip`: a local archive of the application;
+- `Vistrea-Studio-X.Y.Z.dmg`: a local disk image with an Applications link;
+- `SHA256SUMS`: SHA-256 digests for the ZIP and DMG.
 
-## One-time GitHub configuration
+Generated output belongs outside the repository and must not be committed.
 
-Enable GitHub Pages with **GitHub Actions** as the publishing source. The
-workflow deploys the feed to:
+## Build a local package
 
-```text
-https://lllllayer.github.io/vistrea/appcast.xml
-```
-
-Create these Actions variables:
-
-| Variable | Value |
-|---|---|
-| `MACOS_SIGNING_IDENTITY` | Full `Developer ID Application: ... (TEAMID)` identity |
-| `VISTREA_SPARKLE_PUBLIC_KEY` | Base64 Ed25519 public key printed by Sparkle `generate_keys` |
-
-Create these Actions secrets:
-
-| Secret | Value |
-|---|---|
-| `MACOS_DEVELOPER_ID_CERTIFICATE_BASE64` | Base64-encoded Developer ID `.p12` |
-| `MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD` | Password protecting the `.p12` |
-| `MACOS_KEYCHAIN_PASSWORD` | Ephemeral CI keychain password |
-| `APPLE_NOTARY_KEY_BASE64` | Base64-encoded App Store Connect `.p8` API key |
-| `APPLE_NOTARY_KEY_ID` | App Store Connect API key ID |
-| `APPLE_NOTARY_ISSUER_ID` | App Store Connect issuer ID |
-| `VISTREA_SPARKLE_PRIVATE_KEY` | Contents of the private key exported by Sparkle `generate_keys -x` |
-
-Keep the Developer ID certificate and Sparkle private key in separately
-controlled backups. Do not place either key in repository variables, workflow
-arguments, logs, release assets, or the application bundle.
-
-## Generate the Sparkle key once
-
-Resolve the pinned package and use the bundled Sparkle tool:
-
-```bash
-swift package --package-path apps/studio-macos resolve
-apps/studio-macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys \
-  --account dev.vistrea.studio
-apps/studio-macos/.build/artifacts/sparkle/Sparkle/bin/generate_keys \
-  --account dev.vistrea.studio \
-  -x /secure/location/vistrea-studio-sparkle-private-key
-```
-
-The first command prints the public key for `VISTREA_SPARKLE_PUBLIC_KEY`; the
-exported file content becomes `VISTREA_SPARKLE_PRIVATE_KEY`.
-
-## Test packaging without release credentials
-
-A manual workflow dispatch builds an ad-hoc-signed package, uploads it as a
-workflow artifact, omits Sparkle feed metadata, and never creates a GitHub
-Release. The same boundary can be tested locally:
+From the repository root:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -80,64 +30,51 @@ pnpm build:host
 tools/release/package-studio-macos.sh \
   --version 0.1.0 \
   --build-number 0.1.0 \
-  --output-dir /tmp/vistrea-studio-release
+  --output-dir /tmp/vistrea-studio-package
 ```
 
-This path validates bundle composition, both architectures, nested Host and
-Sparkle code signatures, ZIP, DMG, and checksums. It also starts the embedded
-Host against a temporary Workspace, performs an authenticated status request,
-and verifies clean descriptor and Workspace-lock removal. A packaged-app smoke
-launch additionally proves that a normal app launch creates the default
-Application Support Workspace and closes its owned Host cleanly. Local ad-hoc
-signing uses a local-only library-validation exemption because its components
-have no shared Team ID; Developer ID builds do not receive that exemption.
-This path does not claim Gatekeeper or update acceptance.
+Use a new or empty output directory for each run. The version must be a
+canonical `X.Y.Z` value, and the build number must contain one to three
+canonical numeric components.
 
-## Publish a release
+This path requires no release credentials. It uses local ad-hoc code signing
+only so macOS can load the assembled application and its nested code during
+development acceptance.
 
-Use a clean, reviewed commit on the intended release branch, then create and
-push an annotated tag:
+## What the local package verifies
 
-```bash
-git tag -a studio-v0.1.0 -m "Vistrea Studio 0.1.0"
-git push origin studio-v0.1.0
-```
+The helper:
 
-The workflow then:
+1. builds both supported macOS architecture slices from the SwiftPM package;
+2. embeds architecture-matched pinned Node.js and production Host runtimes;
+3. copies the exact protocol schemas, SQLite migrations, and application
+   resources required by the embedded Host;
+4. includes the pinned Sparkle dependency while leaving updates disabled
+   because no feed metadata is configured;
+5. signs nested code in dependency order with a local ad-hoc identity;
+6. starts the embedded Host against a temporary Workspace before and after
+   signing, performs an authenticated status request, and verifies descriptor
+   and Workspace-lock cleanup;
+7. creates the app bundle, ZIP, DMG, and checksums without publishing them.
 
-1. validates the canonical tag, proves it is newer than every published Studio
-   release, and checks all required credentials;
-2. resolves the exact Node, Host, and SwiftPM dependency locks and runs Studio
-   tests;
-3. builds the Host plus both macOS architectures and assembles the application
-   bundle with both embedded Host runtimes;
-4. signs the embedded Node.js and SQLite code, Sparkle helpers, Sparkle, the
-   application, and the DMG;
-5. submits the application and DMG to Apple, waits, and staples their tickets;
-6. generates the signed Sparkle appcast with tag-scoped asset URLs, rejecting
-   any archive whose short version or build version differs from the tag;
-7. creates or refreshes a draft GitHub Release;
-8. publishes that Release so every update enclosure is publicly downloadable;
-9. deploys the signed appcast to GitHub Pages as the last public state change.
+The packaged application owns its embedded Host and can open, create, switch,
+and restore local Workspace locations without shell-provided Host credentials.
 
-A rerun may replace assets on an existing draft. It refuses to overwrite an
-already published release.
+## Current limitations
 
-Every Studio release uses its canonical `X.Y.Z` value for both
-`CFBundleShortVersionString` and `CFBundleVersion`. The global release
-concurrency group serializes all tags that update the one public appcast.
+Local packages are development artifacts. They are not evidence of public
+distribution acceptance, Gatekeeper acceptance, notarization, or installed
+old-to-new updates. The repository does not currently publish an appcast or
+provide an automated release lane.
 
-## Required first-release acceptance
+The guarded distribution and updater implementation remains in the packaging
+code so it can be reviewed when formal release work resumes, but it is not an
+active product or CI capability.
 
-Before calling public updates verified:
+## Resuming formal distribution
 
-1. install the DMG on both Apple silicon and Intel macOS 14 or later;
-2. verify `spctl` accepts the application and DMG;
-3. launch the installed app twice and confirm the update permission behavior;
-4. publish a second strictly higher semantic version;
-5. use **Vistrea Studio > Check for Updates…** on the older installed build;
-6. install, relaunch, and confirm the new short version and build number;
-7. verify the Workspace remains unchanged across the update.
-
-That credentialed old-to-new loop is intentionally distinct from the local
-ad-hoc packaging verification recorded in development progress.
+Before formal distribution resumes, the project must review ADR-0009 again,
+define the supported channel and trust boundaries, restore a fail-closed CI
+workflow, document operational ownership, and complete installed old-to-new
+acceptance on supported macOS hardware. That future work is intentionally
+separate from the credential-free local packaging loop above.
