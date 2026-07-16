@@ -902,11 +902,15 @@ export interface CollectWorkspaceGarbageCommand {
   readonly dry_run?: boolean;
   /** Defaults to 24 hours and protects newly written, not-yet-referenced objects. */
   readonly minimum_age_seconds?: number;
+  /** Required for destructive collection and copied from a current dry-run result. */
+  readonly expected_plan_digest?: string;
 }
 
 export interface CollectWorkspaceGarbageResult {
   readonly dry_run: boolean;
   readonly minimum_age_seconds: number;
+  /** Digest of the exact generation, catalog cleanup, and physical deletion plan. */
+  readonly plan_digest: string;
   readonly scanned_objects: number;
   readonly reachable_objects: number;
   readonly retained_objects: number;

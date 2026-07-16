@@ -179,13 +179,31 @@ test("a WAL-aware backup restores exact metadata and preserves pre-restore evide
     (error: unknown) => isDataError(error, "conflict"),
   );
   activeRead.rollback();
-  const backup = await workspace.backup({
+  const backupPromise = workspace.backup({
     reason: "Checkpoint before a destructive local experiment.",
     retention: {
       policy_id: "test-manual-backup",
       reason: "Keep this recovery point for the integration test.",
     },
   });
+  assert.throws(
+    () => workspace.data.beginUnitOfWork("read"),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  assert.throws(
+    () => workspace.data.registerVerifiedObjects([first.object]),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  await assert.rejects(
+    workspace.exchange.exportPack({
+      ref_names: ["teams/demo/main"],
+      created_by: { kind: "human", id: "workspace-test@vistrea.dev", extensions: {} },
+    }),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  const backup = await backupPromise;
+  const postBackupRead = workspace.data.beginUnitOfWork("read");
+  postBackupRead.rollback();
   const objectStore = await FileObjectStore.open({ workspaceRoot });
   const backupLifecycle = await objectStore.inspectLifecycle(backup.hash);
   assert.deepEqual(backupLifecycle.active_retention_policy_ids, ["test-manual-backup"]);
@@ -308,6 +326,48 @@ test("existing Workspace migration creates a pinned backup before applying SQL",
   assert.equal(foundFailedMigrationBackup, true);
 });
 
+test("automatic migration recovery points root their pre-migration object closure", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  const [versionOne] = discoverSQLiteMigrations();
+  assert.ok(versionOne);
+  const versionTwo = migration(
+    2,
+    "000002_add_recovery_probe.sql",
+    "CREATE TABLE vistrea_recovery_probe (value TEXT NOT NULL) STRICT;\n",
+  );
+  const migrations = [versionOne, versionTwo];
+  let workspace = await LocalDataWorkspace.open({
+    workspaceRoot,
+    validator,
+    migrations: [versionOne],
+  });
+  const backedUp = await commitPayload(workspace, "migration closure", "teams/migrate/main");
+  await workspace.close();
+
+  workspace = await LocalDataWorkspace.open({ workspaceRoot, validator, migrations });
+  const migrationBackup = workspace.migrationResult.backup;
+  assert.ok(migrationBackup);
+  await replaceRefWithUnrelatedPayload(
+    workspace,
+    "post migration history",
+    "teams/migrate/main",
+    backedUp.commit_id,
+  );
+  await workspace.close();
+
+  const plan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    migrations,
+    command: { minimum_age_seconds: 0 },
+  });
+  assert.equal(plan.candidate_hashes.includes(backedUp.object.hash), false);
+  assert.equal(plan.candidate_hashes.includes(migrationBackup.hash), false);
+  const objectStore = await FileObjectStore.open({ workspaceRoot });
+  assert.equal((await objectStore.stat(backedUp.object.hash)).hash, backedUp.object.hash);
+});
+
 test("offline garbage collection is dry-run first and preserves reachable and retained objects", async (t) => {
   const validator = await validatorPromise;
   const workspaceRoot = await temporaryWorkspace(t);
@@ -350,6 +410,7 @@ test("offline garbage collection is dry-run first and preserves reachable and re
     command: { minimum_age_seconds: 0 },
   });
   assert.equal(dryRun.dry_run, true);
+  assert.match(dryRun.plan_digest, /^sha256:[0-9a-f]{64}$/);
   assert.deepEqual(dryRun.candidate_hashes, [orphan.hash]);
   assert.equal(dryRun.deleted_objects, 0);
   assert.equal(
@@ -357,11 +418,37 @@ test("offline garbage collection is dry-run first and preserves reachable and re
     true,
   );
 
+  await assert.rejects(
+    LocalDataWorkspace.collectGarbage({
+      workspaceRoot,
+      validator,
+      command: { dry_run: false, minimum_age_seconds: 0 },
+    }),
+    (error: unknown) => isDataError(error, "invalid_argument"),
+  );
+  await assert.rejects(
+    LocalDataWorkspace.collectGarbage({
+      workspaceRoot,
+      validator,
+      command: {
+        dry_run: false,
+        minimum_age_seconds: 0,
+        expected_plan_digest: `sha256:${"0".repeat(64)}`,
+      },
+    }),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+
   const deleted = await LocalDataWorkspace.collectGarbage({
     workspaceRoot,
     validator,
-    command: { dry_run: false, minimum_age_seconds: 0 },
+    command: {
+      dry_run: false,
+      minimum_age_seconds: 0,
+      expected_plan_digest: dryRun.plan_digest,
+    },
   });
+  assert.equal(deleted.plan_digest, dryRun.plan_digest);
   assert.equal(deleted.deleted_objects, 1);
   assert.equal(deleted.deleted_bytes, orphan.byte_size);
   assert.equal(deleted.removed_catalog_entries, 1);
@@ -387,10 +474,19 @@ test("offline garbage collection is dry-run first and preserves reachable and re
   await workspace.objects.unpin(retained.hash, "test-retention");
   await workspace.close();
 
+  const releasePlan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: { minimum_age_seconds: 0 },
+  });
   const released = await LocalDataWorkspace.collectGarbage({
     workspaceRoot,
     validator,
-    command: { dry_run: false, minimum_age_seconds: 0 },
+    command: {
+      dry_run: false,
+      minimum_age_seconds: 0,
+      expected_plan_digest: releasePlan.plan_digest,
+    },
   });
   assert.deepEqual(released.candidate_hashes, [retained.hash]);
   const afterRelease = await FileObjectStore.open({ workspaceRoot });
@@ -399,6 +495,204 @@ test("offline garbage collection is dry-run first and preserves reachable and re
   );
   assert.equal((await afterRelease.stat(pack.hash)).hash, pack.hash);
   assert.equal((await afterRelease.stat(repaired.hash)).hash, repaired.hash);
+});
+
+test("destructive garbage collection rejects a stale dry-run plan", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  let workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const first = await workspace.objects.put(bytesOf(Buffer.from("first orphan", "utf8")), {
+    media_type: "application/octet-stream",
+    compression: "none",
+    logical_name: "first-orphan.bin",
+  });
+  workspace.data.registerVerifiedObjects([first]);
+  await workspace.close();
+
+  const stalePlan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: { minimum_age_seconds: 0 },
+  });
+  workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const second = await workspace.objects.put(bytesOf(Buffer.from("second orphan", "utf8")), {
+    media_type: "application/octet-stream",
+    compression: "none",
+    logical_name: "second-orphan.bin",
+  });
+  workspace.data.registerVerifiedObjects([second]);
+  await workspace.close();
+
+  await assert.rejects(
+    LocalDataWorkspace.collectGarbage({
+      workspaceRoot,
+      validator,
+      command: {
+        dry_run: false,
+        minimum_age_seconds: 0,
+        expected_plan_digest: stalePlan.plan_digest,
+      },
+    }),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  const objectStore = await FileObjectStore.open({ workspaceRoot });
+  assert.equal((await objectStore.stat(first.hash)).hash, first.hash);
+  assert.equal((await objectStore.stat(second.hash)).hash, second.hash);
+
+  const currentPlan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: { minimum_age_seconds: 0 },
+  });
+  assert.notEqual(currentPlan.plan_digest, stalePlan.plan_digest);
+  assert.deepEqual(currentPlan.candidate_hashes, [first.hash, second.hash].sort());
+});
+
+test("retained metadata backups root their complete reachable object closure through GC", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  let workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const backedUp = await commitPayload(workspace, "backup closure", "teams/closure/main");
+  const backup = await workspace.backup({
+    reason: "Protect the complete reachable object closure.",
+    retention: {
+      policy_id: "test-backup-closure",
+      reason: "Keep the metadata recovery point and everything it reaches.",
+    },
+  });
+  await replaceRefWithUnrelatedPayload(
+    workspace,
+    "current unrelated history",
+    "teams/closure/main",
+    backedUp.commit_id,
+  );
+  const orphan = await workspace.objects.put(bytesOf(Buffer.from("collect me", "utf8")), {
+    media_type: "application/octet-stream",
+    compression: "none",
+    logical_name: "collect-me.bin",
+  });
+  workspace.data.registerVerifiedObjects([orphan]);
+  await workspace.close();
+
+  const plan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: { minimum_age_seconds: 0 },
+  });
+  assert.deepEqual(plan.candidate_hashes, [orphan.hash]);
+  assert.equal(plan.candidate_hashes.includes(backedUp.object.hash), false);
+  await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: {
+      dry_run: false,
+      minimum_age_seconds: 0,
+      expected_plan_digest: plan.plan_digest,
+    },
+  });
+
+  const afterCollection = await FileObjectStore.open({ workspaceRoot });
+  assert.equal((await afterCollection.stat(backedUp.object.hash)).hash, backedUp.object.hash);
+  await assert.rejects(afterCollection.stat(orphan.hash), (error: unknown) =>
+    isDataError(error, "not_found"),
+  );
+
+  await LocalDataWorkspace.restore({ workspaceRoot, validator, backup });
+  workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const read = workspace.data.beginUnitOfWork("read");
+  assert.equal(read.versions.resolveRef("teams/closure/main").commit_id, backedUp.commit_id);
+  read.rollback();
+  assert.deepEqual(
+    await collect(await workspace.objects.open(backedUp.object.hash)),
+    Buffer.from("backup closure", "utf8"),
+  );
+  await workspace.close();
+});
+
+test("restore rejects a backup with a missing reachable object before journal or swap", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  let workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const backedUp = await commitPayload(workspace, "missing closure", "teams/missing/main");
+  const backup = await workspace.backup({
+    reason: "Exercise restore closure verification.",
+    retention: {
+      policy_id: "test-missing-closure",
+      reason: "Keep the recovery point while one dependency is removed.",
+    },
+  });
+  const current = await replaceRefWithUnrelatedPayload(
+    workspace,
+    "current survives failed restore",
+    "teams/missing/main",
+    backedUp.commit_id,
+  );
+  await workspace.close();
+
+  const metadataPath = path.join(workspaceRoot, "metadata.sqlite");
+  const metadataBefore = await fs.readFile(metadataPath);
+  const objectStore = await FileObjectStore.open({ workspaceRoot });
+  await objectStore.deletePhysical(backedUp.object.hash);
+  await assert.rejects(
+    LocalDataWorkspace.restore({ workspaceRoot, validator, backup }),
+    (error: unknown) => isDataError(error, "integrity_error"),
+  );
+  assert.deepEqual(await fs.readFile(metadataPath), metadataBefore);
+  await assert.rejects(fs.stat(path.join(workspaceRoot, ".restore-journal.json")), {
+    code: "ENOENT",
+  });
+
+  workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const read = workspace.data.beginUnitOfWork("read");
+  assert.equal(read.versions.resolveRef("teams/missing/main").commit_id, current.commit_id);
+  read.rollback();
+  await workspace.close();
+});
+
+test("releasing backup retention lets its otherwise unreachable closure be collected", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t);
+  const workspace = await LocalDataWorkspace.open({ workspaceRoot, validator });
+  const backedUp = await commitPayload(workspace, "released closure", "teams/release/main");
+  const backup = await workspace.backup({
+    reason: "Exercise recovery-point release.",
+    retention: {
+      policy_id: "test-release-closure",
+      reason: "Release this recovery point before collection.",
+    },
+  });
+  await replaceRefWithUnrelatedPayload(
+    workspace,
+    "replacement after release",
+    "teams/release/main",
+    backedUp.commit_id,
+  );
+  await workspace.close();
+
+  const objectStore = await FileObjectStore.open({ workspaceRoot });
+  await objectStore.unpin(backup.hash, "test-release-closure");
+  const plan = await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: { minimum_age_seconds: 0 },
+  });
+  assert.equal(plan.candidate_hashes.includes(backedUp.object.hash), true);
+  assert.equal(plan.candidate_hashes.includes(backup.hash), true);
+  await LocalDataWorkspace.collectGarbage({
+    workspaceRoot,
+    validator,
+    command: {
+      dry_run: false,
+      minimum_age_seconds: 0,
+      expected_plan_digest: plan.plan_digest,
+    },
+  });
+  await assert.rejects(objectStore.stat(backedUp.object.hash), (error: unknown) =>
+    isDataError(error, "not_found"),
+  );
+  await assert.rejects(objectStore.stat(backup.hash), (error: unknown) =>
+    isDataError(error, "not_found"),
+  );
 });
 
 test("an interrupted restore blocks open and explicit recovery restores original bytes", async (t) => {
@@ -563,6 +857,43 @@ async function commitPayload(
         ? { mode: "must_not_exist" }
         : { mode: "must_match", expected_commit_id: parentCommitId }) as unknown as RefUpdatePrecondition,
     );
+    unit.commit();
+    return { commit_id: commit.commit_id, object };
+  } catch (error) {
+    unit.rollback();
+    throw error;
+  }
+}
+
+async function replaceRefWithUnrelatedPayload(
+  workspace: LocalDataWorkspace,
+  payloadText: string,
+  refName: string,
+  expectedCommitId: string,
+): Promise<{ readonly commit_id: string; readonly object: ObjectRef }> {
+  const payload = Buffer.from(payloadText, "utf8");
+  const object = await workspace.objects.put(bytesOf(payload), {
+    media_type: "application/octet-stream",
+    compression: "none",
+    logical_name: `${payloadText.replaceAll(" ", "-")}.bin`,
+  });
+  workspace.data.registerVerifiedObjects([object]);
+  const unit = workspace.data.beginUnitOfWork("write");
+  try {
+    const commit = unit.versions.createCommit({
+      protocol_version: { major: 1, minor: 0 },
+      parents: [],
+      created_at: new Date().toISOString(),
+      author: { kind: "human", id: "workspace-test@vistrea.dev", extensions: {} },
+      message: `Replace ${refName} with ${payloadText}.`,
+      roots: { runtime_graph: object },
+      object_hashes: [object.hash],
+      extensions: {},
+    } as unknown as CommitManifest);
+    unit.versions.updateRef(refName, commit.commit_id, {
+      mode: "must_match",
+      expected_commit_id: expectedCommitId,
+    } as unknown as RefUpdatePrecondition);
     unit.commit();
     return { commit_id: commit.commit_id, object };
   } catch (error) {

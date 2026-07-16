@@ -26,10 +26,20 @@ through an interrupted restore. Recovery requires an explicit maintenance call
 and preserves the old lock or SQLite files under `.recovery/` as evidence.
 
 `LocalDataWorkspace.backup` is safe while the Host owns the Workspace, provided
-all Units of Work are closed. `restore`, `recoverInterruptedRestore`, and
-`collectGarbage` are static offline operations and acquire the same `.host.lock`
-as the Host. GC defaults to dry-run and exported packs/readable documents plus
-backup objects are pinned.
+all Units of Work are closed. It temporarily rejects new Units of Work and
+ObjectRef registration until the backup finishes. `restore`,
+`recoverInterruptedRestore`, and `collectGarbage` are static offline operations
+and acquire the same `.host.lock` as the Host. GC defaults to dry-run and
+exported packs/readable documents plus backup objects are pinned. A retained
+Workspace backup is a metadata recovery point: GC dynamically treats every
+ObjectRef reachable from its SQLite database as a root, so the backup remains
+restorable without per-object retention policies.
+
+Restore validates the backup database and its complete reachable ObjectRef
+closure before creating a restore journal or replacing live metadata. GC dry
+runs return a digest of the exact generation and deletion plan; destructive GC
+requires the digest from an immediately preceding matching dry run and fails if
+the plan changes.
 
 The remaining complete `WorkspaceRepository` lifecycle work is atomic
 `workspace.json`/genesis/default-ref bootstrap, cache/index compaction, and Hub

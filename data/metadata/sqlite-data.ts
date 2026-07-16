@@ -123,9 +123,14 @@ export interface SQLiteBackupResult extends SQLiteMetadataInspection {
 }
 
 export interface SQLiteMaintenanceSnapshot {
-  readonly registeredObjectHashes: ReadonlySet<string>;
+  readonly generation: number;
+  readonly registeredObjects: ReadonlyMap<string, ObjectRef>;
   readonly reachableObjectHashes: ReadonlySet<string>;
 }
+
+export interface SQLiteMetadataMaintenanceInspection
+  extends SQLiteMetadataInspection,
+    SQLiteMaintenanceSnapshot {}
 
 export interface InspectSQLiteMetadataFileOptions {
   readonly databasePath: string;
@@ -138,6 +143,21 @@ export interface InspectSQLiteMetadataFileOptions {
 export function inspectSQLiteMetadataFile(
   options: InspectSQLiteMetadataFileOptions,
 ): SQLiteMetadataInspection {
+  const inspection = inspectSQLiteMetadataForMaintenance(options);
+  return {
+    schemaVersion: inspection.schemaVersion,
+    generation: inspection.generation,
+  };
+}
+
+/**
+ * Opens and verifies one metadata file while also deriving its complete object
+ * catalog and reachable object closure. Local Workspace backup, restore, and
+ * garbage collection share this exact reachability implementation.
+ */
+export function inspectSQLiteMetadataForMaintenance(
+  options: InspectSQLiteMetadataFileOptions,
+): SQLiteMetadataMaintenanceInspection {
   const migrations =
     options.migrations ?? discoverSQLiteMigrations(options.migrationsDirectory);
   let database: Database.Database | undefined;
@@ -152,11 +172,10 @@ export function inspectSQLiteMetadataFile(
     database.pragma("trusted_schema = OFF");
     database.pragma("busy_timeout = 5000");
     const schema = verifySQLiteMetadataSchema(database, migrations);
-    const catalog = loadObjectCatalog(database, options.validator);
-    loadMetadataState(database, options.validator, catalog);
+    const maintenance = readSQLiteMaintenanceSnapshot(database, options.validator);
     return {
       schemaVersion: schema.schemaVersion,
-      generation: readGeneration(database),
+      ...maintenance,
     };
   } catch (error) {
     throw mapSQLiteError(error, "verify the SQLite metadata file");
@@ -416,14 +435,9 @@ export class SQLiteDataStore implements WorkspaceDataSource {
     this.#assertMaintenanceIdle();
     try {
       this.#database.exec("BEGIN");
-      const catalog = loadObjectCatalog(this.#database, this.#validator);
-      const state = loadMetadataState(this.#database, this.#validator, catalog);
-      const reachable = collectMaintenanceReachableObjectHashes(state);
+      const snapshot = readSQLiteMaintenanceSnapshot(this.#database, this.#validator);
       this.#database.exec("ROLLBACK");
-      return {
-        registeredObjectHashes: new Set(catalog.keys()),
-        reachableObjectHashes: reachable,
-      };
+      return snapshot;
     } catch (error) {
       if (this.#database.inTransaction) {
         this.#database.exec("ROLLBACK");
@@ -692,6 +706,19 @@ function readGeneration(database: Database.Database): number {
     throw new DataError("integrity_error", "The SQLite Workspace generation is invalid.");
   }
   return row.generation;
+}
+
+function readSQLiteMaintenanceSnapshot(
+  database: Database.Database,
+  validator: ProtocolValidator,
+): SQLiteMaintenanceSnapshot {
+  const catalog = loadObjectCatalog(database, validator);
+  const state = loadMetadataState(database, validator, catalog);
+  return {
+    generation: readGeneration(database),
+    registeredObjects: new Map(catalog),
+    reachableObjectHashes: collectMaintenanceReachableObjectHashes(state),
+  };
 }
 
 function collectMaintenanceReachableObjectHashes(state: DataState): ReadonlySet<string> {

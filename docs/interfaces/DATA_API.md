@@ -56,24 +56,32 @@ The production local composition implements the lifecycle boundary through
 `WorkspaceRepository` remains separate:
 
 - `backup` is the only maintenance operation allowed while the Workspace is
-  open. It refuses active Units of Work, uses SQLite's online backup API,
+  open. It refuses active Units of Work and temporarily rejects new Units of
+  Work and ObjectRef registration, uses SQLite's online backup API,
   independently runs schema, ledger, `quick_check`, foreign-key, catalog, and
-  metadata validation, then stores and pins the resulting ObjectRef.
+  metadata validation, then stores and pins the resulting ObjectRef. The result
+  is a metadata recovery point: while retained, its complete reachable
+  ObjectRef closure is also a GC root.
 - Opening an existing older schema creates that verified and pinned backup
   before synchronously authorizing any migration SQL. A failed migration rolls
   the complete batch back and keeps the recovery object.
-- `restore` is offline and lock-exclusive. It verifies the stored ObjectRef and
-  candidate SQLite file before changing `metadata.sqlite`, preserves the old
-  database/WAL/SHM files under `.recovery/`, and uses a durable restore journal.
-  Normal open refuses an interrupted restore until explicit recovery rolls the
-  preserved files back.
+- `restore` is offline and lock-exclusive. Before creating a journal or changing
+  `metadata.sqlite`, it verifies the stored backup plus the existence, payload
+  hash, and canonical catalog metadata of every reachable ObjectRef. It
+  preserves the old database/WAL/SHM files under `.recovery/` and uses a durable
+  restore journal. Normal open refuses an interrupted restore until explicit
+  recovery rolls the preserved files back.
 - local garbage collection is offline, dry-run by default, and applies a
   minimum-age grace period. Its mark set includes every live metadata ObjectRef,
   Commit ancestry rooted by Refs, Tags, Working Sets and live resources, plus
-  active Object Store retention policies. Catalog rows are removed only after a
-  same-transaction reachability recheck and before physical deletion, so a
-  crash can leave a repairable unregistered orphan but never a registered
-  missing payload.
+  active Object Store retention policies and the reachable closure of every
+  retained Workspace metadata backup. A dry run returns `plan_digest` for the
+  exact generation, catalog cleanup, and physical deletion plan. Destructive
+  collection requires that value from the immediately preceding matching dry
+  run as `expected_plan_digest` and fails with a retryable conflict when
+  recomputation differs. Catalog rows are removed only after a same-transaction
+  reachability recheck and before physical deletion, so a crash can leave a
+  repairable unregistered orphan but never a registered missing payload.
 - stale `.host.lock` recovery is explicit and succeeds only for a valid lock
   whose PID is definitely absent. The original lock is retained as recovery
   evidence; live, inaccessible, malformed, or symlinked locks fail closed.

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -26,7 +26,10 @@ import { canonicalizeIdentityJson } from "../internal/support.js";
 import {
   discoverSQLiteMigrations,
   inspectSQLiteMetadataFile,
+  inspectSQLiteMetadataForMaintenance,
   SQLiteDataStore,
+  type SQLiteMaintenanceSnapshot,
+  type SQLiteMetadataMaintenanceInspection,
   type MigrationAuthorization,
   type SQLiteMigration,
 } from "../metadata/index.js";
@@ -38,6 +41,7 @@ const RESTORE_JOURNAL_FILENAME = ".restore-journal.json";
 const MAINTENANCE_DIRECTORY = ".maintenance";
 const RECOVERY_DIRECTORY = ".recovery";
 const DEFAULT_GARBAGE_MINIMUM_AGE_SECONDS = 24 * 60 * 60;
+const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SQLITE_RUNTIME_FILES = [
   METADATA_FILENAME,
   `${METADATA_FILENAME}-wal`,
@@ -125,10 +129,21 @@ export class LocalDataWorkspace {
   ) {
     this.workspaceRoot = workspaceRoot;
     this.#sqlite = sqlite;
-    this.data = sqlite;
+    this.data = {
+      clock: sqlite.clock,
+      registerVerifiedObjects: (objects): void => {
+        this.#assertPublicDataOperationAllowed("register ObjectRefs");
+        sqlite.registerVerifiedObjects(objects);
+      },
+      beginUnitOfWork: (mode) => {
+        this.#assertPublicDataOperationAllowed("begin a Unit of Work");
+        return sqlite.beginUnitOfWork(mode);
+      },
+      checkHealth: () => sqlite.checkHealth(),
+    };
     this.#fileObjects = objects;
     this.objects = objects;
-    this.exchange = new PackExchangeService({ data: sqlite, objects, validator });
+    this.exchange = new PackExchangeService({ data: this.data, objects, validator });
     this.#lock = lock;
     this.migrationResult = {
       from_version: sqlite.migrationResult.fromVersion,
@@ -308,10 +323,15 @@ export class LocalDataWorkspace {
       const restoredPath = path.join(temporaryDirectory, METADATA_FILENAME);
       try {
         await writeObjectToFile(objects, options.backup, restoredPath);
-        const inspection = inspectSQLiteMetadataFile({
+        const inspection = inspectSQLiteMetadataForMaintenance({
           databasePath: restoredPath,
           validator: options.validator,
           migrations,
+        });
+        await assertReachableObjectClosure({
+          objects,
+          inspection,
+          context: `Workspace backup ${options.backup.hash}`,
         });
 
         const recoveryId = `restore-${randomUUID()}`;
@@ -479,11 +499,37 @@ export class LocalDataWorkspace {
       for await (const object of objects.inventory()) {
         inventory.set(object.hash, await objects.inspectLifecycle(object.hash));
       }
-      const missingRegistered = [...snapshot.registeredObjectHashes]
+      const reachableObjectHashes = new Set(snapshot.reachableObjectHashes);
+      const retainedBackups = [...inventory.values()]
+        .filter(
+          (lifecycle) =>
+            lifecycle.object.media_type === WORKSPACE_BACKUP_MEDIA_TYPE &&
+            lifecycle.active_retention_policy_ids.length > 0,
+        )
+        .sort((left, right) => left.object.hash.localeCompare(right.object.hash));
+      for (const lifecycle of retainedBackups) {
+        const backupInspection = await inspectStoredWorkspaceBackup({
+          workspaceRoot,
+          objects,
+          backup: lifecycle.object,
+          validator: options.validator,
+          migrations,
+        });
+        await assertReachableObjectClosure({
+          objects,
+          inspection: backupInspection,
+          context: `Retained Workspace backup ${lifecycle.object.hash}`,
+        });
+        for (const hash of backupInspection.reachableObjectHashes) {
+          reachableObjectHashes.add(hash);
+        }
+      }
+
+      const missingRegistered = [...snapshot.registeredObjects.keys()]
         .filter((hash) => !inventory.has(hash))
         .sort();
       const missingReachable = missingRegistered.filter((hash) =>
-        snapshot.reachableObjectHashes.has(hash),
+        reachableObjectHashes.has(hash),
       );
       if (missingReachable.length > 0) {
         throw new DataError("integrity_error", "Reachable ObjectRefs have no physical payload.", {
@@ -496,7 +542,7 @@ export class LocalDataWorkspace {
       let youngObjects = 0;
       const candidates: ObjectRef[] = [];
       for (const lifecycle of inventory.values()) {
-        if (snapshot.reachableObjectHashes.has(lifecycle.object.hash)) {
+        if (reachableObjectHashes.has(lifecycle.object.hash)) {
           reachableObjects += 1;
           continue;
         }
@@ -516,6 +562,25 @@ export class LocalDataWorkspace {
       }
       candidates.sort((left, right) => left.hash.localeCompare(right.hash));
       const candidateBytes = sumObjectBytes(candidates);
+      const planDigest = createGarbagePlanDigest({
+        generation: snapshot.generation,
+        minimumAgeSeconds: command.minimumAgeSeconds,
+        candidates,
+        staleCatalogHashes: missingRegistered,
+      });
+      if (!command.dryRun && command.expectedPlanDigest !== planDigest) {
+        throw new DataError(
+          "conflict",
+          "The Workspace garbage-collection plan changed after its dry run.",
+          {
+            retryable: true,
+            details: {
+              expected_plan_digest: command.expectedPlanDigest as string,
+              actual_plan_digest: planDigest,
+            },
+          },
+        );
+      }
       let deletedObjects = 0;
       let deletedBytes = 0;
       let removedCatalogEntries = 0;
@@ -539,6 +604,7 @@ export class LocalDataWorkspace {
       return {
         dry_run: command.dryRun,
         minimum_age_seconds: command.minimumAgeSeconds,
+        plan_digest: planDigest,
         scanned_objects: inventory.size,
         reachable_objects: reachableObjects,
         retained_objects: retainedObjects,
@@ -580,6 +646,15 @@ export class LocalDataWorkspace {
   #assertOpen(): void {
     if (this.#closed || this.#storageClosed) {
       throw new DataError("conflict", "The local Workspace is closed.");
+    }
+  }
+
+  #assertPublicDataOperationAllowed(operation: string): void {
+    this.#assertOpen();
+    if (this.#maintenanceActive) {
+      throw new DataError("conflict", `Cannot ${operation} while Workspace backup is running.`, {
+        retryable: true,
+      });
     }
   }
 }
@@ -737,6 +812,99 @@ async function createBackupObject(options: {
   }
 }
 
+async function inspectStoredWorkspaceBackup(options: {
+  readonly workspaceRoot: string;
+  readonly objects: FileObjectStore;
+  readonly backup: ObjectRef;
+  readonly validator: ProtocolValidator;
+  readonly migrations: readonly SQLiteMigration[];
+}): Promise<SQLiteMetadataMaintenanceInspection> {
+  options.validator.assert(PROTOCOL_SCHEMA_IDS.objectRef, options.backup);
+  if (
+    options.backup.media_type !== WORKSPACE_BACKUP_MEDIA_TYPE ||
+    options.backup.compression !== "none"
+  ) {
+    throw new DataError("integrity_error", "A retained recovery point is not a Workspace backup.", {
+      details: { hash: options.backup.hash },
+    });
+  }
+  const stored = await options.objects.stat(options.backup.hash);
+  if (canonicalizeIdentityJson(stored) !== canonicalizeIdentityJson(options.backup)) {
+    throw new DataError("integrity_error", "A retained Workspace backup has conflicting metadata.", {
+      details: { hash: options.backup.hash },
+    });
+  }
+
+  const maintenanceRoot = await ensureControlledSubdirectory(
+    options.workspaceRoot,
+    MAINTENANCE_DIRECTORY,
+  );
+  const temporaryDirectory = await fs.mkdtemp(path.join(maintenanceRoot, "backup-"));
+  const backupPath = path.join(temporaryDirectory, METADATA_FILENAME);
+  try {
+    await writeObjectToFile(options.objects, options.backup, backupPath);
+    return inspectSQLiteMetadataForMaintenance({
+      databasePath: backupPath,
+      validator: options.validator,
+      migrations: options.migrations,
+    });
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+async function assertReachableObjectClosure(options: {
+  readonly objects: ObjectStore;
+  readonly inspection: SQLiteMaintenanceSnapshot;
+  readonly context: string;
+}): Promise<void> {
+  for (const hash of [...options.inspection.reachableObjectHashes].sort()) {
+    const expected = options.inspection.registeredObjects.get(hash);
+    if (expected === undefined) {
+      throw new DataError("integrity_error", `${options.context} has an unregistered reachable object.`, {
+        details: { hash },
+      });
+    }
+    let stored: ObjectRef;
+    try {
+      stored = await options.objects.stat(hash);
+    } catch (error) {
+      if (!isDataError(error, "not_found")) {
+        throw error;
+      }
+      throw new DataError("integrity_error", `${options.context} is missing a reachable object.`, {
+        details: { hash },
+      });
+    }
+    if (canonicalizeIdentityJson(stored) !== canonicalizeIdentityJson(expected)) {
+      throw new DataError(
+        "integrity_error",
+        `${options.context} has conflicting reachable object metadata.`,
+        { details: { hash } },
+      );
+    }
+  }
+}
+
+function createGarbagePlanDigest(options: {
+  readonly generation: number;
+  readonly minimumAgeSeconds: number;
+  readonly candidates: readonly ObjectRef[];
+  readonly staleCatalogHashes: readonly string[];
+}): string {
+  const plan: JsonObject = {
+    format_version: 1,
+    workspace_generation: options.generation,
+    minimum_age_seconds: options.minimumAgeSeconds,
+    candidate_objects: options.candidates.map((object) => ({
+      hash: object.hash,
+      byte_size: object.byte_size,
+    })),
+    stale_catalog_hashes: [...options.staleCatalogHashes],
+  };
+  return `sha256:${createHash("sha256").update(canonicalizeIdentityJson(plan)).digest("hex")}`;
+}
+
 async function writeObjectToFile(
   objects: FileObjectStore,
   object: ObjectRef,
@@ -851,10 +1019,12 @@ async function assertNoInterruptedRestore(workspaceRoot: string): Promise<void> 
 function normalizeGarbageCommand(command: CollectWorkspaceGarbageCommand | undefined): {
   readonly dryRun: boolean;
   readonly minimumAgeSeconds: number;
+  readonly expectedPlanDigest?: string;
 } {
   const dryRun = command?.dry_run ?? true;
   const minimumAgeSeconds =
     command?.minimum_age_seconds ?? DEFAULT_GARBAGE_MINIMUM_AGE_SECONDS;
+  const expectedPlanDigest = command?.expected_plan_digest;
   if (typeof dryRun !== "boolean") {
     throw new DataError("invalid_argument", "dry_run must be boolean.");
   }
@@ -868,7 +1038,26 @@ function normalizeGarbageCommand(command: CollectWorkspaceGarbageCommand | undef
       "minimum_age_seconds must be a safe integer between 0 and one year.",
     );
   }
-  return { dryRun, minimumAgeSeconds };
+  if (dryRun && expectedPlanDigest !== undefined) {
+    throw new DataError(
+      "invalid_argument",
+      "expected_plan_digest is accepted only for destructive garbage collection.",
+    );
+  }
+  if (!dryRun && expectedPlanDigest === undefined) {
+    throw new DataError(
+      "invalid_argument",
+      "Destructive garbage collection requires expected_plan_digest from a current dry run.",
+    );
+  }
+  if (expectedPlanDigest !== undefined && !OBJECT_HASH_PATTERN.test(expectedPlanDigest)) {
+    throw new DataError("invalid_argument", "expected_plan_digest must be a canonical SHA-256 digest.");
+  }
+  return {
+    dryRun,
+    minimumAgeSeconds,
+    ...(expectedPlanDigest === undefined ? {} : { expectedPlanDigest }),
+  };
 }
 
 function assertBackupReason(reason: string): void {
