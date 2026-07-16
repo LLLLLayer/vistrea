@@ -107,6 +107,22 @@ enum StudioAccessibilityID {
     }
 }
 
+extension View {
+    /// Exposes one stable automation element for a logical product region
+    /// while preserving the accessibility of its interactive descendants.
+    ///
+    /// On macOS 15, applying an identifier directly to a SwiftUI container
+    /// propagates that identifier to its children. The resulting duplicates
+    /// make the region ambiguous and can overwrite identifiers owned by nested
+    /// controls. Creating an explicit containing element keeps the region and
+    /// its descendants independently addressable across supported macOS
+    /// versions.
+    func studioAccessibilityContainer(_ identifier: String) -> some View {
+        accessibilityElement(children: .contain)
+            .accessibilityIdentifier(identifier)
+    }
+}
+
 enum StudioKeyboardNavigation {
     static func section(
         for key: KeyEquivalent,

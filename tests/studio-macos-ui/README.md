@@ -48,6 +48,12 @@ thresholds because macOS renderer output differs across OS, architecture, and
 display scale. These UI tests verify real composition and interaction rather
 than treating one machine's pixels as a portable baseline.
 
+Every logical region identifier must resolve to exactly one AX element. SwiftUI
+structural containers use a containing accessibility element so macOS 15 cannot
+propagate the region identifier over nested buttons, sliders, Canvas cards, or
+their own identifiers. The UI tests intentionally fail on either a missing or a
+duplicated identifier.
+
 ## Generate and build without running UI automation
 
 Install the repository-pinned XcodeGen release, generate into this directory,

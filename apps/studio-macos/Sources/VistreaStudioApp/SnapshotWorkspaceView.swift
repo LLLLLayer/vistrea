@@ -80,7 +80,7 @@ struct SnapshotWorkspaceView: View {
             EventTimelineStrip(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .accessibilityIdentifier(StudioAccessibilityID.workspace)
+        .studioAccessibilityContainer(StudioAccessibilityID.workspace)
         .onKeyPress(phases: .down) { press in
             guard let destination = StudioKeyboardNavigation.section(
                 for: press.key,
@@ -130,12 +130,12 @@ struct SnapshotWorkspaceView: View {
                     }
                 }
             }
-            .accessibilityIdentifier(StudioAccessibilityID.workspaceEmpty)
+            .studioAccessibilityContainer(StudioAccessibilityID.workspaceEmpty)
         case let .failure(message):
             FailureView(message: message, isBusy: model.isRefreshing || model.isCapturing) {
                 Task { await model.refresh() }
             }
-            .accessibilityIdentifier(StudioAccessibilityID.workspaceFailure)
+            .studioAccessibilityContainer(StudioAccessibilityID.workspaceFailure)
         case .content:
             HSplitView {
                 NavigationColumn(section: $section)
@@ -623,7 +623,7 @@ private struct CanvasSection: View {
                     .frame(minWidth: StudioLayoutMetrics.inspectorMinWidth)
             }
         }
-        .accessibilityIdentifier(StudioAccessibilityID.canvasSection)
+        .studioAccessibilityContainer(StudioAccessibilityID.canvasSection)
     }
 }
 
@@ -667,7 +667,7 @@ private struct StateInspectorView: View {
                 }
             }
         }
-        .accessibilityIdentifier(StudioAccessibilityID.inspector)
+        .studioAccessibilityContainer(StudioAccessibilityID.inspector)
     }
 
     private func header(arrangement: StudioLayoutMetrics.InspectorArrangement) -> some View {
@@ -843,7 +843,7 @@ private struct CanvasPane: View {
                 )
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityIdentifier(StudioAccessibilityID.canvasEmpty)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasEmpty)
         case let .failure(message):
             VStack(spacing: 14) {
                 ContentUnavailableView(
@@ -865,7 +865,7 @@ private struct CanvasPane: View {
                 .accessibilityIdentifier(StudioAccessibilityID.canvasRetry)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityIdentifier(StudioAccessibilityID.canvasFailure)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasFailure)
         case .content:
             InteractiveScreenStateCanvas(model: model)
         }
@@ -1161,7 +1161,7 @@ private struct StateContextColumn: View {
                 isEditingAnnotations = false
             }
         }
-        .accessibilityIdentifier(StudioAccessibilityID.inspectorContext)
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorContext)
     }
 
     @ViewBuilder
@@ -3229,7 +3229,7 @@ private struct ContextBar: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
-        .accessibilityIdentifier(StudioAccessibilityID.contextBar)
+        .studioAccessibilityContainer(StudioAccessibilityID.contextBar)
     }
 
     @ViewBuilder
@@ -3400,7 +3400,7 @@ private struct ScreenshotPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .accessibilityIdentifier(StudioAccessibilityID.inspectorScreenshot)
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorScreenshot)
     }
 
     @ViewBuilder
@@ -3471,7 +3471,7 @@ private struct ViewTreePane: View {
             Divider()
             treeContent
         }
-        .accessibilityIdentifier(StudioAccessibilityID.inspectorTree)
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorTree)
     }
 
     @ViewBuilder
@@ -3643,7 +3643,7 @@ private struct TuningPreviewControls: View {
         .onChange(of: node.id) {
             resetValues()
         }
-        .accessibilityIdentifier(StudioAccessibilityID.tuningControls)
+        .studioAccessibilityContainer(StudioAccessibilityID.tuningControls)
     }
 
     @ViewBuilder
@@ -3974,7 +3974,7 @@ private struct ActiveTuningList: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 6) {
             switch model.tuningPhase {
             case .idle, .loading:
                 ProgressView("Loading active previews…")
@@ -4007,11 +4007,12 @@ private struct ActiveTuningList: View {
                         .disabled(model.revertingTuningIDs.contains(application.id))
                         .accessibilityIdentifier(StudioAccessibilityID.tuningRevert(application.id))
                     }
+                    .accessibilityElement(children: .contain)
                     .accessibilityLabel("Active tuning preview, status \(application.status)")
                 }
             }
         }
-        .accessibilityIdentifier(StudioAccessibilityID.tuningActivePreviews)
+        .studioAccessibilityContainer(StudioAccessibilityID.tuningActivePreviews)
     }
 }
 

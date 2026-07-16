@@ -27,3 +27,8 @@ passing regression gate.
 
 Do not copy a baseline between buckets. Each committed bucket must be captured and
 reviewed on the environment named by its directory.
+
+The presentation tests render a fixed-size `NSHostingView` directly into its bitmap
+cache. Do not replace that path with a WindowServer capture: off-screen window bounds
+can vary by several pixels between otherwise identical runs, making an exact Golden
+comparison nondeterministic.

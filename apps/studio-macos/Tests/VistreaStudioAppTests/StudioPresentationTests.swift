@@ -259,8 +259,12 @@ final class StudioPresentationTests: XCTestCase {
         window.isOpaque = true
         window.appearance = NSAppearance(named: .aqua)
         window.backgroundColor = .windowBackgroundColor
+        hostingView.autoresizingMask = [.width, .height]
         window.contentView = hostingView
+        window.contentMinSize = size
+        window.contentMaxSize = size
         window.setContentSize(size)
+        hostingView.frame = CGRect(origin: .zero, size: size)
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
         window.orderFront(nil)
 
@@ -277,16 +281,18 @@ final class StudioPresentationTests: XCTestCase {
         }
         NSAnimationContext.endGrouping()
 
-        let image = try XCTUnwrap(
-            CGWindowListCreateImage(
-                .null,
-                .optionIncludingWindow,
-                CGWindowID(window.windowNumber),
-                [.boundsIgnoreFraming, .bestResolution]
-            )
+        let bitmap = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds),
+            "The fixed-size Studio presentation surface did not create a bitmap representation."
         )
-        let bitmap = NSBitmapImageRep(cgImage: image)
+        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
         bitmap.size = size
+        let expectedPixelSize = NSSize(
+            width: size.width * window.backingScaleFactor,
+            height: size.height * window.backingScaleFactor
+        )
+        XCTAssertEqual(bitmap.pixelsWide, Int(expectedPixelSize.width.rounded()))
+        XCTAssertEqual(bitmap.pixelsHigh, Int(expectedPixelSize.height.rounded()))
         window.orderOut(nil)
         window.contentView = nil
         window.close()

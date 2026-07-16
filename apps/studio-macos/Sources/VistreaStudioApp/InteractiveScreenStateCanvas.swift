@@ -103,7 +103,7 @@ struct InteractiveScreenStateCanvas: View {
             Divider()
             pathSelectionBar(spatialIndex: index)
         }
-        .accessibilityIdentifier(StudioAccessibilityID.canvasViewport)
+        .studioAccessibilityContainer(StudioAccessibilityID.canvasViewport)
         .onKeyPress(.escape) {
             guard model.selectedCanvasStateID != nil else { return .ignored }
             Task { await model.selectCanvasState(id: nil) }
@@ -225,6 +225,7 @@ struct InteractiveScreenStateCanvas: View {
                     }
                     return .handled
                 }
+                .accessibilityElement(children: .combine)
                 .accessibilityLabel(
                     "Screen state \(CanvasStatePresentation.displayTitle(for: positioned.state)), "
                         + positioned.state.status
@@ -378,7 +379,7 @@ struct InteractiveScreenStateCanvas: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color(nsColor: .controlBackgroundColor))
-            .accessibilityIdentifier(StudioAccessibilityID.canvasPathBar)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasPathBar)
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow.motionlines")
@@ -390,7 +391,7 @@ struct InteractiveScreenStateCanvas: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .controlBackgroundColor))
-            .accessibilityIdentifier(StudioAccessibilityID.canvasPathBar)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasPathBar)
         }
     }
 

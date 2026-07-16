@@ -23,7 +23,7 @@ struct WorkspaceWelcomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
-        .accessibilityIdentifier(StudioAccessibilityID.welcome)
+        .studioAccessibilityContainer(StudioAccessibilityID.welcome)
     }
 
     private var welcomeColumn: some View {
@@ -140,7 +140,7 @@ struct WorkspaceWelcomeView: View {
             }
         }
         .padding(34)
-        .accessibilityIdentifier(StudioAccessibilityID.welcomeRecentWorkspaces)
+        .studioAccessibilityContainer(StudioAccessibilityID.welcomeRecentWorkspaces)
     }
 
     private func isCurrent(_ url: URL) -> Bool {

@@ -448,6 +448,9 @@ Every primary screen defines:
 
 - Every Canvas and tree action has a non-pointer alternative.
 - Selection, focus, and current mode are exposed to accessibility APIs.
+- Each logical product region exposes exactly one stable automation identifier;
+  containing regions preserve the roles and identifiers of their native child
+  controls instead of propagating or overwriting them.
 - Command-1 through Command-6 navigate the six Workspace sections without
   depending on sidebar focus.
 - A focused Canvas card can be selected without a pointer, and arrow-key

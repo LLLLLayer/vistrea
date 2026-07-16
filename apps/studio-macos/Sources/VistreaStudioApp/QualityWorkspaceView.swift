@@ -30,7 +30,7 @@ struct QualityWorkspaceView: View {
                 BuildDiffWorkspaceView(model: model)
             }
         }
-        .accessibilityIdentifier(StudioAccessibilityID.quality)
+        .studioAccessibilityContainer(StudioAccessibilityID.quality)
     }
 
     private enum QualityMode: String, CaseIterable, Identifiable {
@@ -80,7 +80,7 @@ private struct ValidationWorkspaceView: View {
             .padding(10)
             Divider()
             validationContent
-                .accessibilityIdentifier(StudioAccessibilityID.qualityValidationResults)
+                .studioAccessibilityContainer(StudioAccessibilityID.qualityValidationResults)
         }
         .onAppear { synchronizeSnapshotSelection() }
         .onChange(of: model.selectedSnapshotID) { synchronizeSnapshotSelection() }
