@@ -54,6 +54,10 @@ propagate the region identifier over nested buttons, sliders, Canvas cards, or
 their own identifiers. The UI tests intentionally fail on either a missing or a
 duplicated identifier.
 
+Canvas card positioning wraps the complete semantic element so the visual card,
+hit target, and AX frame stay aligned. The drag test verifies the requested local
+offset, keeps the sibling card stationary, and proves the Inspector stays closed.
+
 ## Generate and build without running UI automation
 
 Install the repository-pinned XcodeGen release, generate into this directory,

@@ -62,6 +62,7 @@ final class StudioCoreFlowUITests: StudioUITestCase {
 
         requireElement(AccessibilityID.inspector, in: application)
         requireElement(AccessibilityID.canvasPathBar, in: application)
+        requireText("Path to Catalog", in: application)
         requireElement(AccessibilityID.canvasRoutePicker, in: application)
         requireElement(AccessibilityID.inspectorScreenshot, in: application)
         requireElement(AccessibilityID.inspectorTree, in: application)
@@ -137,21 +138,40 @@ final class StudioCoreFlowUITests: StudioUITestCase {
             waitUntil(timeout: 2) { catalogState.isHittable },
             "The fixture Catalog state did not become actionable."
         )
+        let catalogVariant = requireElement(
+            AccessibilityID.canvasState(Fixture.catalogVariantStateID),
+            in: application
+        )
         let originalFrame = catalogState.frame
+        let originalVariantFrame = catalogVariant.frame
         let source = catalogState.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = source
             .withOffset(CGVector(dx: 72, dy: 44))
         source.click(forDuration: 0.15, thenDragTo: destination)
 
         XCTAssertTrue(
-            waitUntil(timeout: 3) { catalogState.frame.origin != originalFrame.origin },
-            "The drag did not move the local presentation card."
+            waitUntil(timeout: 3) {
+                let movedFrame = self.element(
+                    AccessibilityID.canvasState(Fixture.catalogStateID),
+                    in: application
+                ).frame
+                let deltaX = movedFrame.origin.x - originalFrame.origin.x
+                let deltaY = movedFrame.origin.y - originalFrame.origin.y
+                return abs(abs(deltaX) - 72) <= 4 && abs(abs(deltaY) - 44) <= 4
+            },
+            "The dragged Catalog card and its accessibility frame did not move by the requested offset."
         )
         assertRemainsAbsent(
             element(AccessibilityID.inspector, in: application),
             duration: 1,
             message: "Dragging a Canvas card must not select it or open the Inspector."
         )
+        let currentVariantFrame = element(
+            AccessibilityID.canvasState(Fixture.catalogVariantStateID),
+            in: application
+        ).frame
+        XCTAssertEqual(currentVariantFrame.origin.x, originalVariantFrame.origin.x, accuracy: 1)
+        XCTAssertEqual(currentVariantFrame.origin.y, originalVariantFrame.origin.y, accuracy: 1)
         attachScreenshot("canvas-card-dragged-without-selection", of: application)
     }
 }

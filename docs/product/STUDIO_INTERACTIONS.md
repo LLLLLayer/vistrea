@@ -232,7 +232,8 @@ reports that absence instead of inventing reachability.
 
 Card selection and card repositioning are mutually exclusive interactions: a
 click selects the Screen State, while a drag moves only its session-local
-presentation and must not open the Inspector. The Canvas exposes distinct
+presentation and must not open the Inspector. The visual card, hit target, and
+accessibility frame remain co-located after that local repositioning. The Canvas exposes distinct
 loading, empty, and retryable failure states. An empty graph never appears as
 an error, and a graph read failure never hides the active Workspace or silently
 falls back to stale content.

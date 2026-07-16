@@ -47,6 +47,7 @@ class StudioUITestCase: XCTestCase {
 
     enum Fixture {
         static let catalogStateID = "screenstate_019f0000-0000-7000-8000-0000000000c2"
+        static let catalogVariantStateID = "screenstate_019f0000-0000-7000-8000-0000000000c3"
 
         static var snapshotPath: String {
             var repositoryRoot = URL(fileURLWithPath: #filePath)

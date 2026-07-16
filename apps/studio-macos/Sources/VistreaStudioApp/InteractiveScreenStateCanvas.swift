@@ -182,7 +182,6 @@ struct InteractiveScreenStateCanvas: View {
                     isDragging: draggingNodeID == stateID,
                     metrics: metrics
                 )
-                .position(centers[stateID] ?? .zero)
                 .onHover { isHovering in
                     hoveredNodeID = isHovering ? stateID : nil
                 }
@@ -247,6 +246,9 @@ struct InteractiveScreenStateCanvas: View {
                 .accessibilityAction(named: Text("Toggle merge selection")) {
                     model.toggleMergeSelection(stateID: stateID)
                 }
+                // Position the complete semantic card so its macOS AX frame
+                // follows session-local Canvas dragging as well as its pixels.
+                .position(centers[stateID] ?? .zero)
             }
         }
         .frame(width: viewportSize.width, height: viewportSize.height, alignment: .topLeading)
