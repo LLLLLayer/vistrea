@@ -27,6 +27,7 @@ struct InteractiveScreenStateCanvas: View {
     private static let maximumZoom: CGFloat = 1.8
     private static let overflowInset: CGFloat = 600
     private static let fitPadding: CGFloat = 52
+    private static let interactionCoordinateSpace = "vistrea.canvas.interaction"
 
     private var graph: CanvasGraph {
         // This view is rendered only for CanvasPhase.content. Keep a defensive
@@ -63,6 +64,7 @@ struct InteractiveScreenStateCanvas: View {
 
                     graphContent(in: proxy.size, spatialIndex: index)
                 }
+                .coordinateSpace(name: Self.interactionCoordinateSpace)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 .overlay(alignment: .topTrailing) {
                     viewportControls(in: proxy.size, spatialIndex: index)
@@ -235,7 +237,11 @@ struct InteractiveScreenStateCanvas: View {
                         isEntry: spatialIndex.isEntryState(id: stateID),
                         isSelected: isSelected,
                         isOnRoute: isOnRoute,
-                        isMergeSelected: model.mergeSelectionStateIDs.contains(stateID)
+                        isMergeSelected: model.mergeSelectionStateIDs.contains(stateID),
+                        projectedDragOffset: CGSize(
+                            width: (nodeOffsets[stateID]?.width ?? 0) * zoom,
+                            height: (nodeOffsets[stateID]?.height ?? 0) * zoom
+                        )
                     )
                 )
                 .accessibilityIdentifier(StudioAccessibilityID.canvasState(stateID))
@@ -268,7 +274,13 @@ struct InteractiveScreenStateCanvas: View {
     }
 
     private func nodeDragGesture(for stateID: String) -> some Gesture {
-        DragGesture(minimumDistance: 4)
+        // A node-local coordinate space moves with the card and feeds its own
+        // translation back into the next event. The fixed Canvas space keeps
+        // the card under the pointer for the complete drag distance.
+        DragGesture(
+            minimumDistance: 4,
+            coordinateSpace: .named(Self.interactionCoordinateSpace)
+        )
             .onChanged { value in
                 if draggingNodeID != stateID {
                     draggingNodeID = stateID
@@ -575,13 +587,19 @@ struct InteractiveScreenStateCanvas: View {
         isEntry: Bool,
         isSelected: Bool,
         isOnRoute: Bool,
-        isMergeSelected: Bool
+        isMergeSelected: Bool,
+        projectedDragOffset: CGSize
     ) -> String {
         var values: [String] = []
         if isEntry { values.append("entry") }
         if isSelected { values.append("selected") }
         if isOnRoute { values.append("on selected route") }
         if isMergeSelected { values.append("selected for merge") }
+        let offsetX = Int(projectedDragOffset.width.rounded())
+        let offsetY = Int(projectedDragOffset.height.rounded())
+        if offsetX != 0 || offsetY != 0 {
+            values.append("canvas offset \(offsetX), \(offsetY) pixels")
+        }
         return values.isEmpty ? "not selected" : values.joined(separator: ", ")
     }
 

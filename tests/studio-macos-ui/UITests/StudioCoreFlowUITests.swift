@@ -144,6 +144,10 @@ final class StudioCoreFlowUITests: StudioUITestCase {
         )
         let originalFrame = catalogState.frame
         let originalVariantFrame = catalogVariant.frame
+        XCTAssertFalse(
+            String(describing: catalogState.value).contains("canvas offset"),
+            "The fixture Catalog card must start at its deterministic graph position."
+        )
         let source = catalogState.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let destination = source
             .withOffset(CGVector(dx: 72, dy: 44))
@@ -151,15 +155,24 @@ final class StudioCoreFlowUITests: StudioUITestCase {
 
         XCTAssertTrue(
             waitUntil(timeout: 3) {
-                let movedFrame = self.element(
+                let movedState = self.element(
                     AccessibilityID.canvasState(Fixture.catalogStateID),
                     in: application
-                ).frame
+                )
+                let value = String(describing: movedState.value)
+                let offsetPublished = (68...76).contains { offsetX in
+                    (40...48).contains { offsetY in
+                        value.contains("canvas offset \(offsetX), \(offsetY) pixels")
+                    }
+                }
+                let movedFrame = movedState.frame
                 let deltaX = movedFrame.origin.x - originalFrame.origin.x
                 let deltaY = movedFrame.origin.y - originalFrame.origin.y
-                return abs(abs(deltaX) - 72) <= 4 && abs(abs(deltaY) - 44) <= 4
+                return offsetPublished
+                    && abs(deltaX - 72) <= 4
+                    && abs(deltaY - 44) <= 4
             },
-            "The dragged Catalog card and its accessibility frame did not move by the requested offset."
+            "The dragged Catalog card, live Canvas offset, and accessibility frame did not move together."
         )
         assertRemainsAbsent(
             element(AccessibilityID.inspector, in: application),
@@ -172,6 +185,13 @@ final class StudioCoreFlowUITests: StudioUITestCase {
         ).frame
         XCTAssertEqual(currentVariantFrame.origin.x, originalVariantFrame.origin.x, accuracy: 1)
         XCTAssertEqual(currentVariantFrame.origin.y, originalVariantFrame.origin.y, accuracy: 1)
+        XCTAssertFalse(
+            String(describing: element(
+                AccessibilityID.canvasState(Fixture.catalogVariantStateID),
+                in: application
+            ).value).contains("canvas offset"),
+            "Dragging Catalog must not move its loading-state sibling."
+        )
         attachScreenshot("canvas-card-dragged-without-selection", of: application)
     }
 }

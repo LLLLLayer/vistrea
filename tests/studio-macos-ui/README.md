@@ -55,8 +55,11 @@ their own identifiers. The UI tests intentionally fail on either a missing or a
 duplicated identifier.
 
 Canvas card positioning wraps the complete semantic element so the visual card,
-hit target, and AX frame stay aligned. The drag test verifies the requested local
-offset, keeps the sibling card stationary, and proves the Inspector stays closed.
+hit target, and AX frame stay aligned. Node dragging measures translation in the
+fixed Canvas coordinate space rather than the moving card's local space. The
+drag test verifies the requested visual offset, published accessibility offset,
+and AX-frame delta together, keeps the sibling card stationary, and proves the
+Inspector stays closed.
 
 ## Generate and build without running UI automation
 
