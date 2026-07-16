@@ -11,14 +11,15 @@ struct QualityWorkspaceView: View {
                 Label("Quality", systemImage: "checkmark.shield")
                     .font(.headline)
                 Spacer()
-                Picker("Quality mode", selection: $mode) {
+            Picker("Quality mode", selection: $mode) {
                     ForEach(QualityMode.allCases) { mode in
                         Text(mode.label).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-                .labelsHidden()
+            .frame(maxWidth: 280)
+            .labelsHidden()
+            .accessibilityIdentifier(StudioAccessibilityID.qualityMode)
             }
             .padding(10)
             Divider()
@@ -29,6 +30,7 @@ struct QualityWorkspaceView: View {
                 BuildDiffWorkspaceView(model: model)
             }
         }
+        .accessibilityIdentifier(StudioAccessibilityID.quality)
     }
 
     private enum QualityMode: String, CaseIterable, Identifiable {
@@ -67,15 +69,18 @@ private struct ValidationWorkspaceView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(snapshotID.isEmpty || model.isValidating)
+                .accessibilityIdentifier(StudioAccessibilityID.qualityValidateSnapshot)
                 Button("Validate Screen Graph") {
                     Task { await model.validateSelectedScreenGraph() }
                 }
                 .disabled(model.selectedScope == nil || model.isValidating)
+                .accessibilityIdentifier(StudioAccessibilityID.qualityValidateGraph)
                 Spacer()
             }
             .padding(10)
             Divider()
             validationContent
+                .accessibilityIdentifier(StudioAccessibilityID.qualityValidationResults)
         }
         .onAppear { synchronizeSnapshotSelection() }
         .onChange(of: model.selectedSnapshotID) { synchronizeSnapshotSelection() }
@@ -337,6 +342,7 @@ private struct BuildDiffWorkspaceView: View {
                         || leftBuildID == rightBuildID
                         || model.isComparingBuilds
                 )
+                .accessibilityIdentifier(StudioAccessibilityID.qualityCompareBuilds)
                 Spacer()
             }
             .padding(10)

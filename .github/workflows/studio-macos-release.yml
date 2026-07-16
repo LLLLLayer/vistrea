@@ -125,7 +125,19 @@ jobs:
         run: pnpm build:host
 
       - name: Test Studio
+        env:
+          VISTREA_REQUIRE_STUDIO_SNAPSHOTS: "1"
+          VISTREA_STUDIO_SNAPSHOT_ARTIFACTS_DIR: ${{ runner.temp }}/VistreaStudioSnapshotDiffs
         run: swift test --package-path apps/studio-macos
+
+      - name: Upload Studio snapshot failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vistrea-Studio-Snapshot-Failure-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/VistreaStudioSnapshotDiffs
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Import Developer ID and notarization credentials
         if: steps.metadata.outputs.is_release == 'true'

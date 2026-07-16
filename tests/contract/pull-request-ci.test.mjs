@@ -8,6 +8,10 @@ const workflowPath = path.join(
   repositoryRoot,
   ".github/workflows/pull-request-ci.yml",
 );
+const releaseWorkflowPath = path.join(
+  repositoryRoot,
+  ".github/workflows/studio-macos-release.yml",
+);
 
 test("the pull request CI matrix covers every supported implementation surface", async () => {
   const workflow = await fs.readFile(workflowPath, "utf8");
@@ -20,6 +24,7 @@ test("the pull request CI matrix covers every supported implementation surface",
   for (const job of [
     "node-host",
     "studio",
+    "studio-ui",
     "ios-sdk",
     "ios-demo",
     "android-sdk",
@@ -34,6 +39,13 @@ test("the pull request CI matrix covers every supported implementation surface",
     "pnpm build:host",
     "swift test --package-path apps/studio-macos",
     "swift build -c release --package-path apps/studio-macos",
+    "--spec tests/studio-macos-ui/project.yml",
+    "VistreaStudioUIRegression.xcodeproj",
+    "VistreaStudioUI-Tests.xcresult",
+    "build-for-testing",
+    "test-without-building",
+    "VISTREA_REQUIRE_STUDIO_SNAPSHOTS",
+    "VistreaStudioSnapshotDiffs",
     "node --test .build/typescript/tests/integration/ios-runtime-client-interop.test.js",
     "swift test --package-path sdks/ios",
     "swift build -c release --package-path sdks/ios",
@@ -55,9 +67,42 @@ test("the pull request CI matrix covers every supported implementation surface",
 
   assert.match(workflow, /java-version: "17"/u);
   assert.match(workflow, /VISTREA_SKIP_ANDROID_RUNTIME_INTEROP: "1"/u);
+  assert.match(
+    workflow,
+    /- name: Test Studio\n\s+env:\n\s+VISTREA_REQUIRE_STUDIO_SNAPSHOTS: "1"\n\s+VISTREA_STUDIO_SNAPSHOT_ARTIFACTS_DIR: \$\{\{ runner\.temp \}\}\/VistreaStudioSnapshotDiffs\n\s+run: swift test --package-path apps\/studio-macos/u,
+  );
+  assert.match(
+    workflow,
+    /- name: Upload Studio snapshot failure evidence\n\s+if: failure\(\)\n\s+uses: actions\/upload-artifact@[0-9a-f]{40}/u,
+  );
   assert.match(workflow, /git status --short --untracked-files=all/u);
   assert.doesNotMatch(workflow, /connectedDebugAndroidTest/u);
   assert.doesNotMatch(workflow, /test:e2e:/u);
+
+  await Promise.all(
+    [
+      "project.yml",
+      "Resources/Info.plist",
+      "UITests/StudioCoreFlowUITests.swift",
+      "UITests/StudioCanvasStateUITests.swift",
+      "UITests/StudioWelcomeUITests.swift",
+    ].map((entry) =>
+      fs.access(path.join(repositoryRoot, "tests/studio-macos-ui", entry)),
+    ),
+  );
+});
+
+test("the release lane also fails closed on missing Studio snapshots", async () => {
+  const workflow = await fs.readFile(releaseWorkflowPath, "utf8");
+
+  assert.match(
+    workflow,
+    /- name: Test Studio\n\s+env:\n\s+VISTREA_REQUIRE_STUDIO_SNAPSHOTS: "1"\n\s+VISTREA_STUDIO_SNAPSHOT_ARTIFACTS_DIR: \$\{\{ runner\.temp \}\}\/VistreaStudioSnapshotDiffs\n\s+run: swift test --package-path apps\/studio-macos/u,
+  );
+  assert.match(
+    workflow,
+    /- name: Upload Studio snapshot failure evidence\n\s+if: failure\(\)\n\s+uses: actions\/upload-artifact@[0-9a-f]{40}/u,
+  );
 });
 
 test("all pull request workflow actions are pinned to immutable commits", async () => {

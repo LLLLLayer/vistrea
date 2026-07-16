@@ -697,7 +697,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     }
 
     /// Creates a single-change alpha Tuning Patch bound to the selected node.
-    public func previewAlpha(_ value: Double) async {
+    public func previewAlpha(
+        _ value: Double,
+        previewTTLMilliseconds: Int? = nil
+    ) async {
         guard let node = selectedNode else {
             tuningError = "Select a node with a stable ID to preview tuning."
             return
@@ -705,7 +708,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         await previewTuning(
             property: "alpha",
             originalValue: .number(value: node.alpha ?? 1, unit: "ratio"),
-            previewValue: .number(value: value, unit: "ratio")
+            previewValue: .number(value: value, unit: "ratio"),
+            previewTTLMilliseconds: previewTTLMilliseconds
         )
     }
 
@@ -714,7 +718,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     public func previewTuning(
         property: String,
         originalValue: TuningPropertyValueDraft,
-        previewValue: TuningPropertyValueDraft
+        previewValue: TuningPropertyValueDraft,
+        previewTTLMilliseconds: Int? = nil
     ) async {
         guard !isApplyingTuning else {
             return
@@ -756,7 +761,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             lastTuningPatch = patch
             lastTuningApplication = try await client.applyTuningPatch(
                 patchID: patch.patchID,
-                previewTTLMilliseconds: nil
+                previewTTLMilliseconds: previewTTLMilliseconds
             )
         } catch {
             tuningError = Self.message(for: error)

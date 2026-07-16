@@ -82,6 +82,107 @@ final class StudioCoreAcceptanceWorkflowTests: XCTestCase {
         }
     }
 
+    func testWorkflowExercisesTuningRevertAndQualityAsOneMainPath() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let screenshot = try XCTUnwrap(snapshot.screenshot)
+        let stateID = "screenstate_019f0000-0000-7000-8000-000000000001"
+        let graph = CanvasGraph(
+            screenGraphID: "graph_019f0000-0000-7000-8000-000000000001",
+            entryStateIDs: [stateID],
+            states: [
+                CanvasStateSummary(
+                    screenStateID: stateID,
+                    title: "Home",
+                    kind: "screen",
+                    status: "active"
+                ),
+            ],
+            transitions: []
+        )
+        let client = FixtureHostClient(
+            snapshots: [snapshot],
+            objectsByHash: [
+                screenshot.object.hash: Data(
+                    repeating: 0x5a,
+                    count: Int(screenshot.object.byteSize.rawValue)
+                ),
+            ],
+            canvasGraph: graph,
+            designReferences: []
+        )
+
+        let result = try await StudioCoreAcceptanceWorkflow.run(
+            client: client,
+            request: StudioCoreAcceptanceRequest(
+                expectedSnapshotID: snapshot.snapshotID.rawValue,
+                exerciseReversibleTuningAndQuality: true
+            )
+        )
+
+        XCTAssertTrue(result.tuningPreviewReverted)
+        XCTAssertTrue(result.validationCompleted)
+        XCTAssertTrue(result.coreWorkflowCompleted)
+        let previewTTL = await client.lastTuningPreviewTTLMilliseconds
+        XCTAssertEqual(previewTTL, 30_000)
+        let activeApplications = try await client.listActiveTuningApplications()
+        XCTAssertTrue(activeApplications.items.isEmpty)
+    }
+
+    func testWorkflowCleansUpBoundedPreviewWhenPostApplyReloadFails() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let screenshot = try XCTUnwrap(snapshot.screenshot)
+        let stateID = "screenstate_019f0000-0000-7000-8000-000000000001"
+        let graph = CanvasGraph(
+            screenGraphID: "graph_019f0000-0000-7000-8000-000000000001",
+            entryStateIDs: [stateID],
+            states: [
+                CanvasStateSummary(
+                    screenStateID: stateID,
+                    title: "Home",
+                    kind: "screen",
+                    status: "active"
+                ),
+            ],
+            transitions: []
+        )
+        let client = FixtureHostClient(
+            snapshots: [snapshot],
+            objectsByHash: [
+                screenshot.object.hash: Data(
+                    repeating: 0x5a,
+                    count: Int(screenshot.object.byteSize.rawValue)
+                ),
+            ],
+            canvasGraph: graph,
+            designReferences: [],
+            failActiveTuningReloadWhileApplicationIsActive: true
+        )
+
+        do {
+            _ = try await StudioCoreAcceptanceWorkflow.run(
+                client: client,
+                request: StudioCoreAcceptanceRequest(
+                    expectedSnapshotID: snapshot.snapshotID.rawValue,
+                    exerciseReversibleTuningAndQuality: true
+                )
+            )
+            XCTFail("Expected the failed active-preview reload to fail acceptance.")
+        } catch {
+            XCTAssertEqual(
+                error as? StudioCoreAcceptanceError,
+                .failed("The reversible tuning preview did not become active.")
+            )
+        }
+
+        let previewTTL = await client.lastTuningPreviewTTLMilliseconds
+        XCTAssertEqual(previewTTL, 30_000)
+        let activeApplications = try await client.listActiveTuningApplications()
+        XCTAssertTrue(
+            activeApplications.items.isEmpty,
+            "Acceptance failure must not leave a Runtime tuning override active."
+        )
+    }
+
     private func screenshotObject(for snapshot: RuntimeSnapshot) throws -> [String: Data] {
         let screenshot = try XCTUnwrap(snapshot.screenshot)
         return [

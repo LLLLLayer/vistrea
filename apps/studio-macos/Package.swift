@@ -54,5 +54,14 @@ let package = Package(
                 .product(name: "VistreaRuntimeModels", package: "VistreaIOSSDK"),
             ]
         ),
+        .testTarget(
+            name: "VistreaStudioAppTests",
+            dependencies: [
+                "VistreaStudioApp",
+                "VistreaStudioCore",
+                "VistreaStudioHostRuntime",
+                .product(name: "VistreaRuntimeModels", package: "VistreaIOSSDK"),
+            ]
+        ),
     ]
 )

@@ -221,11 +221,21 @@ rather than transforming a composited graph layer. Final positions snap to the
 display backing scale, low zoom progressively removes secondary card detail,
 and Reset-to-fit restores the deterministic layered layout without enlarging it
 beyond 100%. Selecting a destination keeps the same state selected in the
-Inspector, enumerates a bounded set of cycle-free routes from every recorded
-entry, and highlights the chosen route's states and directional transitions.
-Alternative routes are explicit choices rather than lines highlighted all at
-once. A state with no recorded entry route reports that absence instead of
-inventing reachability.
+Inspector and first reserves one deterministic shortest route for each
+depth-reachable recorded entry. The global expansion budget limits only
+alternative cycle-free routes; `maximumDepth` and `maximumPaths` remain hard
+limits, and a route set with more reachable entries than `maximumPaths` is
+truncated by sorted entry ID. The chosen route's states and directional
+transitions are highlighted. Alternative routes are explicit choices rather
+than lines highlighted all at once. A state with no recorded entry route
+reports that absence instead of inventing reachability.
+
+Card selection and card repositioning are mutually exclusive interactions: a
+click selects the Screen State, while a drag moves only its session-local
+presentation and must not open the Inspector. The Canvas exposes distinct
+loading, empty, and retryable failure states. An empty graph never appears as
+an error, and a graph read failure never hides the active Workspace or silently
+falls back to stale content.
 
 Engine mapping:
 
@@ -308,6 +318,9 @@ Rules:
 - Saving a Tuning Patch does not claim the source code changed.
 - A Review Issue becomes verified only after capture from a real later build.
 - Partial patch application lists rejected properties and reasons.
+- Automated acceptance previews use a bounded TTL and attempt an explicit
+  Revert on both success and later workflow failure. The TTL is the final
+  safety bound when immediate best-effort cleanup cannot reach the Host.
 - Source handoff is generated from the exact persisted Tuning Patch. Studio
   shows canonical Coding Agent instructions and reports missing source mapping
   explicitly; it never invents a file path.
@@ -435,6 +448,11 @@ Every primary screen defines:
 
 - Every Canvas and tree action has a non-pointer alternative.
 - Selection, focus, and current mode are exposed to accessibility APIs.
+- Command-1 through Command-6 navigate the six Workspace sections without
+  depending on sidebar focus.
+- A focused Canvas card can be selected without a pointer, and arrow-key
+  navigation moves to the nearest state in the deterministic layered layout
+  while revealing an offscreen destination.
 - Diff colors are not the only status indicator.
 - Design-property editors support keyboard entry and reset.
 - Long operations announce progress without stealing focus.

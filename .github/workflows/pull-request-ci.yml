@@ -72,7 +72,19 @@ jobs:
       - name: Build the managed Host
         run: pnpm build:host
 
+      - name: Report the Studio snapshot environment
+        env:
+          SNAPSHOT_ARTIFACTS: ${{ runner.temp }}/VistreaStudioSnapshotDiffs
+        run: |
+          mkdir -p "$SNAPSHOT_ARTIFACTS"
+          sw_vers | tee "$SNAPSHOT_ARTIFACTS/environment.txt"
+          uname -m | tee -a "$SNAPSHOT_ARTIFACTS/environment.txt"
+          xcodebuild -version | tee -a "$SNAPSHOT_ARTIFACTS/environment.txt"
+
       - name: Test Studio
+        env:
+          VISTREA_REQUIRE_STUDIO_SNAPSHOTS: "1"
+          VISTREA_STUDIO_SNAPSHOT_ARTIFACTS_DIR: ${{ runner.temp }}/VistreaStudioSnapshotDiffs
         run: swift test --package-path apps/studio-macos
 
       - name: Verify Node and Swift Runtime interoperability
@@ -80,6 +92,103 @@ jobs:
 
       - name: Build Studio in Release configuration
         run: swift build -c release --package-path apps/studio-macos
+
+      - name: Upload Studio snapshot failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vistrea-Studio-Snapshot-Failure-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/VistreaStudioSnapshotDiffs
+          if-no-files-found: warn
+          retention-days: 14
+
+  studio-ui:
+    name: Vistrea Studio UI regression
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install pinned XcodeGen
+        run: tools/ci/install-xcodegen.sh "$RUNNER_TEMP/xcodegen"
+
+      - name: Report the Studio UI environment
+        run: |
+          sw_vers | tee "$RUNNER_TEMP/studio-ui-environment.txt"
+          uname -m | tee -a "$RUNNER_TEMP/studio-ui-environment.txt"
+          xcodebuild -version | tee -a "$RUNNER_TEMP/studio-ui-environment.txt"
+
+      - name: Generate the Studio UI regression project
+        run: |
+          "$RUNNER_TEMP/xcodegen/bin/xcodegen" generate \
+            --spec tests/studio-macos-ui/project.yml \
+            --project tests/studio-macos-ui
+
+      - name: Build Studio UI regression for testing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project tests/studio-macos-ui/VistreaStudioUIRegression.xcodeproj \
+            -scheme VistreaStudioUIRegression \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/VistreaStudioUI-DerivedData" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
+            -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Build.xcresult" \
+            -parallel-testing-enabled NO \
+            build-for-testing \
+            | tee "$RUNNER_TEMP/studio-ui-build.log"
+
+      - name: Run Studio UI regression
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project tests/studio-macos-ui/VistreaStudioUIRegression.xcodeproj \
+            -scheme VistreaStudioUIRegression \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/VistreaStudioUI-DerivedData" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
+            -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Tests.xcresult" \
+            -parallel-testing-enabled NO \
+            test-without-building \
+            | tee "$RUNNER_TEMP/studio-ui-tests.log"
+
+      - name: Export Studio UI regression evidence
+        if: always()
+        run: |
+          result="$RUNNER_TEMP/VistreaStudioUI-Tests.xcresult"
+          if [[ -d "$result" ]]; then
+            xcrun xcresulttool get test-results summary \
+              --path "$result" \
+              > "$RUNNER_TEMP/studio-ui-test-summary.json" || true
+            xcrun xcresulttool get test-results tests \
+              --path "$result" \
+              > "$RUNNER_TEMP/studio-ui-tests.json" || true
+            xcrun xcresulttool export attachments \
+              --path "$result" \
+              --output-path "$RUNNER_TEMP/studio-ui-attachments" || true
+            xcrun xcresulttool export diagnostics \
+              --path "$result" \
+              --output-path "$RUNNER_TEMP/studio-ui-diagnostics" || true
+          fi
+
+      - name: Upload Studio UI regression evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vistrea-Studio-UI-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/VistreaStudioUI-Build.xcresult
+            ${{ runner.temp }}/VistreaStudioUI-Tests.xcresult
+            ${{ runner.temp }}/studio-ui-attachments
+            ${{ runner.temp }}/studio-ui-diagnostics
+            ${{ runner.temp }}/studio-ui-environment.txt
+            ${{ runner.temp }}/studio-ui-test-summary.json
+            ${{ runner.temp }}/studio-ui-tests.json
+            ${{ runner.temp }}/studio-ui-build.log
+            ${{ runner.temp }}/studio-ui-tests.log
+          if-no-files-found: warn
+          retention-days: 14
 
   ios-sdk:
     name: iOS SDK

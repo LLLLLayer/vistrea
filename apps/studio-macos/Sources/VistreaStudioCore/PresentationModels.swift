@@ -679,8 +679,10 @@ public enum CanvasLayout {
         for transition in graph.transitions {
             outgoing[transition.sourceStateID, default: []].append(transition.targetStateID)
         }
-        while !queue.isEmpty {
-            let current = queue.removeFirst()
+        var queueIndex = 0
+        while queueIndex < queue.count {
+            let current = queue[queueIndex]
+            queueIndex += 1
             let nextColumn = (columnByState[current] ?? 0) + 1
             for target in (outgoing[current] ?? []).sorted() where columnByState[target] == nil {
                 columnByState[target] = nextColumn
@@ -805,6 +807,53 @@ public enum CanvasViewportProjection {
     }
 }
 
+/// Bounds the number of SwiftUI card views and transition paths instantiated
+/// while navigating a large graph. State centers are already projected into
+/// viewport coordinates, so this remains presentation-only and cannot alter
+/// persisted Screen Graph identity or layout evidence.
+public enum CanvasViewportCulling {
+    public static func visibleStateIDs(
+        projectedCenters: [String: CGPoint],
+        viewportSize: CGSize,
+        cardSize: CGSize,
+        overscan: CGFloat = 120
+    ) -> Set<String> {
+        guard viewportSize.width > 0, viewportSize.height > 0,
+              cardSize.width >= 0, cardSize.height >= 0,
+              overscan >= 0
+        else {
+            return []
+        }
+
+        let renderBounds = CGRect(origin: .zero, size: viewportSize)
+            .insetBy(dx: -(cardSize.width / 2 + overscan),
+                     dy: -(cardSize.height / 2 + overscan))
+        return Set(projectedCenters.compactMap { stateID, center in
+            renderBounds.contains(center) ? stateID : nil
+        })
+    }
+
+    public static func transitionMayIntersectViewport(
+        source: CGPoint,
+        target: CGPoint,
+        viewportSize: CGSize,
+        overscan: CGFloat = 120
+    ) -> Bool {
+        guard viewportSize.width > 0, viewportSize.height > 0, overscan >= 0 else {
+            return false
+        }
+        let renderBounds = CGRect(origin: .zero, size: viewportSize)
+            .insetBy(dx: -overscan, dy: -overscan)
+        let segmentBounds = CGRect(
+            x: min(source.x, target.x),
+            y: min(source.y, target.y),
+            width: abs(target.x - source.x),
+            height: abs(target.y - source.y)
+        ).insetBy(dx: -1, dy: -1)
+        return renderBounds.intersects(segmentBounds)
+    }
+}
+
 /// One concrete, cycle-free route from a materialized Screen Graph entry to
 /// a selected target state. Parallel Transitions intentionally produce
 /// distinct routes because they may represent different observed actions
@@ -843,18 +892,21 @@ public enum CanvasPathPlanner {
         to targetStateID: String,
         in graph: CanvasGraph,
         maximumPaths: Int = 24,
-        maximumDepth: Int = 64
+        maximumDepth: Int = 64,
+        maximumExpansions: Int = 100_000
     ) -> [CanvasRoute] {
-        guard maximumPaths > 0, maximumDepth >= 0 else { return [] }
+        guard maximumPaths > 0, maximumDepth >= 0, maximumExpansions >= 0 else { return [] }
 
         let knownStateIDs = Set(graph.states.map(\.id))
         guard knownStateIDs.contains(targetStateID) else { return [] }
 
         var outgoing: [String: [CanvasTransitionSummary]] = [:]
+        var incoming: [String: [String]] = [:]
         for transition in graph.transitions
         where knownStateIDs.contains(transition.sourceStateID)
             && knownStateIDs.contains(transition.targetStateID) {
             outgoing[transition.sourceStateID, default: []].append(transition)
+            incoming[transition.targetStateID, default: []].append(transition.sourceStateID)
         }
         for sourceStateID in Array(outgoing.keys) {
             outgoing[sourceStateID]?.sort {
@@ -865,6 +917,23 @@ public enum CanvasPathPlanner {
             }
         }
 
+        // Reverse breadth-first search gives every reachable state its exact
+        // shortest distance to the target. Primary routes use these distances
+        // and therefore never depend on the bounded alternative-route walk.
+        var distanceToTarget = [targetStateID: 0]
+        var reverseQueue = [targetStateID]
+        var reverseQueueIndex = 0
+        while reverseQueueIndex < reverseQueue.count {
+            let current = reverseQueue[reverseQueueIndex]
+            reverseQueueIndex += 1
+            let predecessorDistance = (distanceToTarget[current] ?? 0) + 1
+            for predecessor in incoming[current] ?? []
+            where distanceToTarget[predecessor] == nil {
+                distanceToTarget[predecessor] = predecessorDistance
+                reverseQueue.append(predecessor)
+            }
+        }
+
         var entryStateIDs: [String] = []
         var seenEntries = Set<String>()
         for entryStateID in graph.entryStateIDs.sorted()
@@ -872,7 +941,53 @@ public enum CanvasPathPlanner {
             entryStateIDs.append(entryStateID)
         }
 
-        var routes: [CanvasRoute] = []
+        let reachableEntryStateIDs = entryStateIDs.filter {
+            guard let distance = distanceToTarget[$0] else { return false }
+            return distance <= maximumDepth
+        }
+
+        func shortestRoute(from entryStateID: String) -> CanvasRoute? {
+            guard let initialDistance = distanceToTarget[entryStateID],
+                  initialDistance <= maximumDepth
+            else {
+                return nil
+            }
+
+            var currentStateID = entryStateID
+            var stateIDs = [entryStateID]
+            var transitionIDs: [String] = []
+            while currentStateID != targetStateID {
+                guard let currentDistance = distanceToTarget[currentStateID],
+                      currentDistance > 0,
+                      let transition = (outgoing[currentStateID] ?? []).first(where: {
+                          distanceToTarget[$0.targetStateID] == currentDistance - 1
+                      })
+                else {
+                    return nil
+                }
+                transitionIDs.append(transition.transitionID)
+                currentStateID = transition.targetStateID
+                stateIDs.append(currentStateID)
+            }
+
+            return CanvasRoute(
+                entryStateID: entryStateID,
+                targetStateID: targetStateID,
+                stateIDs: stateIDs,
+                transitionIDs: transitionIDs
+            )
+        }
+
+        // Reserve one deterministic shortest route per reachable entry before
+        // enumerating alternatives. If the caller's path cap is smaller than
+        // the number of reachable entries, sorted entry order determines which
+        // primary routes fit within that explicit cap.
+        let primaryRoutes = reachableEntryStateIDs
+            .prefix(maximumPaths)
+            .compactMap(shortestRoute)
+        var alternativeRoutes: [CanvasRoute] = []
+        var routeIDs = Set(primaryRoutes.map(\.id))
+        var expansions = 0
 
         func walk(
             entryStateID: String,
@@ -881,26 +996,36 @@ public enum CanvasPathPlanner {
             transitionIDs: [String],
             visitedStateIDs: Set<String>
         ) {
-            guard routes.count < maximumPaths else { return }
+            guard primaryRoutes.count + alternativeRoutes.count < maximumPaths else { return }
             if currentStateID == targetStateID {
-                routes.append(
-                    CanvasRoute(
-                        entryStateID: entryStateID,
-                        targetStateID: targetStateID,
-                        stateIDs: stateIDs,
-                        transitionIDs: transitionIDs
-                    )
+                let route = CanvasRoute(
+                    entryStateID: entryStateID,
+                    targetStateID: targetStateID,
+                    stateIDs: stateIDs,
+                    transitionIDs: transitionIDs
                 )
+                if routeIDs.insert(route.id).inserted {
+                    alternativeRoutes.append(route)
+                }
                 return
             }
-            guard transitionIDs.count < maximumDepth else { return }
+            guard transitionIDs.count < maximumDepth,
+                  expansions < maximumExpansions
+            else {
+                return
+            }
 
             for transition in outgoing[currentStateID] ?? [] {
-                guard routes.count < maximumPaths,
+                let nextDepth = transitionIDs.count + 1
+                guard primaryRoutes.count + alternativeRoutes.count < maximumPaths,
+                      expansions < maximumExpansions,
+                      let remainingDistance = distanceToTarget[transition.targetStateID],
+                      nextDepth + remainingDistance <= maximumDepth,
                       !visitedStateIDs.contains(transition.targetStateID)
                 else {
                     continue
                 }
+                expansions += 1
                 var nextVisited = visitedStateIDs
                 nextVisited.insert(transition.targetStateID)
                 walk(
@@ -913,7 +1038,12 @@ public enum CanvasPathPlanner {
             }
         }
 
-        for entryStateID in entryStateIDs where routes.count < maximumPaths {
+        let primaryEntryStateIDs = Set(primaryRoutes.map(\.entryStateID))
+        for entryStateID in reachableEntryStateIDs
+        where primaryEntryStateIDs.contains(entryStateID)
+            && primaryRoutes.count + alternativeRoutes.count < maximumPaths
+            && expansions < maximumExpansions
+        {
             walk(
                 entryStateID: entryStateID,
                 currentStateID: entryStateID,
@@ -922,7 +1052,11 @@ public enum CanvasPathPlanner {
                 visitedStateIDs: [entryStateID]
             )
         }
-        return routes
+
+        let alternativesByEntry = Dictionary(grouping: alternativeRoutes, by: \.entryStateID)
+        return primaryRoutes.flatMap { primaryRoute in
+            [primaryRoute] + (alternativesByEntry[primaryRoute.entryStateID] ?? [])
+        }
     }
 }
 

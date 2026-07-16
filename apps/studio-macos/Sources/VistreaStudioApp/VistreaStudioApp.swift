@@ -30,6 +30,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     private var model: SnapshotWorkspaceModel
     private var projectDocuments: StudioProjectDocuments
     private var managedHost: ManagedStudioHost?
+    private let launchConfiguration: StudioLaunchConfiguration
     private let workspaceHistory: StudioWorkspaceHistory
     private let workspaceManagementEnabled: Bool
     private var windowContent: WindowContent
@@ -38,15 +39,18 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
 
     override init() {
+        let launchConfiguration = StudioLaunchConfiguration()
         let workspaceHistory = StudioWorkspaceHistory()
         let composition = StudioComposition.makeInitialClient(
-            workspaceHistory: workspaceHistory
+            workspaceHistory: workspaceHistory,
+            launchConfiguration: launchConfiguration
         )
         model = SnapshotWorkspaceModel(client: composition.client)
         projectDocuments = StudioProjectDocuments(
             workspaceURL: composition.managedHost?.workspaceURL
         )
         managedHost = composition.managedHost
+        self.launchConfiguration = launchConfiguration
         self.workspaceHistory = workspaceHistory
         workspaceManagementEnabled = composition.workspaceManagementEnabled
         windowContent = composition.opensWelcome ? .welcome : .workspace
@@ -59,7 +63,9 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
-        updaterController = StudioUpdates.makeUpdaterController()
+        if !launchConfiguration.isUITesting {
+            updaterController = StudioUpdates.makeUpdaterController()
+        }
         configureApplicationMenu()
         showMainWindow()
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -151,7 +157,32 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
+        let viewMenuItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu(title: "View")
+        for section in WorkspaceSection.allCases {
+            let item = NSMenuItem(
+                title: "Show \(section.rawValue)",
+                action: #selector(selectWorkspaceSection(_:)),
+                keyEquivalent: String(section.shortcutKey.character)
+            )
+            item.keyEquivalentModifierMask = [.command]
+            item.target = self
+            item.representedObject = section.rawValue
+            viewMenu.addItem(item)
+        }
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+
         NSApplication.shared.mainMenu = mainMenu
+    }
+
+    @objc
+    private func selectWorkspaceSection(_ sender: NSMenuItem) {
+        guard let section = sender.representedObject as? String else { return }
+        NotificationCenter.default.post(
+            name: StudioNavigationRequest.notification,
+            object: section
+        )
     }
 
     private func makeOpenRecentMenu() -> NSMenu {
@@ -370,7 +401,9 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
             width: StudioLayoutMetrics.windowMinWidth,
             height: StudioLayoutMetrics.windowMinHeight
         )
-        window.setFrameAutosaveName("VistreaStudioSnapshotWorkspace")
+        if !launchConfiguration.isUITesting {
+            window.setFrameAutosaveName("VistreaStudioSnapshotWorkspace")
+        }
         window.setContentSize(
             NSSize(
                 width: StudioLayoutMetrics.windowInitialWidth,
@@ -570,8 +603,43 @@ private enum StudioComposition {
 
     @MainActor
     static func makeInitialClient(
-        workspaceHistory: StudioWorkspaceHistory
+        workspaceHistory: StudioWorkspaceHistory,
+        launchConfiguration: StudioLaunchConfiguration = StudioLaunchConfiguration()
     ) -> Result {
+        if launchConfiguration.isUITesting {
+            do {
+                let snapshot = try CanonicalFixtureLoader.loadDefaultSnapshot()
+                let client: any HostClient
+                switch launchConfiguration.content {
+                case .fixtureWorkspace, .fixtureWelcome:
+                    client = FixtureWorkspace.makeClient(snapshot: snapshot)
+                case .fixtureCanvasEmpty:
+                    client = FixtureHostClient(snapshots: [snapshot])
+                case .fixtureCanvasFailure:
+                    client = FixtureHostClient(
+                        snapshots: [snapshot],
+                        canvasGraphFailureMessage: "The deterministic UI-test Screen Graph is unavailable."
+                    )
+                case .production:
+                    preconditionFailure("Production is not a UI-testing launch mode.")
+                }
+                return Result(
+                    client: client,
+                    managedHost: nil,
+                    workspaceManagementEnabled: launchConfiguration.content == .fixtureWelcome,
+                    opensWelcome: launchConfiguration.content == .fixtureWelcome
+                )
+            } catch {
+                return Result(
+                    client: UnavailableHostClient(message: error.localizedDescription),
+                    managedHost: nil,
+                    workspaceManagementEnabled: launchConfiguration.content == .fixtureWelcome,
+                    opensWelcome: launchConfiguration.content == .fixtureWelcome,
+                    startupMessage: error.localizedDescription
+                )
+            }
+        }
+
         let environment = ProcessInfo.processInfo.environment
         let hostURL = environment["VISTREA_HOST_URL"]
         let hostToken = environment["VISTREA_HOST_TOKEN"]

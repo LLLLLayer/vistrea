@@ -16,10 +16,14 @@ struct InteractiveScreenStateCanvas: View {
     @State private var draggingNodeID: String?
     @State private var nodeDragOrigin = CGSize.zero
     @State private var selectedRouteIndex = 0
+    @State private var selectedRoutes: [CanvasRoute] = []
+    @State private var spatialIndex: CanvasGraphSpatialIndex?
     @State private var didFitInitialGraph = false
     @State private var hoveredNodeID: String?
+    @State private var currentMinimumZoom: CGFloat = 0.04
+    @FocusState private var focusedNodeID: String?
 
-    private static let minimumZoom: CGFloat = 0.45
+    private static let minimumInteractiveZoom: CGFloat = 0.04
     private static let maximumZoom: CGFloat = 1.8
     private static let overflowInset: CGFloat = 600
     private static let fitPadding: CGFloat = 52
@@ -33,15 +37,6 @@ struct InteractiveScreenStateCanvas: View {
             states: [],
             transitions: []
         )
-    }
-
-    private var entryStateIDs: Set<String> {
-        Set(graph.entryStateIDs)
-    }
-
-    private var selectedRoutes: [CanvasRoute] {
-        guard let targetStateID = model.selectedCanvasStateID else { return [] }
-        return CanvasPathPlanner.paths(to: targetStateID, in: graph)
     }
 
     private var selectedRoute: CanvasRoute? {
@@ -58,6 +53,7 @@ struct InteractiveScreenStateCanvas: View {
     }
 
     var body: some View {
+        let index = resolvedSpatialIndex
         VStack(spacing: 0) {
             GeometryReader { proxy in
                 ZStack(alignment: .topLeading) {
@@ -65,11 +61,11 @@ struct InteractiveScreenStateCanvas: View {
                         .contentShape(Rectangle())
                         .gesture(panGesture)
 
-                    graphContent(in: proxy.size)
+                    graphContent(in: proxy.size, spatialIndex: index)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                 .overlay(alignment: .topTrailing) {
-                    viewportControls(in: proxy.size)
+                    viewportControls(in: proxy.size, spatialIndex: index)
                 }
                 .clipped()
                 .background(Color(nsColor: .textBackgroundColor))
@@ -88,43 +84,95 @@ struct InteractiveScreenStateCanvas: View {
                     )
                 }
                 .onAppear {
-                    fitInitialGraphIfReady(in: proxy.size)
+                    cacheSpatialIndexIfNeeded(index)
+                    fitInitialGraphIfReady(in: proxy.size, spatialIndex: index)
+                    refreshSelectedRoutes()
                 }
                 .onChange(of: proxy.size) { _, size in
-                    fitInitialGraphIfReady(in: size)
+                    fitInitialGraphIfReady(in: size, spatialIndex: index)
                 }
-                .onChange(of: model.selectedCanvasStateID) { _, _ in
-                    selectedRouteIndex = 0
+                .onChange(of: spatialIndexKey) { _, _ in
+                    spatialIndex = makeSpatialIndex()
+                }
+                .onChange(of: routeCacheKey) { _, _ in
+                    refreshSelectedRoutes()
                 }
             }
             .frame(minHeight: 260)
 
             Divider()
-            pathSelectionBar
+            pathSelectionBar(spatialIndex: index)
+        }
+        .accessibilityIdentifier(StudioAccessibilityID.canvasViewport)
+        .onKeyPress(.escape) {
+            guard model.selectedCanvasStateID != nil else { return .ignored }
+            Task { await model.selectCanvasState(id: nil) }
+            return .handled
         }
     }
 
-    private func graphContent(in viewportSize: CGSize) -> some View {
-        let centers = projectedStateCenters
+    private func graphContent(
+        in viewportSize: CGSize,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) -> some View {
         let metrics = CanvasCardRenderMetrics(zoom: zoom)
+        var pinnedStateIDs = Set<String>()
+        if let selectedStateID = model.selectedCanvasStateID {
+            pinnedStateIDs.insert(selectedStateID)
+        }
+        if let focusedNodeID {
+            pinnedStateIDs.insert(focusedNodeID)
+        }
+        if let draggingNodeID {
+            pinnedStateIDs.insert(draggingNodeID)
+        }
+        let visibleStates = spatialIndex.visibleStates(
+            viewportSize: viewportSize,
+            zoom: zoom,
+            viewportOffset: viewportOffset,
+            cardSize: metrics.size,
+            displayScale: displayScale,
+            nodeOffsets: nodeOffsets,
+            pinnedStateIDs: pinnedStateIDs
+        )
+        let transitionCandidates = spatialIndex.transitionCandidates(
+            viewportSize: viewportSize,
+            zoom: zoom,
+            viewportOffset: viewportOffset,
+            movedStateIDs: nodeOffsets.keys
+        )
+        var projectedStateIDs = Set(visibleStates.map(\.id))
+        for transition in transitionCandidates {
+            projectedStateIDs.insert(transition.sourceStateID)
+            projectedStateIDs.insert(transition.targetStateID)
+        }
+        let centers = spatialIndex.projectedCenters(
+            for: projectedStateIDs,
+            zoom: zoom,
+            viewportOffset: viewportOffset,
+            displayScale: displayScale,
+            nodeOffsets: nodeOffsets
+        )
         return ZStack(alignment: .topLeading) {
             Canvas { context, _ in
                 drawTransitions(
                     context: &context,
+                    transitions: transitionCandidates,
                     centers: centers,
-                    cardSize: metrics.size
+                    cardSize: metrics.size,
+                    viewportSize: viewportSize
                 )
             }
             .allowsHitTesting(false)
 
-            ForEach(model.canvasStates) { positioned in
+            ForEach(visibleStates) { positioned in
                 let stateID = positioned.id
                 let isSelected = stateID == model.selectedCanvasStateID
                 let isOnRoute = routeStateIDs.contains(stateID)
                 let hasSelectedRoute = selectedRoute != nil
                 CanvasStateCard(
                     state: positioned.state,
-                    isEntry: entryStateIDs.contains(stateID),
+                    isEntry: spatialIndex.isEntryState(id: stateID),
                     isSelected: isSelected,
                     isOnRoute: isOnRoute,
                     isDimmed: hasSelectedRoute && !isOnRoute,
@@ -138,77 +186,69 @@ struct InteractiveScreenStateCanvas: View {
                 .onHover { isHovering in
                     hoveredNodeID = isHovering ? stateID : nil
                 }
-                .highPriorityGesture(
-                    TapGesture().modifiers(.command).onEnded {
+                .gesture(nodeInteractionGesture(for: stateID))
+                .focusable()
+                .focused($focusedNodeID, equals: stateID)
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.command) {
                         model.toggleMergeSelection(stateID: stateID)
+                    } else {
+                        inspectState(stateID)
                     }
-                )
-                .simultaneousGesture(nodeDragGesture(for: stateID))
-                .onTapGesture {
-                    selectedRouteIndex = 0
-                    Task { await model.selectCanvasState(id: stateID) }
+                    return .handled
+                }
+                .onKeyPress(.space) {
+                    inspectState(stateID)
+                    return .handled
+                }
+                .onKeyPress(
+                    keys: [.upArrow, .downArrow, .leftArrow, .rightArrow],
+                    phases: .down
+                ) { press in
+                    guard let direction = keyboardDirection(for: press.key),
+                          let destination = CanvasKeyboardNavigation.destination(
+                              from: stateID,
+                              direction: direction,
+                              states: model.canvasStates
+                          )
+                    else {
+                        return .ignored
+                    }
+                    revealState(
+                        destination,
+                        in: viewportSize,
+                        cardSize: metrics.size,
+                        spatialIndex: spatialIndex
+                    )
+                    DispatchQueue.main.async {
+                        focusedNodeID = destination
+                    }
+                    return .handled
                 }
                 .accessibilityLabel(
                     "Screen state \(CanvasStatePresentation.displayTitle(for: positioned.state)), "
                         + positioned.state.status
                 )
                 .accessibilityHint("Select to inspect and show entry paths. Command-select to merge.")
+                .accessibilityValue(
+                    accessibilityStateDescription(
+                        isEntry: spatialIndex.isEntryState(id: stateID),
+                        isSelected: isSelected,
+                        isOnRoute: isOnRoute,
+                        isMergeSelected: model.mergeSelectionStateIDs.contains(stateID)
+                    )
+                )
+                .accessibilityIdentifier(StudioAccessibilityID.canvasState(stateID))
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction {
-                    selectedRouteIndex = 0
-                    Task { await model.selectCanvasState(id: stateID) }
+                    inspectState(stateID)
+                }
+                .accessibilityAction(named: Text("Toggle merge selection")) {
+                    model.toggleMergeSelection(stateID: stateID)
                 }
             }
         }
         .frame(width: viewportSize.width, height: viewportSize.height, alignment: .topLeading)
-    }
-
-    private var stateCenters: [String: CGPoint] {
-        Dictionary(uniqueKeysWithValues: model.canvasStates.map { positioned in
-            let offset = nodeOffsets[positioned.id] ?? .zero
-            return (
-                positioned.id,
-                CGPoint(
-                    x: Self.overflowInset
-                        + CGFloat(positioned.column) * StudioLayoutMetrics.canvasColumnWidth
-                        + StudioLayoutMetrics.canvasCardWidth / 2
-                        + offset.width,
-                    y: Self.overflowInset
-                        + CGFloat(positioned.row) * StudioLayoutMetrics.canvasRowHeight
-                        + StudioLayoutMetrics.canvasCardHeight / 2
-                        + offset.height
-                )
-            )
-        })
-    }
-
-    private var projectedStateCenters: [String: CGPoint] {
-        Dictionary(uniqueKeysWithValues: stateCenters.map { stateID, logicalPoint in
-            (
-                stateID,
-                CanvasViewportProjection.point(
-                    logicalPoint,
-                    zoom: zoom,
-                    offset: viewportOffset,
-                    displayScale: displayScale
-                )
-            )
-        })
-    }
-
-    private var graphDrawingBounds: CGRect {
-        let halfWidth = StudioLayoutMetrics.canvasCardWidth / 2
-        let halfHeight = StudioLayoutMetrics.canvasCardHeight / 2
-        return stateCenters.values.reduce(CGRect.null) { bounds, center in
-            bounds.union(
-                CGRect(
-                    x: center.x - halfWidth,
-                    y: center.y - halfHeight,
-                    width: StudioLayoutMetrics.canvasCardWidth,
-                    height: StudioLayoutMetrics.canvasCardHeight
-                )
-            )
-        }
     }
 
     private var panGesture: some Gesture {
@@ -242,8 +282,22 @@ struct InteractiveScreenStateCanvas: View {
             }
     }
 
+    private func nodeInteractionGesture(for stateID: String) -> some Gesture {
+        let commandTap = TapGesture()
+            .modifiers(.command)
+            .onEnded { model.toggleMergeSelection(stateID: stateID) }
+        let inspectTap = TapGesture()
+            .modifiers([])
+            .onEnded { inspectState(stateID) }
+        return nodeDragGesture(for: stateID)
+            .exclusively(before: commandTap.simultaneously(with: inspectTap))
+    }
+
     @ViewBuilder
-    private func viewportControls(in viewportSize: CGSize) -> some View {
+    private func viewportControls(
+        in viewportSize: CGSize,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) -> some View {
         HStack(spacing: 5) {
             Button {
                 applyZoom(
@@ -254,8 +308,9 @@ struct InteractiveScreenStateCanvas: View {
                 Image(systemName: "minus.magnifyingglass")
             }
             .help("Zoom out")
+            .accessibilityIdentifier(StudioAccessibilityID.canvasZoomOut)
 
-            Text("\(Int((zoom * 100).rounded()))%")
+            Text(zoomPercentageLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 42)
@@ -269,16 +324,18 @@ struct InteractiveScreenStateCanvas: View {
                 Image(systemName: "plus.magnifyingglass")
             }
             .help("Zoom in")
+            .accessibilityIdentifier(StudioAccessibilityID.canvasZoomIn)
 
             Divider().frame(height: 16)
 
             Button {
                 nodeOffsets.removeAll()
-                fitGraph(in: viewportSize)
+                fitGraph(in: viewportSize, spatialIndex: spatialIndex)
             } label: {
                 Label("Fit", systemImage: "arrow.up.left.and.arrow.down.right")
             }
             .help("Reset node positions and fit the graph")
+            .accessibilityIdentifier(StudioAccessibilityID.canvasFit)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)
@@ -290,9 +347,9 @@ struct InteractiveScreenStateCanvas: View {
     }
 
     @ViewBuilder
-    private var pathSelectionBar: some View {
+    private func pathSelectionBar(spatialIndex: CanvasGraphSpatialIndex) -> some View {
         if let targetStateID = model.selectedCanvasStateID,
-           let target = graph.states.first(where: { $0.id == targetStateID }) {
+           let target = spatialIndex.state(id: targetStateID)?.state {
             HStack(spacing: 10) {
                 Label("Path to \(CanvasStatePresentation.displayTitle(for: target))", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                     .font(.caption.weight(.semibold))
@@ -303,9 +360,9 @@ struct InteractiveScreenStateCanvas: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    routeMenu
+                    routeMenu(spatialIndex: spatialIndex)
                     Divider().frame(height: 16)
-                    routeBreadcrumb
+                    routeBreadcrumb(spatialIndex: spatialIndex)
                 }
 
                 Spacer(minLength: 0)
@@ -316,10 +373,12 @@ struct InteractiveScreenStateCanvas: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Clear the selected path")
+                .accessibilityIdentifier(StudioAccessibilityID.canvasClearSelection)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color(nsColor: .controlBackgroundColor))
+            .accessibilityIdentifier(StudioAccessibilityID.canvasPathBar)
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow.motionlines")
@@ -331,19 +390,23 @@ struct InteractiveScreenStateCanvas: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .controlBackgroundColor))
+            .accessibilityIdentifier(StudioAccessibilityID.canvasPathBar)
         }
     }
 
-    private var routeMenu: some View {
+    private func routeMenu(spatialIndex: CanvasGraphSpatialIndex) -> some View {
         Menu {
             ForEach(Array(selectedRoutes.enumerated()), id: \.element.id) { index, route in
                 Button {
                     selectedRouteIndex = index
                 } label: {
                     if index == min(selectedRouteIndex, selectedRoutes.count - 1) {
-                        Label(routeDescription(route, index: index), systemImage: "checkmark")
+                        Label(
+                            routeDescription(route, index: index, spatialIndex: spatialIndex),
+                            systemImage: "checkmark"
+                        )
                     } else {
-                        Text(routeDescription(route, index: index))
+                        Text(routeDescription(route, index: index, spatialIndex: spatialIndex))
                     }
                 }
             }
@@ -353,9 +416,10 @@ struct InteractiveScreenStateCanvas: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityIdentifier(StudioAccessibilityID.canvasRoutePicker)
     }
 
-    private var routeBreadcrumb: some View {
+    private func routeBreadcrumb(spatialIndex: CanvasGraphSpatialIndex) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 5) {
                 if let route = selectedRoute {
@@ -365,7 +429,7 @@ struct InteractiveScreenStateCanvas: View {
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.tertiary)
                         }
-                        Text(displayTitle(for: stateID))
+                        Text(displayTitle(for: stateID, spatialIndex: spatialIndex))
                             .font(.caption)
                             .lineLimit(1)
                             .padding(.horizontal, 7)
@@ -384,30 +448,50 @@ struct InteractiveScreenStateCanvas: View {
         .frame(maxWidth: 520, alignment: .leading)
     }
 
-    private func routeDescription(_ route: CanvasRoute, index: Int) -> String {
+    private func routeDescription(
+        _ route: CanvasRoute,
+        index: Int,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) -> String {
         let stepCount = route.transitionIDs.count
-        return "Route \(index + 1) · \(stepCount) step\(stepCount == 1 ? "" : "s") · \(displayTitle(for: route.entryStateID))"
+        return "Route \(index + 1) · \(stepCount) step\(stepCount == 1 ? "" : "s") · \(displayTitle(for: route.entryStateID, spatialIndex: spatialIndex))"
     }
 
-    private func displayTitle(for stateID: String) -> String {
-        guard let state = graph.states.first(where: { $0.id == stateID }) else { return stateID }
+    private func displayTitle(
+        for stateID: String,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) -> String {
+        guard let state = spatialIndex.state(id: stateID)?.state else { return stateID }
         return CanvasStatePresentation.displayTitle(for: state)
     }
 
-    private func fitGraph(in viewportSize: CGSize) {
-        let fit = CanvasViewportProjection.fit(
-            bounds: graphDrawingBounds,
+    private func fitGraph(
+        in viewportSize: CGSize,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) {
+        let minimumZoom = CanvasFitZoomPolicy.minimumZoom(
+            bounds: spatialIndex.baseDrawingBounds,
             viewportSize: viewportSize,
             padding: Self.fitPadding,
-            minimumZoom: Self.minimumZoom,
+            interactiveMinimum: Self.minimumInteractiveZoom
+        )
+        let fit = CanvasViewportProjection.fit(
+            bounds: spatialIndex.baseDrawingBounds,
+            viewportSize: viewportSize,
+            padding: Self.fitPadding,
+            minimumZoom: minimumZoom,
             maximumZoom: 1,
             displayScale: displayScale
         )
+        currentMinimumZoom = min(Self.minimumInteractiveZoom, fit.zoom)
         zoom = fit.zoom
         viewportOffset = fit.offset
     }
 
-    private func fitInitialGraphIfReady(in viewportSize: CGSize) {
+    private func fitInitialGraphIfReady(
+        in viewportSize: CGSize,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) {
         guard !didFitInitialGraph,
               viewportSize.width >= 320,
               viewportSize.height >= 240
@@ -415,11 +499,87 @@ struct InteractiveScreenStateCanvas: View {
             return
         }
         didFitInitialGraph = true
-        fitGraph(in: viewportSize)
+        fitGraph(in: viewportSize, spatialIndex: spatialIndex)
     }
 
     private func clampedZoom(_ value: CGFloat) -> CGFloat {
-        min(max(value, Self.minimumZoom), Self.maximumZoom)
+        min(max(value, currentMinimumZoom), Self.maximumZoom)
+    }
+
+    private var zoomPercentageLabel: String {
+        let percentage = zoom * 100
+        if percentage > 0, percentage < 1 {
+            return "<1%"
+        }
+        return "\(Int(percentage.rounded()))%"
+    }
+
+    private func inspectState(_ stateID: String) {
+        selectedRouteIndex = 0
+        Task { await model.selectCanvasState(id: stateID) }
+    }
+
+    private var spatialIndexKey: CanvasGraphSpatialIndexKey {
+        CanvasGraphSpatialIndexKey(graph: graph)
+    }
+
+    private var resolvedSpatialIndex: CanvasGraphSpatialIndex {
+        if let spatialIndex, spatialIndex.key == spatialIndexKey {
+            return spatialIndex
+        }
+        return makeSpatialIndex()
+    }
+
+    private func makeSpatialIndex() -> CanvasGraphSpatialIndex {
+        CanvasGraphSpatialIndex(
+            key: spatialIndexKey,
+            states: model.canvasStates,
+            entryStateIDs: graph.entryStateIDs,
+            transitions: graph.transitions,
+            originInset: Self.overflowInset
+        )
+    }
+
+    private func cacheSpatialIndexIfNeeded(_ index: CanvasGraphSpatialIndex) {
+        guard spatialIndex?.key != index.key else { return }
+        spatialIndex = index
+    }
+
+    private var routeCacheKey: String {
+        "\(graph.screenGraphID)|\(graph.revision)|\(model.selectedCanvasStateID ?? "none")"
+    }
+
+    private func refreshSelectedRoutes() {
+        selectedRouteIndex = 0
+        guard let targetStateID = model.selectedCanvasStateID else {
+            selectedRoutes = []
+            return
+        }
+        selectedRoutes = CanvasPathPlanner.paths(to: targetStateID, in: graph)
+    }
+
+    private func keyboardDirection(for key: KeyEquivalent) -> CanvasKeyboardDirection? {
+        switch key {
+        case .upArrow: .up
+        case .downArrow: .down
+        case .leftArrow: .left
+        case .rightArrow: .right
+        default: nil
+        }
+    }
+
+    private func accessibilityStateDescription(
+        isEntry: Bool,
+        isSelected: Bool,
+        isOnRoute: Bool,
+        isMergeSelected: Bool
+    ) -> String {
+        var values: [String] = []
+        if isEntry { values.append("entry") }
+        if isSelected { values.append("selected") }
+        if isOnRoute { values.append("on selected route") }
+        if isMergeSelected { values.append("selected for merge") }
+        return values.isEmpty ? "not selected" : values.joined(separator: ", ")
     }
 
     private func applyZoom(_ targetZoom: CGFloat, around anchor: CGPoint) {
@@ -436,13 +596,20 @@ struct InteractiveScreenStateCanvas: View {
 
     private func drawTransitions(
         context: inout GraphicsContext,
+        transitions: [CanvasTransitionSummary],
         centers: [String: CGPoint],
-        cardSize: CGSize
+        cardSize: CGSize,
+        viewportSize: CGSize
     ) {
-        for transition in graph.transitions {
+        for transition in transitions {
             guard let sourceCenter = centers[transition.sourceStateID],
                   let targetCenter = centers[transition.targetStateID],
-                  transition.sourceStateID != transition.targetStateID
+                  transition.sourceStateID != transition.targetStateID,
+                  CanvasViewportCulling.transitionMayIntersectViewport(
+                      source: sourceCenter,
+                      target: targetCenter,
+                      viewportSize: viewportSize
+                  )
             else {
                 continue
             }
@@ -461,6 +628,43 @@ struct InteractiveScreenStateCanvas: View {
                 lineWidth: lineWidth
             )
         }
+    }
+
+    private func revealState(
+        _ stateID: String,
+        in viewportSize: CGSize,
+        cardSize: CGSize,
+        spatialIndex: CanvasGraphSpatialIndex
+    ) {
+        guard let logicalCenter = spatialIndex.logicalCenter(
+            for: stateID,
+            nodeOffsets: nodeOffsets
+        ) else {
+            return
+        }
+        let center = CanvasViewportProjection.point(
+            logicalCenter,
+            zoom: zoom,
+            offset: viewportOffset,
+            displayScale: displayScale
+        )
+        let horizontalMargin = cardSize.width / 2 + 24
+        let verticalMargin = cardSize.height / 2 + 24
+        var correction = CGSize.zero
+        if center.x < horizontalMargin {
+            correction.width = horizontalMargin - center.x
+        } else if center.x > viewportSize.width - horizontalMargin {
+            correction.width = viewportSize.width - horizontalMargin - center.x
+        }
+        if center.y < verticalMargin {
+            correction.height = verticalMargin - center.y
+        } else if center.y > viewportSize.height - verticalMargin {
+            correction.height = viewportSize.height - verticalMargin - center.y
+        }
+        viewportOffset = CGSize(
+            width: viewportOffset.width + correction.width,
+            height: viewportOffset.height + correction.height
+        )
     }
 
     private func drawTransition(
@@ -668,6 +872,7 @@ private enum CanvasCardDetailLevel {
     case full
     case compact
     case overview
+    case map
 }
 
 private struct CanvasCardRenderMetrics {
@@ -675,15 +880,16 @@ private struct CanvasCardRenderMetrics {
 
     var size: CGSize {
         CGSize(
-            width: StudioLayoutMetrics.canvasCardWidth * zoom,
-            height: StudioLayoutMetrics.canvasCardHeight * zoom
+            width: max(detailLevel == .map ? 8 : 0, StudioLayoutMetrics.canvasCardWidth * zoom),
+            height: max(detailLevel == .map ? 6 : 0, StudioLayoutMetrics.canvasCardHeight * zoom)
         )
     }
 
     var detailLevel: CanvasCardDetailLevel {
         if zoom >= 0.86 { return .full }
         if zoom >= 0.6 { return .compact }
-        return .overview
+        if zoom >= 0.24 { return .overview }
+        return .map
     }
 
     var padding: CGFloat { max(5, 12 * zoom) }
@@ -726,17 +932,21 @@ private struct CanvasStateCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: metrics.contentSpacing) {
-            cardHeader
+        ZStack(alignment: .topLeading) {
+            if metrics.detailLevel != .map {
+                VStack(alignment: .leading, spacing: metrics.contentSpacing) {
+                    cardHeader
 
-            if metrics.detailLevel != .overview {
-                summaryText
+                    if metrics.detailLevel != .overview {
+                        summaryText
+                    }
+
+                    Spacer(minLength: 0)
+                    cardFooter
+                }
+                .padding(metrics.padding)
             }
-
-            Spacer(minLength: 0)
-            cardFooter
         }
-        .padding(metrics.padding)
         .frame(
             width: metrics.size.width,
             height: metrics.size.height,

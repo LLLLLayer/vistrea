@@ -17,6 +17,17 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var shortcutKey: KeyEquivalent {
+        switch self {
+        case .canvas: "1"
+        case .evidence: "2"
+        case .documents: "3"
+        case .wiki: "4"
+        case .quality: "5"
+        case .hub: "6"
+        }
+    }
+
     var systemImage: String {
         switch self {
         case .canvas: "point.3.connected.trianglepath.dotted"
@@ -40,12 +51,14 @@ struct SnapshotWorkspaceView: View {
         model: SnapshotWorkspaceModel,
         projectDocuments: StudioProjectDocuments,
         workspaceName: String? = nil,
-        onManageWorkspaces: (() -> Void)? = nil
+        onManageWorkspaces: (() -> Void)? = nil,
+        initialSection: WorkspaceSection = .canvas
     ) {
         self.model = model
         self.projectDocuments = projectDocuments
         self.workspaceName = workspaceName
         self.onManageWorkspaces = onManageWorkspaces
+        _section = State(initialValue: initialSection)
     }
 
     var body: some View {
@@ -67,6 +80,23 @@ struct SnapshotWorkspaceView: View {
             EventTimelineStrip(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityIdentifier(StudioAccessibilityID.workspace)
+        .onKeyPress(phases: .down) { press in
+            guard let destination = StudioKeyboardNavigation.section(
+                for: press.key,
+                modifiers: press.modifiers
+            ) else {
+                return .ignored
+            }
+            section = destination
+            return .handled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: StudioNavigationRequest.notification)) {
+            notification in
+            if let destination = StudioNavigationRequest.section(from: notification) {
+                section = destination
+            }
+        }
         .task {
             guard model.contentPhase == .idle else { return }
             await model.refresh()
@@ -79,6 +109,7 @@ struct SnapshotWorkspaceView: View {
         case .idle, .loading:
             ProgressView("Loading the Workspace…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier(StudioAccessibilityID.workspaceLoading)
         case .empty:
             HSplitView {
                 NavigationColumn(section: $section)
@@ -99,10 +130,12 @@ struct SnapshotWorkspaceView: View {
                     }
                 }
             }
+            .accessibilityIdentifier(StudioAccessibilityID.workspaceEmpty)
         case let .failure(message):
             FailureView(message: message, isBusy: model.isRefreshing || model.isCapturing) {
                 Task { await model.refresh() }
             }
+            .accessibilityIdentifier(StudioAccessibilityID.workspaceFailure)
         case .content:
             HSplitView {
                 NavigationColumn(section: $section)
@@ -547,8 +580,13 @@ private struct NavigationColumn: View {
             Label(section.rawValue, systemImage: section.systemImage)
                 .tag(section)
                 .accessibilityLabel("\(section.rawValue) section")
+                .accessibilityHint(
+                    Text("Press Command-\(String(section.shortcutKey.character)) to open")
+                )
+                .accessibilityIdentifier(StudioAccessibilityID.section(section))
         }
         .listStyle(.sidebar)
+        .accessibilityIdentifier(StudioAccessibilityID.sectionNavigation)
     }
 
     private var selectionBinding: Binding<WorkspaceSection?> {
@@ -585,6 +623,7 @@ private struct CanvasSection: View {
                     .frame(minWidth: StudioLayoutMetrics.inspectorMinWidth)
             }
         }
+        .accessibilityIdentifier(StudioAccessibilityID.canvasSection)
     }
 }
 
@@ -628,6 +667,7 @@ private struct StateInspectorView: View {
                 }
             }
         }
+        .accessibilityIdentifier(StudioAccessibilityID.inspector)
     }
 
     private func header(arrangement: StudioLayoutMetrics.InspectorArrangement) -> some View {
@@ -647,6 +687,7 @@ private struct StateInspectorView: View {
                     .toggleStyle(.button)
                     .help("The window is too narrow to show the state context beside the evidence panes. Toggle between them.")
                     .accessibilityLabel("Show the Screen State context column")
+                    .accessibilityIdentifier(StudioAccessibilityID.inspectorContextToggle)
             }
         }
         .padding(.horizontal)
@@ -672,23 +713,48 @@ private struct StateInspectorView: View {
 /// the design workbench, and the 2D view tree.
 private struct InspectorPanes: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var surface: InspectorSurface = .screenshot
 
     var body: some View {
         VSplitView {
-            TabView {
-                ScreenshotPane(model: model)
-                    .tabItem { Label("Screenshot", systemImage: "photo") }
-                LayerInspector3DPane(model: model)
-                    .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
-                if StudioFeaturePolicy.designReviewVisibleByDefault {
+            VStack(spacing: 0) {
+                Picker("Inspector surface", selection: $surface) {
+                    Label("Screenshot", systemImage: "photo")
+                        .tag(InspectorSurface.screenshot)
+                    Label("3D Layers", systemImage: "square.3.layers.3d")
+                        .tag(InspectorSurface.layers)
+                    if StudioFeaturePolicy.designReviewVisibleByDefault {
+                        Label("Design Review", systemImage: "square.on.square.dashed")
+                            .tag(InspectorSurface.designReview)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 360)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .accessibilityIdentifier(StudioAccessibilityID.inspectorMode)
+                Divider()
+
+                switch surface {
+                case .screenshot:
+                    ScreenshotPane(model: model)
+                case .layers:
+                    LayerInspector3DPane(model: model)
+                case .designReview:
                     DesignReviewPane(model: model)
-                        .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
                 }
             }
             .frame(minHeight: 280)
             ViewTreePane(model: model)
                 .frame(minHeight: 180)
         }
+    }
+
+    private enum InspectorSurface: String, Hashable {
+        case screenshot
+        case layers
+        case designReview
     }
 }
 
@@ -767,18 +833,39 @@ private struct CanvasPane: View {
         case .idle, .loading:
             ProgressView("Loading the Screen Graph…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier(StudioAccessibilityID.canvasLoading)
         case .empty:
-            Text("No Screen States have been observed yet. Record state observations to build the Canvas.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ContentUnavailableView(
+                "No Screen States",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text(
+                    "Capture or explore the selected build to record its first Screen State."
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier(StudioAccessibilityID.canvasEmpty)
         case let .failure(message):
-            Text(message)
-                .foregroundStyle(.red)
-                .multilineTextAlignment(.center)
-                .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 14) {
+                ContentUnavailableView(
+                    "Screen Graph Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(message)
+                )
+                Button("Retry", systemImage: "arrow.clockwise") {
+                    guard let scope = model.selectedScope else { return }
+                    Task {
+                        await model.loadCanvas(
+                            projectID: scope.projectID,
+                            applicationID: scope.applicationID,
+                            applicationVersion: scope.applicationVersion,
+                            buildID: scope.buildID
+                        )
+                    }
+                }
+                .accessibilityIdentifier(StudioAccessibilityID.canvasRetry)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier(StudioAccessibilityID.canvasFailure)
         case .content:
             InteractiveScreenStateCanvas(model: model)
         }
@@ -1074,6 +1161,7 @@ private struct StateContextColumn: View {
                 isEditingAnnotations = false
             }
         }
+        .accessibilityIdentifier(StudioAccessibilityID.inspectorContext)
     }
 
     @ViewBuilder
@@ -3141,6 +3229,7 @@ private struct ContextBar: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+        .accessibilityIdentifier(StudioAccessibilityID.contextBar)
     }
 
     @ViewBuilder
@@ -3311,6 +3400,7 @@ private struct ScreenshotPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .accessibilityIdentifier(StudioAccessibilityID.inspectorScreenshot)
     }
 
     @ViewBuilder
@@ -3381,6 +3471,7 @@ private struct ViewTreePane: View {
             Divider()
             treeContent
         }
+        .accessibilityIdentifier(StudioAccessibilityID.inspectorTree)
     }
 
     @ViewBuilder
@@ -3529,6 +3620,7 @@ private struct TuningPreviewControls: View {
                     Text(value.label).tag(value)
                 }
             }
+            .accessibilityIdentifier(StudioAccessibilityID.tuningPropertyPicker)
             propertyEditor
             if model.isApplyingTuning {
                 ProgressView("Applying preview…")
@@ -3551,6 +3643,7 @@ private struct TuningPreviewControls: View {
         .onChange(of: node.id) {
             resetValues()
         }
+        .accessibilityIdentifier(StudioAccessibilityID.tuningControls)
     }
 
     @ViewBuilder
@@ -3562,7 +3655,10 @@ private struct TuningPreviewControls: View {
                 value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
             )
             Slider(value: $alphaValue, in: 0...1)
-            previewButton("Preview alpha") { await model.previewAlpha(alphaValue) }
+                .accessibilityIdentifier(StudioAccessibilityID.tuningAlphaSlider)
+            previewButton("Preview alpha", property: "alpha") {
+                await model.previewAlpha(alphaValue)
+            }
         case .foregroundColor:
             colorEditor(
                 label: "Foreground",
@@ -3585,7 +3681,7 @@ private struct TuningPreviewControls: View {
                 Slider(value: $fontSize, in: 6...96, step: 0.5)
                 LabeledContent("Weight", value: Int(fontWeight).description)
                 Slider(value: $fontWeight, in: 100...900, step: 100)
-                previewButton("Preview font") {
+                previewButton("Preview font", property: "font") {
                     await model.previewTuning(
                         property: "font",
                         originalValue: .font(
@@ -3613,7 +3709,7 @@ private struct TuningPreviewControls: View {
                 TextField("Source", value: $spacingOriginal, format: .number)
                 TextField("Preview", value: $spacingValue, format: .number)
             }
-            previewButton("Preview spacing") {
+            previewButton("Preview spacing", property: "spacing") {
                 await model.previewTuning(
                     property: "spacing",
                     originalValue: .number(value: spacingOriginal, unit: "logical_point"),
@@ -3627,7 +3723,7 @@ private struct TuningPreviewControls: View {
                     value: source.formatted(.number.precision(.fractionLength(0...2)))
                 )
                 Slider(value: $cornerRadiusValue, in: 0...64, step: 0.5)
-                previewButton("Preview corner radius") {
+                previewButton("Preview corner radius", property: "corner-radius") {
                     await model.previewTuning(
                         property: "corner_radius",
                         originalValue: .number(value: source, unit: "logical_point"),
@@ -3650,7 +3746,7 @@ private struct TuningPreviewControls: View {
         if let source {
             LabeledContent("Source \(label.lowercased())", value: source.summaryText)
             ColorPicker(label, selection: selection, supportsOpacity: true)
-            previewButton("Preview \(label.lowercased())") {
+            previewButton("Preview \(label.lowercased())", property: property.replacingOccurrences(of: "_", with: "-")) {
                 guard let preview = rgba(selection.wrappedValue) else { return }
                 await model.previewTuning(
                     property: property,
@@ -3675,12 +3771,14 @@ private struct TuningPreviewControls: View {
 
     private func previewButton(
         _ title: String,
+        property: String,
         operation: @escaping () async -> Void
     ) -> some View {
         HStack {
             Spacer()
             Button(title) { Task { await operation() } }
                 .disabled(model.isApplyingTuning)
+                .accessibilityIdentifier(StudioAccessibilityID.tuningPreview(property))
         }
     }
 
@@ -3876,40 +3974,44 @@ private struct ActiveTuningList: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
-        switch model.tuningPhase {
-        case .idle, .loading:
-            ProgressView("Loading active previews…")
-                .controlSize(.small)
-        case .empty:
-            Text("No active tuning previews.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case let .failure(message):
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
-        case .content:
-            ForEach(model.activeTuning) { application in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(application.tuningApplicationID)
-                            .font(.caption.monospaced())
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("\(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        Group {
+            switch model.tuningPhase {
+            case .idle, .loading:
+                ProgressView("Loading active previews…")
+                    .controlSize(.small)
+            case .empty:
+                Text("No active tuning previews.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .content:
+                ForEach(model.activeTuning) { application in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(application.tuningApplicationID)
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("\(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Revert") {
+                            Task { await model.revertTuning(id: application.id) }
+                        }
+                        .disabled(model.revertingTuningIDs.contains(application.id))
+                        .accessibilityIdentifier(StudioAccessibilityID.tuningRevert(application.id))
                     }
-                    Spacer()
-                    Button("Revert") {
-                        Task { await model.revertTuning(id: application.id) }
-                    }
-                    .disabled(model.revertingTuningIDs.contains(application.id))
+                    .accessibilityLabel("Active tuning preview, status \(application.status)")
                 }
-                .accessibilityLabel("Active tuning preview, status \(application.status)")
             }
         }
+        .accessibilityIdentifier(StudioAccessibilityID.tuningActivePreviews)
     }
 }
 

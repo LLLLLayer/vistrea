@@ -23,6 +23,7 @@ struct WorkspaceWelcomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .accessibilityIdentifier(StudioAccessibilityID.welcome)
     }
 
     private var welcomeColumn: some View {
@@ -50,12 +51,14 @@ struct WorkspaceWelcomeView: View {
                     title: "New Workspace…",
                     subtitle: "Create an empty local Workspace",
                     systemImage: "plus.rectangle.on.folder",
+                    accessibilityIdentifier: StudioAccessibilityID.welcomeNewWorkspace,
                     action: onNewWorkspace
                 )
                 WelcomeActionButton(
                     title: "Open Workspace…",
                     subtitle: "Choose an existing Vistrea Workspace",
                     systemImage: "folder",
+                    accessibilityIdentifier: StudioAccessibilityID.welcomeOpenWorkspace,
                     action: onOpenWorkspace
                 )
                 if let onReturnToWorkspace, let currentWorkspaceURL {
@@ -63,6 +66,7 @@ struct WorkspaceWelcomeView: View {
                         title: "Return to \(displayName(for: currentWorkspaceURL))",
                         subtitle: "Keep working in the current Workspace",
                         systemImage: "arrow.uturn.backward.circle",
+                        accessibilityIdentifier: "studio.welcome.return-to-workspace",
                         action: onReturnToWorkspace
                     )
                 }
@@ -136,6 +140,7 @@ struct WorkspaceWelcomeView: View {
             }
         }
         .padding(34)
+        .accessibilityIdentifier(StudioAccessibilityID.welcomeRecentWorkspaces)
     }
 
     private func isCurrent(_ url: URL) -> Bool {
@@ -153,6 +158,7 @@ private struct WelcomeActionButton: View {
     let title: String
     let subtitle: String
     let systemImage: String
+    let accessibilityIdentifier: String
     let action: () -> Void
 
     var body: some View {
@@ -184,6 +190,7 @@ private struct WelcomeActionButton: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 

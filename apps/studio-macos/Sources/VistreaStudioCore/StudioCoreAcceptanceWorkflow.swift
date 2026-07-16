@@ -4,15 +4,18 @@ public struct StudioCoreAcceptanceRequest: Equatable, Sendable {
     public let expectedSnapshotID: String
     public let requireConnectedRuntime: Bool
     public let requireCanvasState: Bool
+    public let exerciseReversibleTuningAndQuality: Bool
 
     public init(
         expectedSnapshotID: String,
         requireConnectedRuntime: Bool = true,
-        requireCanvasState: Bool = true
+        requireCanvasState: Bool = true,
+        exerciseReversibleTuningAndQuality: Bool = false
     ) {
         self.expectedSnapshotID = expectedSnapshotID
         self.requireConnectedRuntime = requireConnectedRuntime
         self.requireCanvasState = requireCanvasState
+        self.exerciseReversibleTuningAndQuality = exerciseReversibleTuningAndQuality
     }
 }
 
@@ -33,6 +36,8 @@ public struct StudioCoreAcceptanceResult: Codable, Equatable, Sendable {
     public let reviewIssueCount: Int
     public let wikiNodeCount: Int
     public let designReferenceCount: Int
+    public let tuningPreviewReverted: Bool
+    public let validationCompleted: Bool
     public let coreWorkflowCompleted: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -52,6 +57,8 @@ public struct StudioCoreAcceptanceResult: Codable, Equatable, Sendable {
         case reviewIssueCount = "review_issue_count"
         case wikiNodeCount = "wiki_node_count"
         case designReferenceCount = "design_reference_count"
+        case tuningPreviewReverted = "tuning_preview_reverted"
+        case validationCompleted = "validation_completed"
         case coreWorkflowCompleted = "core_workflow_completed"
     }
 }
@@ -69,9 +76,11 @@ extension StudioCoreAcceptanceError: LocalizedError {
     }
 }
 
-/// Runs the read-only product workflow used by packaged, device, and CI
-/// acceptance. It deliberately drives `SnapshotWorkspaceModel`, so a passing
-/// probe proves Studio orchestration rather than only HTTP decoding.
+/// Runs the product workflow used by packaged, device, and CI acceptance. It
+/// deliberately drives `SnapshotWorkspaceModel`, so a passing probe proves
+/// Studio orchestration rather than only HTTP decoding. The default path is
+/// read-only; the explicit tuning-and-quality option uses a bounded,
+/// reversible Runtime preview.
 @MainActor
 public enum StudioCoreAcceptanceWorkflow {
     public static func run(
@@ -136,7 +145,9 @@ public enum StudioCoreAcceptanceWorkflow {
                 snapshot: snapshot,
                 screenshotByteCount: screenshotByteCount,
                 graph: nil,
-                selectedScreenStateID: nil
+                selectedScreenStateID: nil,
+                tuningPreviewReverted: false,
+                validationCompleted: false
             )
         }
         guard graph.buildScope?.applicationVersion == scope.applicationVersion,
@@ -166,13 +177,78 @@ public enum StudioCoreAcceptanceWorkflow {
             throw failure("The design reference library did not load.")
         }
 
+        var tuningPreviewReverted = false
+        var validationCompleted = false
+        if request.exerciseReversibleTuningAndQuality {
+            guard let selectedNode = model.selectedNode,
+                  selectedNode.stableID != nil
+            else {
+                throw failure("The Inspector did not expose a tunable stable node.")
+            }
+            let originalApplicationIDs = Set(model.activeTuning.map(\.id))
+            let previewAlpha = selectedNode.alpha == 0.82 ? 0.73 : 0.82
+            var pendingApplicationID: String?
+            do {
+                // Acceptance must never leave an unbounded Runtime override.
+                // The TTL is the final safety net if best-effort cleanup also
+                // loses its connection to the Host.
+                await model.previewAlpha(
+                    previewAlpha,
+                    previewTTLMilliseconds: 30_000
+                )
+                if let application = model.lastTuningApplication,
+                   (application.status == "active" || application.status == "partially_active"),
+                   !originalApplicationIDs.contains(application.id)
+                {
+                    pendingApplicationID = application.id
+                }
+                guard model.tuningError == nil,
+                      let application = model.lastTuningApplication,
+                      application.status == "active",
+                      !originalApplicationIDs.contains(application.id),
+                      model.activeTuning.contains(where: { $0.id == application.id })
+                else {
+                    throw failure("The reversible tuning preview did not become active.")
+                }
+                await model.revertTuning(id: application.id)
+                if model.lastTuningApplication?.id == application.id,
+                   model.lastTuningApplication?.status == "reverted"
+                {
+                    pendingApplicationID = nil
+                }
+                guard model.tuningError == nil,
+                      model.lastTuningApplication?.status == "reverted",
+                      !model.activeTuning.contains(where: { $0.id == application.id })
+                else {
+                    throw failure("The tuning preview was not reverted cleanly.")
+                }
+                tuningPreviewReverted = true
+
+                await model.validateSelectedSnapshot()
+                guard accepted(model.validationPhase),
+                      model.lastValidationRun != nil,
+                      model.validationError == nil
+                else {
+                    throw failure("The selected Snapshot did not complete local validation.")
+                }
+                validationCompleted = true
+            } catch {
+                if let pendingApplicationID {
+                    await model.revertTuning(id: pendingApplicationID)
+                }
+                throw error
+            }
+        }
+
         return result(
             model: model,
             status: status,
             snapshot: snapshot,
             screenshotByteCount: screenshotByteCount,
             graph: graph,
-            selectedScreenStateID: stateID
+            selectedScreenStateID: stateID,
+            tuningPreviewReverted: tuningPreviewReverted,
+            validationCompleted: validationCompleted
         )
     }
 
@@ -193,7 +269,9 @@ public enum StudioCoreAcceptanceWorkflow {
         snapshot: SnapshotPresentation,
         screenshotByteCount: Int?,
         graph: CanvasGraph?,
-        selectedScreenStateID: String?
+        selectedScreenStateID: String?,
+        tuningPreviewReverted: Bool,
+        validationCompleted: Bool
     ) -> StudioCoreAcceptanceResult {
         StudioCoreAcceptanceResult(
             snapshotID: snapshot.id,
@@ -212,6 +290,8 @@ public enum StudioCoreAcceptanceWorkflow {
             reviewIssueCount: model.reviewIssues.count,
             wikiNodeCount: model.wikiNodes.count,
             designReferenceCount: model.designReferences.count,
+            tuningPreviewReverted: tuningPreviewReverted,
+            validationCompleted: validationCompleted,
             coreWorkflowCompleted: true
         )
     }

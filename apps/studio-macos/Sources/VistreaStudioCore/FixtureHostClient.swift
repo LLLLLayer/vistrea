@@ -8,6 +8,7 @@ public actor FixtureHostClient: HostClient {
     private let eventTimeline: EventTimeline
     private var reviewIssues: [ReviewIssueSummary]
     private var canvasGraph: CanvasGraph?
+    private let canvasGraphFailureMessage: String?
     private var wikiDetails: [WikiNodeDetail]
     private var knowledgeCollectionsByID: [String: KnowledgeCollectionSummary] = [:]
     private var validationRunsByID: [String: ValidationRunSummary] = [:]
@@ -62,7 +63,11 @@ public actor FixtureHostClient: HostClient {
     private var screenStatesByID: [String: ScreenStateDetail] = [:]
     private var wikiLinks: [StoredWikiLink] = []
     private let automationConfigured: Bool
+    private let failActiveTuningReloadWhileApplicationIsActive: Bool
     private var explorationRun: ScriptedExplorationRun?
+    /// Captures the most recent preview lifetime so acceptance tests can prove
+    /// that automated probes never request an unbounded Runtime override.
+    public private(set) var lastTuningPreviewTTLMilliseconds: Int?
     /// How many times the scripted exploration Operation was polled; lets
     /// tests prove the poll loop stopped.
     public private(set) var explorationPollCount = 0
@@ -93,18 +98,23 @@ public actor FixtureHostClient: HostClient {
         eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: []),
         reviewIssues: [ReviewIssueSummary] = [],
         canvasGraph: CanvasGraph? = nil,
+        canvasGraphFailureMessage: String? = nil,
         wikiNodes: [WikiNodeSummary] = [],
         designReferences: [DesignReferenceDetail]? = nil,
         recaptureSnapshots: [RuntimeSnapshot] = [],
-        automationConfigured: Bool = true
+        automationConfigured: Bool = true,
+        failActiveTuningReloadWhileApplicationIsActive: Bool = false
     ) {
         self.status = status
         self.automationConfigured = automationConfigured
+        self.failActiveTuningReloadWhileApplicationIsActive =
+            failActiveTuningReloadWhileApplicationIsActive
         snapshotsByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.snapshotID.rawValue, $0) })
         self.objectsByHash = objectsByHash
         self.eventTimeline = eventTimeline
         self.reviewIssues = reviewIssues
         self.canvasGraph = canvasGraph
+        self.canvasGraphFailureMessage = canvasGraphFailureMessage
         self.recaptureSnapshots = recaptureSnapshots
         wikiDetails = wikiNodes.map { node in
             WikiNodeDetail(
@@ -160,6 +170,15 @@ public actor FixtureHostClient: HostClient {
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
         screenGraphLoadCount += 1
+        if let canvasGraphFailureMessage {
+            throw HostClientError.server(
+                statusCode: 503,
+                requestID: nil,
+                code: "fixture_canvas_unavailable",
+                message: canvasGraphFailureMessage,
+                retryable: true
+            )
+        }
         guard let canvasGraph else {
             throw HostClientError.server(
                 statusCode: 404,
@@ -514,6 +533,7 @@ public actor FixtureHostClient: HostClient {
         patchID: String,
         previewTTLMilliseconds: Int?
     ) async throws -> TuningApplicationSummary {
+        lastTuningPreviewTTLMilliseconds = previewTTLMilliseconds
         guard let stored = tuningPatchesByID[patchID] else {
             throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
         }
@@ -595,6 +615,13 @@ public actor FixtureHostClient: HostClient {
         let active = tuningApplicationsByID.values
             .filter { $0.status == "active" || $0.status == "partially_active" }
             .sorted { $0.tuningApplicationID < $1.tuningApplicationID }
+        if failActiveTuningReloadWhileApplicationIsActive, !active.isEmpty {
+            throw Self.serverError(
+                503,
+                code: "fixture_tuning_reload_failed",
+                message: "The fixture rejected the active tuning reload."
+            )
+        }
         return TuningApplicationPage(items: active)
     }
 
