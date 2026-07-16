@@ -761,6 +761,44 @@ public enum CanvasViewportProjection {
         return CanvasViewportFit(zoom: zoom, offset: offset)
     }
 
+    /// Changes the Canvas zoom while preserving the logical point currently
+    /// under `anchor`. Keeping this calculation in the presentation layer
+    /// makes native trackpad magnification and explicit zoom controls share
+    /// the same stable viewport behavior.
+    public static func zoom(
+        from currentZoom: CGFloat,
+        to targetZoom: CGFloat,
+        offset: CGSize,
+        anchor: CGPoint,
+        displayScale: CGFloat
+    ) -> CanvasViewportFit {
+        guard currentZoom.isFinite, currentZoom > 0,
+              targetZoom.isFinite, targetZoom > 0,
+              offset.width.isFinite, offset.height.isFinite,
+              anchor.x.isFinite, anchor.y.isFinite
+        else {
+            return CanvasViewportFit(zoom: currentZoom, offset: offset)
+        }
+
+        let logicalAnchor = CGPoint(
+            x: (anchor.x - offset.width) / currentZoom,
+            y: (anchor.y - offset.height) / currentZoom
+        )
+        return CanvasViewportFit(
+            zoom: targetZoom,
+            offset: CGSize(
+                width: snap(
+                    anchor.x - logicalAnchor.x * targetZoom,
+                    displayScale: displayScale
+                ),
+                height: snap(
+                    anchor.y - logicalAnchor.y * targetZoom,
+                    displayScale: displayScale
+                )
+            )
+        )
+    }
+
     private static func snap(_ value: CGFloat, displayScale: CGFloat) -> CGFloat {
         let scale = displayScale.isFinite && displayScale > 0 ? displayScale : 1
         return (value * scale).rounded() / scale

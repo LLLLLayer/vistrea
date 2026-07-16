@@ -212,13 +212,14 @@ The Canvas distinguishes:
 - states missing in the selected build;
 - uncertain identity matches requiring review.
 
-The Canvas viewport supports background panning, magnification and explicit
-zoom controls, and local card repositioning. These presentation coordinates
-are session UI state and never rewrite Screen State identity or Transition
-evidence. Zoom must lay out cards and text at their final size rather than
-transforming a composited graph layer. Final positions snap to the display
-backing scale, low zoom progressively removes secondary card detail, and
-Reset-to-fit restores the deterministic layered layout without enlarging it
+The Canvas viewport supports native two-finger panning with momentum, pinch
+magnification anchored under the gesture, mouse background panning, explicit
+center-anchored zoom controls, and local card repositioning. These presentation
+coordinates are session UI state and never rewrite Screen State identity or
+Transition evidence. Zoom must lay out cards and text at their final size
+rather than transforming a composited graph layer. Final positions snap to the
+display backing scale, low zoom progressively removes secondary card detail,
+and Reset-to-fit restores the deterministic layered layout without enlarging it
 beyond 100%. Selecting a destination keeps the same state selected in the
 Inspector, enumerates a bounded set of cycle-free routes from every recorded
 entry, and highlights the chosen route's states and directional transitions.

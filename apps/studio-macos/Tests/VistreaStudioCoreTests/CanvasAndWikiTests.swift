@@ -125,6 +125,46 @@ final class CanvasAndWikiTests: XCTestCase {
         XCTAssertEqual(largeGraph.offset, CGSize(width: 50, height: 75))
     }
 
+    func testCanvasViewportZoomKeepsTheGestureAnchorStationary() {
+        let anchor = CGPoint(x: 420, y: 260)
+        let originalOffset = CGSize(width: -180, height: 40)
+        let logicalPoint = CGPoint(
+            x: (anchor.x - originalOffset.width) / 0.75,
+            y: (anchor.y - originalOffset.height) / 0.75
+        )
+
+        let viewport = CanvasViewportProjection.zoom(
+            from: 0.75,
+            to: 1.25,
+            offset: originalOffset,
+            anchor: anchor,
+            displayScale: 2
+        )
+        let projected = CanvasViewportProjection.point(
+            logicalPoint,
+            zoom: viewport.zoom,
+            offset: viewport.offset,
+            displayScale: 2
+        )
+
+        XCTAssertEqual(viewport.zoom, 1.25)
+        XCTAssertEqual(projected, anchor)
+    }
+
+    func testCanvasViewportZoomRejectsInvalidScaleWithoutMovingTheViewport() {
+        let originalOffset = CGSize(width: 20, height: -12)
+        let viewport = CanvasViewportProjection.zoom(
+            from: 0,
+            to: 1.2,
+            offset: originalOffset,
+            anchor: CGPoint(x: 100, y: 100),
+            displayScale: 2
+        )
+
+        XCTAssertEqual(viewport.zoom, 0)
+        XCTAssertEqual(viewport.offset, originalOffset)
+    }
+
     func testCanvasPathPlannerEnumeratesEntryRoutesDeterministicallyAndAvoidsCycles() {
         let stateIDs = ["entry-a", "entry-b", "middle-a", "middle-b", "target"]
         let graph = CanvasGraph(

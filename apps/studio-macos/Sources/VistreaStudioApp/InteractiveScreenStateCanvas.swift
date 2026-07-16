@@ -12,7 +12,6 @@ struct InteractiveScreenStateCanvas: View {
     @State private var viewportOffset = CGSize.zero
     @State private var zoom: CGFloat = 1
     @State private var panOrigin: CGSize?
-    @State private var magnificationOrigin: CGFloat?
     @State private var nodeOffsets: [String: CGSize] = [:]
     @State private var draggingNodeID: String?
     @State private var nodeDragOrigin = CGSize.zero
@@ -74,7 +73,20 @@ struct InteractiveScreenStateCanvas: View {
                 }
                 .clipped()
                 .background(Color(nsColor: .textBackgroundColor))
-                .simultaneousGesture(magnificationGesture)
+                .background {
+                    CanvasTrackpadInputBridge(
+                        onScroll: { delta in
+                            viewportOffset = CGSize(
+                                width: viewportOffset.width + delta.width,
+                                height: viewportOffset.height + delta.height
+                            )
+                        },
+                        onMagnify: { magnification, anchor in
+                            let targetZoom = clampedZoom(zoom * (1 + magnification))
+                            applyZoom(targetZoom, around: anchor)
+                        }
+                    )
+                }
                 .onAppear {
                     fitInitialGraphIfReady(in: proxy.size)
                 }
@@ -212,16 +224,6 @@ struct InteractiveScreenStateCanvas: View {
             .onEnded { _ in panOrigin = nil }
     }
 
-    private var magnificationGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                let origin = magnificationOrigin ?? zoom
-                if magnificationOrigin == nil { magnificationOrigin = origin }
-                zoom = clampedZoom(origin * value)
-            }
-            .onEnded { _ in magnificationOrigin = nil }
-    }
-
     private func nodeDragGesture(for stateID: String) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
@@ -244,7 +246,10 @@ struct InteractiveScreenStateCanvas: View {
     private func viewportControls(in viewportSize: CGSize) -> some View {
         HStack(spacing: 5) {
             Button {
-                zoom = clampedZoom(zoom - 0.1)
+                applyZoom(
+                    clampedZoom(zoom - 0.1),
+                    around: CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+                )
             } label: {
                 Image(systemName: "minus.magnifyingglass")
             }
@@ -256,7 +261,10 @@ struct InteractiveScreenStateCanvas: View {
                 .frame(minWidth: 42)
 
             Button {
-                zoom = clampedZoom(zoom + 0.1)
+                applyZoom(
+                    clampedZoom(zoom + 0.1),
+                    around: CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+                )
             } label: {
                 Image(systemName: "plus.magnifyingglass")
             }
@@ -315,7 +323,7 @@ struct InteractiveScreenStateCanvas: View {
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "cursorarrow.motionlines")
-                Text("Drag the background to pan, drag cards to arrange, and select a state to reveal its entry paths.")
+                Text("Two-finger scroll to pan, pinch to zoom, drag cards to arrange, and select a state to reveal its entry paths.")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -412,6 +420,18 @@ struct InteractiveScreenStateCanvas: View {
 
     private func clampedZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, Self.minimumZoom), Self.maximumZoom)
+    }
+
+    private func applyZoom(_ targetZoom: CGFloat, around anchor: CGPoint) {
+        let viewport = CanvasViewportProjection.zoom(
+            from: zoom,
+            to: targetZoom,
+            offset: viewportOffset,
+            anchor: anchor,
+            displayScale: displayScale
+        )
+        zoom = viewport.zoom
+        viewportOffset = viewport.offset
     }
 
     private func drawTransitions(
@@ -533,6 +553,95 @@ struct InteractiveScreenStateCanvas: View {
         )
         arrow.closeSubpath()
         context.fill(arrow, with: .color(color))
+    }
+}
+
+/// A transparent AppKit event bridge for native macOS trackpad navigation.
+/// It observes only events inside its Canvas bounds and never participates in
+/// hit testing, so card selection and mouse dragging remain SwiftUI-owned.
+private struct CanvasTrackpadInputBridge: NSViewRepresentable {
+    let onScroll: (CGSize) -> Void
+    let onMagnify: (CGFloat, CGPoint) -> Void
+
+    func makeNSView(context: Context) -> CanvasTrackpadTrackingView {
+        let view = CanvasTrackpadTrackingView()
+        view.onScroll = onScroll
+        view.onMagnify = onMagnify
+        return view
+    }
+
+    func updateNSView(_ nsView: CanvasTrackpadTrackingView, context: Context) {
+        nsView.onScroll = onScroll
+        nsView.onMagnify = onMagnify
+    }
+
+    static func dismantleNSView(_ nsView: CanvasTrackpadTrackingView, coordinator: ()) {
+        nsView.stopMonitoring()
+    }
+}
+
+@MainActor
+private final class CanvasTrackpadTrackingView: NSView {
+    var onScroll: (CGSize) -> Void = { _ in }
+    var onMagnify: (CGFloat, CGPoint) -> Void = { _, _ in }
+
+    private var eventMonitor: Any?
+
+    override var isFlipped: Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stopMonitoring()
+        } else {
+            startMonitoringIfNeeded()
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    func stopMonitoring() {
+        guard let eventMonitor else { return }
+        NSEvent.removeMonitor(eventMonitor)
+        self.eventMonitor = nil
+    }
+
+    private func startMonitoringIfNeeded() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.scrollWheel, .magnify]
+        ) { [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window
+            else {
+                return event
+            }
+
+            let location = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(location) else { return event }
+
+            switch event.type {
+            case .scrollWheel:
+                // Precise deltas already include the user's macOS scrolling
+                // direction preference and naturally carry momentum phases.
+                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 12
+                self.onScroll(
+                    CGSize(
+                        width: event.scrollingDeltaX * multiplier,
+                        height: event.scrollingDeltaY * multiplier
+                    )
+                )
+                return nil
+            case .magnify:
+                self.onMagnify(event.magnification, location)
+                return nil
+            default:
+                return event
+            }
+        }
     }
 }
 
