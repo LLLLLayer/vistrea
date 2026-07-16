@@ -1,6 +1,6 @@
 import VistreaStudioCore
 
-struct WorkspaceMaintenanceExecutionSummary {
+struct WorkspaceMaintenanceExecutionSummary: Sendable {
     let message: String
     let garbageResult: CollectWorkspaceGarbageResult?
 
@@ -31,7 +31,7 @@ enum WorkspaceMaintenanceCoordinatorOutcome<Success> {
 /// result so a failed runner cannot strand an otherwise healthy Workspace.
 @MainActor
 struct WorkspaceMaintenanceCoordinator {
-    func run<Success>(
+    func run<Success: Sendable>(
         stopHost: (() async -> Void)?,
         execute: () async throws -> Success,
         reopen: () async throws -> Void,
