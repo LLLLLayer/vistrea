@@ -28,7 +28,18 @@ Global options:
 --non-interactive
 ```
 
-The implemented command surface — Workspace status, Snapshot capture and inspection, Runtime events, design review, tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — is maintained command-for-command in `integrations/cli/README.md`. Reserved future command families follow the same `<resource> <verb>` shape:
+The implemented command surface — Workspace status and recovery points, Snapshot capture and inspection, Runtime events, design review, tuning, the Screen Graph, the Deep Wiki, validation, build diffs, and portable packs — is maintained command-for-command in `integrations/cli/README.md`. Its Workspace recovery commands are:
+
+```text
+vistrea workspace recovery-point create --reason <text>
+vistrea workspace recovery-point list
+vistrea workspace recovery-point release <sha256:...> --policy <policy_id>
+```
+
+Destructive restore, garbage collection, interrupted-restore recovery, and
+stale-lock recovery are not exposed directly to Agents. Packaged Studio owns
+the required Host stop, strict offline runner, and Host reopen lifecycle.
+Reserved future command families follow the same `<resource> <verb>` shape:
 
 Commands with structured `--json <command>` input also accept
 `--json-file <path>` for payloads that exceed operating-system argument

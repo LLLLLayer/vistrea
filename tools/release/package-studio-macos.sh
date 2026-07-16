@@ -4,24 +4,14 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: package-studio-macos.sh --version <x.y.z> --build-number <numeric-version> --output-dir <path> [options]
+Usage: package-studio-macos.sh --version <x.y.z> --build-number <numeric-version> --output-dir <path>
 
 Builds a Universal Vistrea Studio application, embeds the production Host and
-Sparkle, signs nested code in dependency order, and produces ZIP and DMG
-distribution archives. Run `pnpm build:host` before packaging.
+Sparkle, ad-hoc signs nested code in dependency order, and produces local ZIP
+and DMG archives with updates disabled. Run `pnpm build:host` before packaging.
 
 Options:
-  --sparkle-feed-url <https-url>  Enable updates with this appcast URL.
-  --sparkle-public-key <base64>   Ed25519 public key paired with the feed URL.
-  --require-distribution          Require Developer ID signing, notarization,
-                                  and enabled Sparkle updates.
   -h, --help                      Show this help.
-
-Environment:
-  VISTREA_CODESIGN_IDENTITY       Developer ID identity; defaults to ad hoc '-'.
-  VISTREA_NOTARY_KEY_FILE         App Store Connect API .p8 key path.
-  VISTREA_NOTARY_KEY_ID           App Store Connect API key ID.
-  VISTREA_NOTARY_ISSUER_ID        App Store Connect issuer ID.
 EOF
 }
 
@@ -33,9 +23,6 @@ fail() {
 VERSION=""
 BUILD_NUMBER=""
 OUTPUT_DIR=""
-SPARKLE_FEED_URL=""
-SPARKLE_PUBLIC_KEY=""
-REQUIRE_DISTRIBUTION=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -54,20 +41,6 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_DIR="$2"
             shift 2
             ;;
-        --sparkle-feed-url)
-            [[ $# -ge 2 ]] || fail "--sparkle-feed-url requires a value"
-            SPARKLE_FEED_URL="$2"
-            shift 2
-            ;;
-        --sparkle-public-key)
-            [[ $# -ge 2 ]] || fail "--sparkle-public-key requires a value"
-            SPARKLE_PUBLIC_KEY="$2"
-            shift 2
-            ;;
-        --require-distribution)
-            REQUIRE_DISTRIBUTION=1
-            shift
-            ;;
         -h|--help)
             usage
             exit 0
@@ -84,29 +57,19 @@ done
     || fail "build number must contain one to three canonical numeric components"
 [[ -n "$OUTPUT_DIR" ]] || fail "--output-dir is required"
 
-if [[ -n "$SPARKLE_FEED_URL" || -n "$SPARKLE_PUBLIC_KEY" ]]; then
-    [[ -n "$SPARKLE_FEED_URL" && -n "$SPARKLE_PUBLIC_KEY" ]] \
-        || fail "Sparkle feed URL and public key must be provided together"
-    if ! /usr/bin/ruby -ruri -e '
-        value = URI.parse(ARGV.fetch(0))
-        exit(value.is_a?(URI::HTTPS) && value.host && !value.host.empty? && !value.userinfo ? 0 : 1)
-    ' "$SPARKLE_FEED_URL" 2>/dev/null; then
-        fail "Sparkle feed URL must be an absolute HTTPS URL with a host and no credentials"
-    fi
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PACKAGE_PATH="$REPO_ROOT/apps/studio-macos"
 INFO_TEMPLATE="$PACKAGE_PATH/Resources/Info.plist"
 NODE_ENTITLEMENTS="$SCRIPT_DIR/host-runtime/Node.entitlements"
-SIGN_IDENTITY="${VISTREA_CODESIGN_IDENTITY:--}"
-NOTARY_KEY_FILE="${VISTREA_NOTARY_KEY_FILE:-}"
-NOTARY_KEY_ID="${VISTREA_NOTARY_KEY_ID:-}"
-NOTARY_ISSUER_ID="${VISTREA_NOTARY_ISSUER_ID:-}"
 
 [[ -f "$INFO_TEMPLATE" ]] || fail "missing Info.plist template: $INFO_TEMPLATE"
 [[ -f "$NODE_ENTITLEMENTS" ]] || fail "missing embedded Node.js entitlements: $NODE_ENTITLEMENTS"
+for update_key in SUFeedURL SUPublicEDKey SURequireSignedFeed SUVerifyUpdateBeforeExtraction; do
+    if /usr/bin/plutil -extract "$update_key" raw "$INFO_TEMPLATE" >/dev/null 2>&1; then
+        fail "local packaging refuses automatic-update metadata: $update_key"
+    fi
+done
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/vistrea-studio-release.XXXXXX")"
 cleanup() {
@@ -114,53 +77,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-NODE_SIGNING_ENTITLEMENTS="$NODE_ENTITLEMENTS"
-APP_SIGNING_ENTITLEMENTS=""
-if [[ "$SIGN_IDENTITY" == "-" ]]; then
-    # Hardened Runtime library validation compares Team IDs. Ad hoc signatures
-    # have no stable Team ID, so a locally packaged app cannot load its ad hoc
-    # Sparkle framework or better-sqlite3 addon without this local-only escape
-    # hatch. Developer ID builds never receive either entitlement file.
-    NODE_SIGNING_ENTITLEMENTS="$TEMP_ROOT/node-ad-hoc.entitlements"
-    APP_SIGNING_ENTITLEMENTS="$TEMP_ROOT/app-ad-hoc.entitlements"
-    /usr/bin/ditto "$NODE_ENTITLEMENTS" "$NODE_SIGNING_ENTITLEMENTS"
-    /usr/bin/plutil -insert 'com\.apple\.security\.cs\.disable-library-validation' \
-        -bool true "$NODE_SIGNING_ENTITLEMENTS"
-    /usr/bin/plutil -create xml1 "$APP_SIGNING_ENTITLEMENTS"
-    /usr/bin/plutil -insert 'com\.apple\.security\.cs\.disable-library-validation' \
-        -bool true "$APP_SIGNING_ENTITLEMENTS"
-fi
-
-if [[ -n "$SPARKLE_PUBLIC_KEY" ]]; then
-    [[ "$SPARKLE_PUBLIC_KEY" != *[[:space:]]* ]] \
-        || fail "Sparkle public key must be canonical base64 without whitespace"
-    PUBLIC_KEY_BYTES="$TEMP_ROOT/sparkle-public-key.bin"
-    if ! printf '%s' "$SPARKLE_PUBLIC_KEY" | /usr/bin/base64 -D > "$PUBLIC_KEY_BYTES" 2>/dev/null; then
-        fail "Sparkle public key is not valid base64"
-    fi
-    [[ "$(wc -c < "$PUBLIC_KEY_BYTES" | tr -d ' ')" == "32" ]] \
-        || fail "Sparkle public key must decode to 32 bytes"
-    CANONICAL_PUBLIC_KEY="$(/usr/bin/base64 < "$PUBLIC_KEY_BYTES" | tr -d '\n')"
-    [[ "$CANONICAL_PUBLIC_KEY" == "$SPARKLE_PUBLIC_KEY" ]] \
-        || fail "Sparkle public key must use canonical padded base64"
-fi
-
-notary_values=0
-[[ -n "$NOTARY_KEY_FILE" ]] && notary_values=$((notary_values + 1))
-[[ -n "$NOTARY_KEY_ID" ]] && notary_values=$((notary_values + 1))
-[[ -n "$NOTARY_ISSUER_ID" ]] && notary_values=$((notary_values + 1))
-[[ "$notary_values" == "0" || "$notary_values" == "3" ]] \
-    || fail "all three VISTREA_NOTARY_* values must be provided together"
-if [[ "$notary_values" == "3" ]]; then
-    [[ -f "$NOTARY_KEY_FILE" ]] || fail "notary key file does not exist: $NOTARY_KEY_FILE"
-    [[ "$SIGN_IDENTITY" != "-" ]] || fail "notarization requires Developer ID signing"
-fi
-
-if [[ "$REQUIRE_DISTRIBUTION" == "1" ]]; then
-    [[ "$SIGN_IDENTITY" != "-" ]] || fail "distribution requires VISTREA_CODESIGN_IDENTITY"
-    [[ "$notary_values" == "3" ]] || fail "distribution requires App Store Connect notarization credentials"
-    [[ -n "$SPARKLE_FEED_URL" ]] || fail "distribution requires an enabled Sparkle feed"
-fi
+# Hardened Runtime library validation compares Team IDs. Ad hoc signatures
+# have no stable Team ID, so a locally packaged app cannot load its ad hoc
+# Sparkle framework or better-sqlite3 addon without this local-only exemption.
+NODE_SIGNING_ENTITLEMENTS="$TEMP_ROOT/node-ad-hoc.entitlements"
+APP_SIGNING_ENTITLEMENTS="$TEMP_ROOT/app-ad-hoc.entitlements"
+/usr/bin/ditto "$NODE_ENTITLEMENTS" "$NODE_SIGNING_ENTITLEMENTS"
+/usr/bin/plutil -insert 'com\.apple\.security\.cs\.disable-library-validation' \
+    -bool true "$NODE_SIGNING_ENTITLEMENTS"
+/usr/bin/plutil -create xml1 "$APP_SIGNING_ENTITLEMENTS"
+/usr/bin/plutil -insert 'com\.apple\.security\.cs\.disable-library-validation' \
+    -bool true "$APP_SIGNING_ENTITLEMENTS"
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
@@ -250,21 +177,12 @@ done < <(/usr/bin/otool -l "$APP_PATH/Contents/MacOS/VistreaStudio" \
 /usr/bin/plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP_PATH/Contents/Info.plist"
 /usr/bin/plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP_PATH/Contents/Info.plist"
 /usr/bin/plutil -insert VistreaEmbeddedHostRuntime -bool true "$APP_PATH/Contents/Info.plist"
-if [[ -n "$SPARKLE_FEED_URL" ]]; then
-    /usr/bin/plutil -insert SUFeedURL -string "$SPARKLE_FEED_URL" "$APP_PATH/Contents/Info.plist"
-    /usr/bin/plutil -insert SUPublicEDKey -string "$SPARKLE_PUBLIC_KEY" "$APP_PATH/Contents/Info.plist"
-    /usr/bin/plutil -insert SURequireSignedFeed -bool true "$APP_PATH/Contents/Info.plist"
-    /usr/bin/plutil -insert SUVerifyUpdateBeforeExtraction -bool true "$APP_PATH/Contents/Info.plist"
-fi
 
 sign_code() {
     local path="$1"
     local preserve_entitlements="${2:-0}"
     local entitlements="${3:-}"
-    local arguments=(--force --sign "$SIGN_IDENTITY" --options runtime)
-    if [[ "$SIGN_IDENTITY" != "-" ]]; then
-        arguments+=(--timestamp)
-    fi
+    local arguments=(--force --sign - --options runtime)
     if [[ "$preserve_entitlements" == "1" ]]; then
         arguments+=(--preserve-metadata=entitlements)
     fi
@@ -299,18 +217,6 @@ if /usr/bin/otool -l "$APP_PATH/Contents/MacOS/VistreaStudio" | /usr/bin/grep -F
     fail "packaged executable retains a build-machine toolchain rpath"
 fi
 
-if [[ "$notary_values" == "3" ]]; then
-    NOTARY_ZIP="$TEMP_ROOT/notarization.zip"
-    /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$NOTARY_ZIP"
-    /usr/bin/xcrun notarytool submit "$NOTARY_ZIP" \
-        --key "$NOTARY_KEY_FILE" \
-        --key-id "$NOTARY_KEY_ID" \
-        --issuer "$NOTARY_ISSUER_ID" \
-        --wait
-    /usr/bin/xcrun stapler staple "$APP_PATH"
-    /usr/bin/xcrun stapler validate "$APP_PATH"
-fi
-
 /usr/bin/ditto "$APP_PATH" "$STAGED_APP"
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$STAGED_ZIP"
 
@@ -325,20 +231,6 @@ ln -s /Applications "$DMG_SOURCE/Applications"
     -ov \
     "$STAGED_DMG"
 
-if [[ "$SIGN_IDENTITY" != "-" ]]; then
-    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --timestamp "$STAGED_DMG"
-fi
-if [[ "$notary_values" == "3" ]]; then
-    /usr/bin/xcrun notarytool submit "$STAGED_DMG" \
-        --key "$NOTARY_KEY_FILE" \
-        --key-id "$NOTARY_KEY_ID" \
-        --issuer "$NOTARY_ISSUER_ID" \
-        --wait
-    /usr/bin/xcrun stapler staple "$STAGED_DMG"
-    /usr/bin/xcrun stapler validate "$STAGED_DMG"
-    /usr/sbin/spctl --assess --type execute --verbose=2 "$STAGED_APP"
-    /usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 "$STAGED_DMG"
-fi
 /usr/bin/hdiutil imageinfo "$STAGED_DMG" >/dev/null
 
 (
@@ -346,9 +238,9 @@ fi
     /usr/bin/shasum -a 256 "$(basename "$STAGED_ZIP")" "$(basename "$STAGED_DMG")" > "$STAGED_CHECKSUMS"
 )
 
-# Final names become visible only after every build, signing, notarization,
-# archive, and checksum step has succeeded. The EXIT trap removes any partial
-# final publication if an unexpected same-filesystem rename fails.
+# Final names become visible only after every build, ad-hoc signing, archive,
+# and checksum step has succeeded. The EXIT trap removes any partial final
+# publication if an unexpected same-filesystem rename fails.
 /bin/mv "$STAGED_APP" "$OUTPUT_APP"
 /bin/mv "$STAGED_ZIP" "$OUTPUT_ZIP"
 /bin/mv "$STAGED_DMG" "$OUTPUT_DMG"

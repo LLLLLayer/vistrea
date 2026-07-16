@@ -35,6 +35,14 @@ Workspace backup is a metadata recovery point: GC dynamically treats every
 ObjectRef reachable from its SQLite database as a root, so the backup remains
 restorable without per-object retention policies.
 
+The online `WorkspaceMaintenancePort` projects this lifecycle as
+`createRecoveryPoint`, `listRecoveryPoints`, and `releaseRecoveryPoint`.
+Creation assigns one explicit retention policy to the verified backup; listing
+includes released historical points and their active policy IDs; release
+removes exactly the requested policy and does not delete bytes. Only a later
+matching garbage-collection plan may reclaim an unretained, unreachable, old
+backup and its closure.
+
 Restore validates the backup database and its complete reachable ObjectRef
 closure before creating a restore journal or replacing live metadata. GC dry
 runs return a digest of the exact generation and deletion plan; destructive GC

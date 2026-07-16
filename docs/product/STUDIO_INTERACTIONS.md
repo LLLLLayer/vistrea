@@ -143,6 +143,33 @@ connection descriptors, Workspace metadata, and Hub credentials are excluded.
 The managed Host remains responsible for creation, health, migration, locking,
 and recovery; the Welcome UI never reads SQLite or initializes storage itself.
 
+Workspace maintenance is a separate Workspace Manager surface. A non-current
+Workspace must be opened before it can be maintained; the only no-Host
+exception is the exact Workspace whose Host failed to start. While the Host is
+online, Studio can list and create retained recovery points or release one
+retention policy. Release changes eligibility and never deletes a backup
+immediately.
+
+Restore, object garbage collection, interrupted-restore recovery, and stale-lock
+recovery use one offline lifecycle:
+
+```text
+confirm the operation
+-> stop Canvas and exploration polling
+-> stop the owning Host, if it is running
+-> invoke the strict one-shot maintenance runner
+-> reopen the same Workspace and Host
+-> present maintenance and reopen results independently
+```
+
+Garbage collection is always analyzed first. Studio shows the exact
+`plan_digest`, candidate counts, and bytes, requires the literal confirmation
+`DELETE`, and submits the same minimum age and digest for the destructive pass.
+Any intervening maintenance or recovery-point change invalidates the preview.
+Studio attempts to reopen the Workspace whether maintenance succeeds or fails;
+a successful maintenance result is not hidden when reopening fails, and the
+user can retry opening separately.
+
 Engine mapping:
 
 - `CreateWorkspace`
@@ -483,4 +510,4 @@ Every primary screen defines:
 3. reversible allowlisted alpha, color, font, spacing/insets, and corner-radius tuning;
 4. Tuning Patch persistence, source-oriented Agent handoff, and fresh-build re-verification evidence.
 
-Canvas exploration, Deep Wiki and Collection editing, Tuning Patch source handoff, local validation and Build Diff, 3D inspection, and the first Hub ref-sync workspace are implemented. Workspace maintenance controls, searchable Hub discovery, subscriptions, versioned collaboration editors, guided conflict resolution, and dedicated Coding Agent operation review remain later milestones.
+Canvas exploration, Deep Wiki and Collection editing, Tuning Patch source handoff, local validation and Build Diff, 3D inspection, Workspace maintenance controls, and the first Hub ref-sync workspace are implemented. Searchable Hub discovery, subscriptions, versioned collaboration editors, guided conflict resolution, and dedicated Coding Agent operation review remain later milestones.

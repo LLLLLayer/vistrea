@@ -39,6 +39,7 @@ The remaining implemented route families return canonical domain resources
 | Deep Wiki | `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes`, `GET /v1/wiki/nodes/<id>`, `POST /v1/wiki/nodes/<id>/revisions`, `GET /v1/wiki/nodes/<id>/backlinks`, `POST /v1/wiki/links`, `POST /v1/wiki/links/<id>/unlink`, `GET /v1/wiki/related` |
 | Knowledge Collections | `POST /v1/knowledge-collections`, `GET /v1/knowledge-collections`, `GET /v1/knowledge-collections/<id>`, `POST /v1/knowledge-collections/<id>/revisions`, `POST /v1/knowledge-collections/<id>/publication`, `POST /v1/knowledge-collections/<id>/exports` |
 | Validation and build diff | `POST /v1/validation/snapshot-runs`, `POST /v1/validation/graph-runs`, `GET /v1/validation/runs/<id>`, `GET /v1/validation/findings`, `GET /v1/validation/findings/<id>`, `POST /v1/validation/findings/<id>/suppress`, `POST /v1/validation/build-diffs`, `GET /v1/validation/build-diffs/<id>` |
+| Workspace recovery points | `GET /v1/workspace/recovery-points`, `POST /v1/workspace/recovery-points`, `POST /v1/workspace/recovery-points/release` |
 | Portable exchange | `POST /v1/exchange/exports`, `POST /v1/exchange/imports` |
 
 `POST /v1/captures` accepts `{}` and applies this deterministic default Engine command:
@@ -60,6 +61,36 @@ unsupported field mask produces a sanitized capture failure while the
 authenticated Runtime session remains usable.
 
 Object reads support one RFC 9110-style `bytes` range, including bounded, open-ended, and suffix forms. Multiple or unsatisfiable ranges return HTTP `416` and `Content-Range: bytes */<size>`. Payload bytes remain the exact encoded bytes identified by the canonical `ObjectRef`; the HTTP adapter does not transparently decompress them.
+
+## Offline Workspace maintenance
+
+Destructive restore, garbage collection, interrupted-restore recovery, and
+stale-lock recovery are intentionally absent from the online Local API. The
+owning Host must be stopped before the composition root invokes the emitted
+one-shot runner:
+
+```bash
+node .build/typescript/apps/host/workspace-maintenance.js \
+  --workspace /absolute/path/to/workspace
+```
+
+The runner accepts exactly one UTF-8 JSON object on stdin, capped at 64 KiB.
+Duplicate or unknown keys, trailing values, non-canonical hashes, and unknown
+operations fail closed. It writes exactly one sanitized versioned JSON envelope
+to stdout and never writes Workspace paths, SQLite rows, or stack traces.
+
+| Operation | Required command fields | Safety rule |
+|---|---|---|
+| `restore` | `format_version: 1`, `operation`, `backup_hash` | The hash must resolve to a canonical verified Workspace backup whose complete reachable object closure is present. |
+| `collect_garbage` dry run | `format_version: 1`, `operation`, `dry_run: true`; optional `minimum_age_seconds` | Reports candidates, bytes, stale records, hashes, and a canonical `plan_digest`; deletes nothing. |
+| `collect_garbage` apply | `format_version: 1`, `operation`, `dry_run: false`, `expected_plan_digest`; optional matching `minimum_age_seconds` | Recomputes the exact plan and fails if its digest changed before deleting anything. |
+| `recover_interrupted_restore` | `format_version: 1`, `operation` | Uses the durable restore journal and preserved same-volume files; it never guesses recovery state. |
+| `recover_stale_lock` | `format_version: 1`, `operation` | Breaks only a proven stale owner and preserves recovery evidence. |
+
+Online `GET`/`POST /v1/workspace/recovery-points` and
+`POST /v1/workspace/recovery-points/release` remain available while the Host is
+running because they create or change retention roots without replacing live
+metadata. Releasing a policy does not immediately delete its backup.
 
 Errors use one sanitized shape:
 

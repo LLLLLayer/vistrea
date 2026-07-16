@@ -171,9 +171,9 @@ It includes:
 
 Studio composes Engine use cases. Views and ViewModels must not access SQLite, object paths, automation implementations, or Hub transport directly.
 
-The current native SwiftUI Studio is Canvas-first: an Application Version + Build scope selects a build-scoped Screen State Canvas, and a selected state resolves that build's canonical Snapshot into screenshot, 2D tree, hierarchy-depth 3D, node properties, tuning, annotations, knowledge links, and Screen State-scoped Review Issues, while a secondary Evidence library retains raw Snapshots. Runtime events live in a bottom timeline. A separate Documents section associates the Workspace with a local source checkout and browses the Markdown roots declared by the repository-owned `vistrea.project.json`; those read-only files remain outside SQLite and the Deep Wiki. Wiki node and Knowledge Collection editing, Canvas merge/split curation, state annotations, live exploration progress, Tuning Patch source handoff, Snapshot and Screen Graph validation, Finding suppression, and same-application Build Diff are implemented. The design comparison, Difference-to-Issue promotion, and fresh-build verification stack remains available through Engine, Host, CLI, and tests, but Design Review is intentionally absent from the default Studio Inspector. A packaged Studio owns an embedded production Host and manages local Workspaces through a Welcome and recent-location surface with explicit create, open, switch, reveal, and close actions. It restores the last available Workspace, reports missing or unrecognized locations without modifying them, and lets registered `.vistrea` directory packages reopen through Finder; environment-provided Host credentials remain an explicit development integration. Workspace backup/restore/migration/garbage-collection controls, generic Agent activity review, and broader collaboration editors remain follow-up product surfaces; `apps/studio-macos/README.md` tracks the exact implemented surface.
+The current native SwiftUI Studio is Canvas-first: an Application Version + Build scope selects a build-scoped Screen State Canvas, and a selected state resolves that build's canonical Snapshot into screenshot, 2D tree, hierarchy-depth 3D, node properties, tuning, annotations, knowledge links, and Screen State-scoped Review Issues, while a secondary Evidence library retains raw Snapshots. Runtime events live in a bottom timeline. A separate Documents section associates the Workspace with a local source checkout and browses the Markdown roots declared by the repository-owned `vistrea.project.json`; those read-only files remain outside SQLite and the Deep Wiki. Wiki node and Knowledge Collection editing, Canvas merge/split curation, state annotations, live exploration progress, Tuning Patch source handoff, Snapshot and Screen Graph validation, Finding suppression, and same-application Build Diff are implemented. The design comparison, Difference-to-Issue promotion, and fresh-build verification stack remains available through Engine, Host, CLI, and tests, but Design Review is intentionally absent from the default Studio Inspector. A packaged Studio owns an embedded production Host and manages local Workspaces through a Welcome and recent-location surface with explicit create, open, switch, reveal, and close actions. It restores the last available Workspace, reports missing or unrecognized locations without modifying them, and lets registered `.vistrea` directory packages reopen through Finder; environment-provided Host credentials remain an explicit development integration. A separate Workspace Manager exposes online recovery-point create/list/release and runs restore, exact-plan object garbage collection, interrupted-restore recovery, and stale-lock recovery through a strict Host stop, one-shot offline runner, and Host reopen lifecycle. Maintenance and reopen failures remain independently visible. Generic Agent activity review and broader collaboration editors remain follow-up product surfaces; `apps/studio-macos/README.md` tracks the exact implemented surface.
 
-Local Studio packaging remains outside the product-layer boundary: a release tool assembles the SwiftPM executable into a Universal app, embeds pinned architecture-specific Node.js and production Host runtimes plus the pinned Sparkle dependency, and produces local ZIP/DMG artifacts. The credential-free ad-hoc package and a real packaged-app launch/clean-quit loop are verified. Formal macOS distribution, public update publication, and installed old-to-new update acceptance are deferred, and no tag-triggered release workflow is active.
+Local Studio packaging remains outside the product-layer boundary: a release tool assembles the SwiftPM executable into a Universal app, embeds pinned architecture-specific Node.js and production Host runtimes plus the pinned but metadata-disabled Sparkle dependency, and produces local ZIP/DMG artifacts. The credential-free ad-hoc package and a real packaged-app launch/clean-quit loop are verified. The canonical packager has no formal-distribution credential branch. Public macOS distribution, update publication, and installed old-to-new update acceptance are deferred, and no tag-triggered release workflow is active.
 
 ### 2.6 Design review and UI tuning
 
@@ -412,7 +412,7 @@ Vistrea exposes the same Engine use cases through:
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-The implemented Agent slice exposes 69 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review and acceptance, reversible tuning, the Screen Graph, exploration Operations, Wiki nodes and Collections, immutable publication, readable export, validation, build diffs, portable packs, object downloads, and Hub status/fetch/push/activity — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite, artifact paths, or Hub transport details. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
+The implemented Agent slice exposes 72 Host operations — Workspace status and recovery points, Snapshot capture and inspection, Runtime event timelines, design review and acceptance, reversible tuning, the Screen Graph, exploration Operations, Wiki nodes and Collections, immutable publication, readable export, validation, build diffs, portable packs, object downloads, and Hub status/fetch/push/activity — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite, artifact paths, or Hub transport details. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
 
 Additional Skill concepts:
 
@@ -521,7 +521,7 @@ The basic real-input automation, dangerous-action confirmation, and raised Store
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
 
-The Agent adapters cover all 65 implemented Host operations through one strict
+The Agent adapters cover all 72 implemented Host operations through one strict
 JSON CLI, with a machine-readable operation manifest enforcing Host/CLI/catalog
 parity. The optional multi-project Hub pack relay serves fast-forward push and
 fetch over loopback or TLS 1.3 with project-scoped viewer, contributor,
@@ -533,9 +533,10 @@ project-safe pollable activity feed; team permission evidence fans out to every
 affected project. Admins can grant, re-role, revoke, and rotate named-principal
 access. Project roles and team directory state persist in separate private
 atomic service documents while plaintext tokens remain one-time or
-descriptor-only values and rotate at restart. Searchable discovery,
-organization-wide roles, versioned collaboration mutations, subscriptions,
-and a user-facing Studio sync experience remain future Hub work.
+descriptor-only values and rotate at restart. Full-text Hub search,
+organization-wide roles, multi-team sharing, versioned collaboration
+mutations, subscriptions, and guided conflict resolution remain future Hub
+work.
 
 ## 12. First complete demonstration
 
@@ -563,7 +564,7 @@ A meaningful first complete demonstration should:
 - automatic physical-iPhone discovery/forwarding beyond the accepted explicit
   CoreDevice/operator IP and pinned-TLS authorization profile;
 - hierarchy-depth 3D versus native View/Layer tree inspection;
-- packaging and distribution for the macOS Studio and native SDK artifacts;
+- public distribution and update channels for the macOS Studio and native SDK artifacts;
 - Hub deployment, identity, permissions, and storage providers.
 
 These choices may evolve without changing the central definition: Vistrea connects runtime structure, design review and tuning, real exploration, versioned knowledge, validation, and Agent workflows around one shared application UI fact base.

@@ -11,6 +11,7 @@ The Inspector layout is responsive. Every structural width lives in `StudioLayou
 It currently provides:
 
 - packaged-app ownership of an embedded loopback Host plus a VS Code-style Workspace entry: Studio restores the last available Workspace, otherwise opens a Welcome surface with recent locations, explicit **New Workspace…** and **Open Workspace…** actions, missing-location recovery, and a return path to the still-open current Workspace. The File menu mirrors New/Open/Open Recent/Manage/Reveal/Close, the window and context bar show the current Workspace, and registered `.vistrea` directory packages can reopen through Finder. Recent preferences contain only canonical paths and last-opened times; source-built `swift run` keeps the canonical fixture mode unless explicit external Host credentials are supplied;
+- a dedicated Workspace Manager with a recent-Workspace sidebar and selected detail. The current Workspace can list and create retained Recovery Points, release individual retention policies, restore a selected backup, analyze and apply an exact garbage-collection plan, or run interrupted-restore and stale-lock recovery. Offline actions stop the owning Host, invoke a strict one-shot runner, and then reopen the same Workspace; maintenance and reopen failures remain separate. A Workspace whose Host failed to start remains repairable without a Host, while every other non-current Workspace must first use **Open to Manage**;
 - a Hub collaboration section that connects an HTTPS origin (or loopback HTTP), canonical Project ID, selected canonical refs, and a session-only bearer token through the managed local Host; it displays the effective direct/inherited identity, team-visible projects, local/remote ref relations, fast-forward fetch/push outcomes, explicit divergence conflicts, and a cursor-polled safe activity feed. URL, Project ID, and refs may persist as form preferences; the bearer token never enters `UserDefaults`, command arguments, logs, or response models and is forgotten on disconnect or process exit;
 - independent Host and Runtime connection status in the context bar;
 - an Application Version + Build scope picker deriving its choices from the listed Snapshot runtime contexts; selecting a scope sends all four scope fields to the Host, filters the Canvas through its build projection and the Evidence library locally, and a refresh never yanks a still-available scope selection;
@@ -40,18 +41,19 @@ It currently provides:
 - an implemented Design Review workbench kept out of the default Inspector by `StudioFeaturePolicy.designReviewVisibleByDefault == false`; its Design Reference, comparison, Difference promotion, and verification models, Host routes, CLI operations, fixtures, and tests remain intact so restoring the product surface does not require rebuilding the capability;
 - loading, empty, detail-error, connection-error, capture-error, and write-conflict states;
 - a capture action over the Host Local API;
-- a canonical fixture-backed development mode when no Host is configured, including in-memory fixture implementations of every write flow above.
+- a canonical fixture-backed development mode when no Host is configured, including in-memory fixture implementations of the product write flows above. Real Workspace recovery points and offline maintenance deliberately require the packaged managed-Host composition and are not simulated by fixture mode.
 
 Writes that the Host contract stamps with the Studio actor `{"kind": "human", "id": "studio"}` are: Review Issue transitions (`changed_by`), Difference promotion (`created_by`), fresh-build verification (`verified_by`), Wiki node and Knowledge Collection creation (`created_by`), Wiki node and Collection revisions (`updated_by`), Wiki links (`created_by`), Tuning Patch creation (`created_by`), Finding suppression (`created_by`), Screen State merges (`merged_by`), splits (`split_by`), and annotations (`annotated_by`), and design comparisons (`completed_by`). Hub fetch/push uses the separate canonical actor `{"kind": "human", "id": "vistrea-studio", "extensions": {}}`. Capture, validation runs, Build Diff, tuning apply and revert, and exploration run and cancel carry no actor field in the current Host contract.
 
-Runtime product presentation depends on the `HostClient` abstraction and does not access SQLite, Object Store paths, or Runtime transports directly. The application composition root alone selects the user-visible Workspace folder and owns the embedded Host process. Project Documents are a deliberate read-only workspace-shell surface: `StudioProjectDocumentLibrary` owns bounded source-project filesystem access and gives SwiftUI immutable summaries and Markdown content; it never reads or constructs Vistrea artifact paths. Reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
+Runtime product presentation depends on the `HostClient` and `WorkspaceMaintenanceClient` abstractions and does not access SQLite, Object Store paths, or Runtime transports directly. The application composition root alone selects the user-visible Workspace folder, owns the embedded Host process, and binds that folder to the strict one-shot maintenance runner. Project Documents are a deliberate read-only workspace-shell surface: `StudioProjectDocumentLibrary` owns bounded source-project filesystem access and gives SwiftUI immutable summaries and Markdown content; it never reads or constructs Vistrea artifact paths. Reusable product behavior remains in `engine/`, while storage implementations remain in `data/`.
 
 ## Local packaging
 
 The SwiftPM executable is the development source of truth. The release helper
 builds both supported architectures, assembles `Vistrea Studio.app`, embeds
 architecture-matched pinned Node.js 22.14.0 runtimes, the emitted production
-Host, exact protocol and migration resources, and the exact Sparkle dependency,
+Host, offline maintenance runner, exact protocol and migration resources, and
+the exact Sparkle dependency,
 then ad-hoc signs nested code in dependency order and produces local ZIP and
 DMG archives:
 
@@ -67,10 +69,11 @@ Packaging starts the embedded Host against a temporary Workspace, performs an
 authenticated status request, and repeats that probe after signing to verify
 clean descriptor and lock removal. That local path is ad-hoc signed, uses a
 local-only library-validation exemption for its Team-ID-less components, and
-intentionally has no update feed. The pinned Sparkle dependency and guarded
-distribution code remain available for future review, but formal distribution,
+intentionally has no update feed. The pinned Sparkle dependency remains behind
+a fail-closed metadata guard, but the canonical packager contains no updater
+metadata or formal-distribution credential path. Public distribution,
 automatic updates, and tag-triggered publication are deferred. `swift run`
-does not create an updater because it has no release Info.plist metadata.
+also does not create an updater because it has no release Info.plist metadata.
 
 See [the macOS local packaging guide](../../docs/release/STUDIO_MACOS_RELEASE.md)
 and the deferred [ADR-0009](../../docs/decisions/0009-direct-macos-distribution.md).
@@ -114,6 +117,8 @@ The adapter consumes these frozen local endpoints:
 - `GET /v1/objects/:hash`
 - `POST /v1/captures`
 - `GET /v1/events`
+- `GET /v1/workspace/recovery-points` and `POST /v1/workspace/recovery-points`
+- `POST /v1/workspace/recovery-points/release`
 - `GET /v1/review-issues` and `GET /v1/review-issues/:id`
 - `POST /v1/review-issues/:id/transitions`
 - `POST /v1/design-comparisons/:id/issues`

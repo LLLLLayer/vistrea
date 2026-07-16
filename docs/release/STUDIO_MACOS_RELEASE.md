@@ -1,13 +1,12 @@
 # Vistrea Studio macOS Local Packaging
 
-Vistrea Studio currently supports credential-free local packaging for
-development and product acceptance. Formal macOS distribution is deferred:
-there is no active tag-triggered release workflow, public update feed,
-notarized download, or automated GitHub Release publication.
+Vistrea Studio supports credential-free local packaging for development and
+product acceptance. Public distribution and automatic update publication are
+deferred. The repository has no tag-triggered release workflow and the local
+packager accepts no formal-distribution credentials.
 
 Do not create a `studio-vX.Y.Z` tag expecting release automation. ADR-0009 is
-deferred and must be reconsidered before a public distribution channel is
-activated.
+deferred and must be superseded before a public distribution channel is added.
 
 ## Local outputs
 
@@ -37,9 +36,9 @@ Use a new or empty output directory for each run. The version must be a
 canonical `X.Y.Z` value, and the build number must contain one to three
 canonical numeric components.
 
-This path requires no release credentials. It uses local ad-hoc code signing
-only so macOS can load the assembled application and its nested code during
-development acceptance.
+This path uses local ad-hoc signing only so macOS can load the assembled
+application and its nested code during development acceptance. It accepts no
+release identity, account, or publication credentials.
 
 ## What the local package verifies
 
@@ -47,34 +46,26 @@ The helper:
 
 1. builds both supported macOS architecture slices from the SwiftPM package;
 2. embeds architecture-matched pinned Node.js and production Host runtimes;
-3. copies the exact protocol schemas, SQLite migrations, and application
-   resources required by the embedded Host;
-4. includes the pinned Sparkle dependency while leaving updates disabled
-   because no feed metadata is configured;
-5. signs nested code in dependency order with a local ad-hoc identity;
+3. copies the exact protocol schemas, SQLite migrations, offline maintenance
+   runner, and application resources required by the embedded Host;
+4. includes the pinned Sparkle dependency while leaving updater creation
+   disabled because the bundle contains no feed metadata;
+5. ad-hoc signs nested code in dependency order;
 6. starts the embedded Host against a temporary Workspace before and after
    signing, performs an authenticated status request, and verifies descriptor
    and Workspace-lock cleanup;
 7. creates the app bundle, ZIP, DMG, and checksums without publishing them.
 
 The packaged application owns its embedded Host and can open, create, switch,
-and restore local Workspace locations without shell-provided Host credentials.
+restore, and repair local Workspace locations without shell-provided Host
+credentials.
 
 ## Current limitations
 
-Local packages are development artifacts. They are not evidence of public
-distribution acceptance, Gatekeeper acceptance, notarization, or installed
-old-to-new updates. The repository does not currently publish an appcast or
-provide an automated release lane.
+Local packages are development artifacts. They are not evidence of a public
+distribution channel or an installed old-to-new update. The repository does
+not currently publish an update feed or provide automated release publication.
 
-The guarded distribution and updater implementation remains in the packaging
-code so it can be reviewed when formal release work resumes, but it is not an
-active product or CI capability.
-
-## Resuming formal distribution
-
-Before formal distribution resumes, the project must review ADR-0009 again,
-define the supported channel and trust boundaries, restore a fail-closed CI
-workflow, document operational ownership, and complete installed old-to-new
-acceptance on supported macOS hardware. That future work is intentionally
-separate from the credential-free local packaging loop above.
+The canonical packager contains only the local ad-hoc path. Future public
+distribution work must introduce a newly reviewed trust model and
+implementation instead of enabling a dormant credential branch.

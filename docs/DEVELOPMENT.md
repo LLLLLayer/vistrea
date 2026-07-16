@@ -132,13 +132,14 @@ A cross-module feature additionally requires an integration test or a documented
 
 ## 10. Pull request CI matrix
 
-Every pull request and push to `main` runs six independent required jobs from
+Every pull request and push to `main` runs seven independent required jobs from
 `.github/workflows/pull-request-ci.yml`:
 
 | Job | Runner | Required gate |
 |---|---|---|
 | Node and Host | Ubuntu 24.04 | Locked install and `pnpm check` |
 | Vistrea Studio | macOS 15 | Managed Host build, Swift tests, Node/Swift Runtime interoperability, and Release build |
+| Vistrea Studio UI regression | macOS 15 | Deterministic presentation goldens, keyboard and accessibility checks, XCUITest workflows, and uploaded failure evidence |
 | iOS SDK | macOS 15 | Swift tests and Release build |
 | iOS Demo App | macOS 15 | Checksum-verified XcodeGen regeneration, generated-project diff, Simulator tests, and Release Simulator build |
 | Android SDK | Ubuntu 24.04 with Node, JDK 17, and API 36 | Unit tests, Debug/Release builds, Android Lint, Compose gates, Node/Kotlin Runtime interoperability, and the Release artifact boundary |

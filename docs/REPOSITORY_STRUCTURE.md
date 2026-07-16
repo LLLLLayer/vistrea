@@ -21,7 +21,7 @@ The repository structure must ensure:
 vistrea/
 ├── .github/
 │   └── workflows/
-│       └── pull-request-ci.yml  # six independent Node and native PR gates
+│       └── pull-request-ci.yml  # seven independent Node and native PR gates
 ├── .gitignore
 ├── .node-version
 ├── AGENTS.md
@@ -37,12 +37,17 @@ vistrea/
 │   │   ├── local-api-contracts.ts # public composition contracts
 │   │   ├── local-api.ts
 │   │   ├── local-host.ts
-│   │   └── serve.ts
+│   │   ├── serve.ts
+│   │   └── workspace-maintenance.ts # strict one-shot offline maintenance runner
 │   └── studio-macos/            # native SwiftUI Studio workspace
 │       ├── Package.resolved      # pinned remote release dependency identity
 │       ├── Package.swift
 │       ├── Resources/            # generated app-bundle metadata template
-│       ├── Sources/             # feature views, Host lifecycle, and model workflows split by domain
+│       ├── Sources/
+│       │   ├── VistreaStudioCore/        # Host and maintenance client contracts
+│       │   ├── VistreaStudioHostRuntime/ # embedded Host and one-shot runner lifecycle
+│       │   ├── VistreaStudioApp/         # Canvas, Inspector, and Workspace Manager UI
+│       │   └── VistreaStudioAcceptanceProbe/
 │       ├── Tests/
 │       └── README.md
 ├── protocol/
@@ -105,7 +110,9 @@ vistrea/
 │   │   ├── README.md
 │   │   ├── validation-engine.ts
 │   │   └── build-diff-engine.ts
-│   ├── workspace/               # README-only reserved use cases
+│   ├── workspace/
+│   │   ├── README.md
+│   │   └── workspace-maintenance-engine.ts # recovery-point application use cases
 │   ├── operations/              # README-only reserved use cases
 │   ├── versioning/              # README-only reserved use cases
 │   └── sync/                    # README-only reserved use cases
@@ -351,7 +358,10 @@ Runtime data is not source code:
 .vistrea/
 ├── workspace.json
 ├── .host.lock
+├── .restore-journal.json        # present only after an interrupted restore
 ├── metadata.sqlite
+├── .maintenance/                # transient same-volume maintenance staging
+├── .recovery/                   # preserved restore and stale-lock evidence
 ├── objects/
 ├── refs/
 ├── exports/

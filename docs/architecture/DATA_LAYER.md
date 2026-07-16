@@ -140,6 +140,17 @@ All metadata repositories used by one atomic Engine command come from one transa
 - apply migrations;
 - back up, compact, and restore.
 
+### `WorkspaceMaintenancePort`
+
+- create and list verified Workspace recovery points while the Host is online;
+- release exactly one recovery-point retention policy without deleting bytes;
+- return canonical backup and retention metadata without exposing physical
+  Object Store or recovery paths.
+
+Offline restore, interrupted-restore recovery, stale-lock recovery, and
+destructive garbage collection remain composition-root operations that require
+exclusive Workspace ownership.
+
 ### `SnapshotRepository`
 
 - persist and load Runtime Snapshots;

@@ -161,6 +161,12 @@ Earlier drafts of this catalog used different names for some implemented operati
 
 The operations below are reserved draft contracts. They are not implemented; the names, types, gates, and adapter cells describe intended semantics for their listed phase.
 
+This status describes the public Engine/Host/CLI parity surface. The local Data
+Layer and packaged Studio already use a strict offline maintenance adapter for
+restore, plan-bound garbage collection, interrupted-restore recovery, and
+stale-lock recovery. `CollectWorkspaceGarbage` remains reserved here until that
+capability is intentionally promoted as an Agent-facing operation.
+
 ### Workspace
 
 | Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |

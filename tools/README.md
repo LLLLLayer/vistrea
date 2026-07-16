@@ -12,7 +12,6 @@ regenerates and verifies the checked-in project.
 prepares architecture-matched pinned Node.js and production Host runtimes,
 proves the embedded Host can open and release a temporary Workspace before and
 after local ad-hoc signing, signs all nested Host and Sparkle code, and produces
-local ZIP/DMG artifacts and checksums. Guarded formal-distribution and update
-helpers remain dormant; there is no active publication workflow or public
-update feed. The tooling composes product runtime modules but does not own
-product logic.
+local ZIP/DMG artifacts and checksums. The packager has no formal-distribution
+credential inputs, publication workflow, or update-feed generator. The tooling
+composes product runtime modules but does not own product logic.
