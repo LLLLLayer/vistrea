@@ -9,6 +9,8 @@ This module is the authenticated loopback HTTP adapter shared by Vistrea Studio 
 - Every route requires exactly one `Authorization: Bearer <token>` header.
 - JSON request bodies default to a 64 KiB limit and cannot exceed a configured 1 MiB ceiling; Deep Wiki node writes get a fixed 2 MiB budget so the documented 262144-character Markdown capacity stays reachable.
 - JSON object keys must be unique at every nesting level and are checked before `JSON.parse` can normalize duplicate values.
+- Every JSON operation declares the type of every accepted command field. Unknown, missing, or mistyped fields fail at the Host boundary with HTTP `400` and `invalid_argument` before Engine dispatch.
+- Operations classified as body-free reject both fixed-length and streamed request bodies. Binary operations own an explicit media type and byte limit instead of entering JSON parsing.
 - HTTP errors expose stable codes and sanitized messages, never stack traces, secrets, SQLite rows, or physical paths.
 
 ## Version 1 routes

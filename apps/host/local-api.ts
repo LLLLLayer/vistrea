@@ -527,6 +527,15 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "source", "created_by"],
       ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "created_by"],
+      {
+        name: "string",
+        kind: "string",
+        canvas_size: "object",
+        pixel_size: "object",
+        asset_hash: "string",
+        source: "object",
+        created_by: "object",
+      },
     );
     const reference = await context.design.addDesignReference(
       command as unknown as Parameters<DesignReviewEngine["addDesignReference"]>[0],
@@ -543,6 +552,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["snapshot_id", "name", "created_by"],
       ["snapshot_id", "name", "created_by"],
+      { snapshot_id: "string", name: "string", created_by: "object" },
     );
     const reference = await context.design.promoteSnapshotBaseline(
       command as unknown as Parameters<DesignReviewEngine["promoteSnapshotBaseline"]>[0],
@@ -565,12 +575,17 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
-    const command = parseCommandObject(input, [
-      "design_reference_id",
-      "design_region",
-      "runtime_target",
-      "created_by",
-    ]);
+    const command = parseCommandObject(
+      input,
+      ["design_reference_id", "design_region", "runtime_target", "created_by"],
+      ["design_reference_id", "design_region", "runtime_target", "created_by"],
+      {
+        design_reference_id: "string",
+        design_region: "object",
+        runtime_target: "object",
+        created_by: "object",
+      },
+    );
     const mapping = context.design.mapDesignRegion(
       command as unknown as Parameters<DesignReviewEngine["mapDesignRegion"]>[0],
     );
@@ -611,6 +626,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["design_reference_id", "target_snapshot_id", "completed_by", "include_pixel"],
       ["design_reference_id", "target_snapshot_id", "completed_by"],
+      {
+        design_reference_id: "string",
+        target_snapshot_id: "string",
+        completed_by: "object",
+        include_pixel: "boolean",
+      },
     );
     const comparison = await context.design.runDesignComparison(
       command as unknown as Parameters<DesignReviewEngine["runDesignComparison"]>[0],
@@ -639,6 +660,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["difference_id", "title", "description", "created_by"],
       ["difference_id", "created_by"],
+      {
+        difference_id: "string",
+        title: "string",
+        description: "string",
+        created_by: "object",
+      },
     );
     const issue = context.design.createReviewIssueFromDifference({
       ...(command as unknown as Omit<
@@ -680,6 +707,19 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
           "actual",
           "created_by",
         ],
+        {
+          design_reference_id: "string",
+          mapping_id: "string",
+          comparison_id: "string",
+          runtime_target: "object",
+          title: "string",
+          description: "string",
+          category: "string",
+          severity: "string",
+          expected: "object",
+          actual: "object",
+          created_by: "object",
+        },
       );
       const issue = context.design.createReviewIssue(
         command as unknown as Parameters<DesignReviewEngine["createReviewIssue"]>[0],
@@ -717,6 +757,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["expected_revision", "to_state", "reason", "changed_by"],
       ["expected_revision", "to_state", "changed_by"],
+      {
+        expected_revision: "integer",
+        to_state: "string",
+        reason: "string",
+        changed_by: "object",
+      },
     );
     const issue = context.design.updateReviewIssue({
       ...(command as unknown as Omit<Parameters<DesignReviewEngine["updateReviewIssue"]>[0], "issue_id">),
@@ -751,6 +797,15 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         "verified_build_id",
         "verified_by",
       ],
+      {
+        expected_revision: "integer",
+        basis: "string",
+        result: "string",
+        verified_snapshot_id: "string",
+        verified_build_id: "string",
+        rationale: "string",
+        verified_by: "object",
+      },
     );
     const result = await context.design.verifyReviewIssue({
       ...(command as unknown as Omit<Parameters<DesignReviewEngine["verifyReviewIssue"]>[0], "issue_id">),
@@ -770,6 +825,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["expected_revision", "verified_by"],
       ["expected_revision", "verified_by"],
+      { expected_revision: "integer", verified_by: "object" },
     );
     const result = await context.designAcceptance.recaptureAndVerifyIssue({
       ...(command as unknown as Omit<
@@ -790,6 +846,15 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["title", "description", "target_snapshot_id", "issue_ids", "changes", "status", "created_by"],
       ["title", "target_snapshot_id", "changes", "created_by"],
+      {
+        title: "string",
+        description: "string",
+        target_snapshot_id: "string",
+        issue_ids: "string_array",
+        changes: "object_array",
+        status: "string",
+        created_by: "object",
+      },
     );
     const patch = context.tuning.createTuningPatch(
       command as unknown as Parameters<TuningEngine["createTuningPatch"]>[0],
@@ -826,6 +891,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["patch_id", "preview_ttl_ms"],
       ["patch_id"],
+      { patch_id: "string", preview_ttl_ms: "integer" },
     );
     const application = await context.tuning.applyTuningPatch(
       requireRuntimeTuning(context),
@@ -850,6 +916,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   if (tuningRevertMatch !== null) {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
+    assertNoRequestBody(request);
     const applicationId = decodeResourceSegment(
       tuningRevertMatch[1] as string,
       "tuning application ID",
@@ -887,6 +954,14 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["snapshot_id", "title", "state_kind", "entry", "capture_source", "session_id"],
       ["snapshot_id"],
+      {
+        snapshot_id: "string",
+        title: "string",
+        state_kind: "string",
+        entry: "boolean",
+        capture_source: "string",
+        session_id: "string",
+      },
     );
     const result = context.graph.recordStateObservation(
       command as unknown as Parameters<ScreenGraphEngine["recordStateObservation"]>[0],
@@ -903,6 +978,13 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["before_snapshot_id", "after_snapshot_id", "action", "capture_source", "session_id"],
       ["before_snapshot_id", "after_snapshot_id", "action"],
+      {
+        before_snapshot_id: "string",
+        after_snapshot_id: "string",
+        action: "object",
+        capture_source: "string",
+        session_id: "string",
+      },
     );
     const result = context.graph.recordTransitionObservation(
       command as unknown as Parameters<ScreenGraphEngine["recordTransitionObservation"]>[0],
@@ -1097,7 +1179,6 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   if (pathname === "/v1/exploration/operations") {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
-    const engine = requireExplorationOperations(context);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
     const command = parseCommandObject(
       input,
@@ -1111,7 +1192,17 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         "actor_id",
       ],
       ["maximum_actions"],
+      {
+        maximum_actions: "integer",
+        maximum_depth: "integer",
+        settle_milliseconds: "integer",
+        application_id: "string",
+        maximum_recovery_attempts: "integer",
+        excluded_stable_ids: "string_array",
+        actor_id: "string",
+      },
     );
+    const engine = requireExplorationOperations(context);
     const ref = engine.run(command as unknown as RunExplorationCommand);
     writeJson(response, 201, ref as unknown as JsonObject);
     return;
@@ -1199,6 +1290,16 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["kind", "title", "slug", "summary", "markdown", "labels", "related_resources", "created_by"],
       ["kind", "title", "markdown", "created_by"],
+      {
+        kind: "string",
+        title: "string",
+        slug: "string",
+        summary: "string",
+        markdown: "string",
+        labels: "string_array",
+        related_resources: "object_array",
+        created_by: "object",
+      },
     );
     const node = context.knowledge.createNode(
       command as unknown as Parameters<KnowledgeEngine["createNode"]>[0],
@@ -1229,6 +1330,16 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
         "updated_by",
       ],
       ["expected_revision", "updated_by"],
+      {
+        expected_revision: "integer",
+        title: "string",
+        summary: "string",
+        markdown: "string",
+        labels: "string_array",
+        related_resources: "object_array",
+        to_status: "string",
+        updated_by: "object",
+      },
     );
     const node = context.knowledge.updateNode({
       ...(command as unknown as Omit<
@@ -1273,6 +1384,14 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["source_node_id", "target", "relation", "label", "annotation", "created_by"],
       ["source_node_id", "target", "relation", "created_by"],
+      {
+        source_node_id: "string",
+        target: "object",
+        relation: "string",
+        label: "string",
+        annotation: "string",
+        created_by: "object",
+      },
     );
     const link = context.knowledge.linkNode(
       command as unknown as Parameters<KnowledgeEngine["linkNode"]>[0],
@@ -1287,7 +1406,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoSearchParameters(url);
     const linkId = decodeResourceSegment(wikiUnlinkMatch[1] as string, "wiki link ID");
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
-    const command = parseCommandObject(input, ["expected_revision"], ["expected_revision"]);
+    const command = parseCommandObject(
+      input,
+      ["expected_revision"],
+      ["expected_revision"],
+      { expected_revision: "integer" },
+    );
     context.knowledge.unlinkNode({
       wiki_link_id: linkId,
       expected_revision: command["expected_revision"] as number,
@@ -1508,6 +1632,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["snapshot_id", "categories", "configuration"],
       ["snapshot_id"],
+      { snapshot_id: "string", categories: "string_array", configuration: "object" },
     );
     const outcome = context.validation.validateSnapshot(
       command as unknown as Parameters<ValidationEngine["validateSnapshot"]>[0],
@@ -1524,6 +1649,7 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["project_id", "application_id", "configuration"],
       ["project_id", "application_id"],
+      { project_id: "string", application_id: "string", configuration: "object" },
     );
     const outcome = context.validation.validateScreenGraph(
       command as unknown as Parameters<ValidationEngine["validateScreenGraph"]>[0],
@@ -1540,6 +1666,13 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["project_id", "application_id", "left_build_id", "right_build_id", "baseline_tag"],
       ["project_id", "application_id", "left_build_id", "right_build_id"],
+      {
+        project_id: "string",
+        application_id: "string",
+        left_build_id: "string",
+        right_build_id: "string",
+        baseline_tag: "string",
+      },
     );
     const diff = context.buildDiffs.compareBuilds(
       command as unknown as Parameters<BuildDiffEngine["compareBuilds"]>[0],
@@ -1605,6 +1738,13 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["expected_finding_revision", "reason_code", "justification", "created_by", "expires_at"],
       ["expected_finding_revision", "reason_code", "justification", "created_by"],
+      {
+        expected_finding_revision: "integer",
+        reason_code: "string",
+        justification: "string",
+        created_by: "object",
+        expires_at: "string",
+      },
     );
     const finding = context.validation.suppressFinding({
       ...(command as unknown as Omit<
@@ -1638,6 +1778,13 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       input,
       ["ref_names", "commit_ids", "prerequisite_commit_ids", "created_by", "message"],
       ["created_by"],
+      {
+        ref_names: "string_array",
+        commit_ids: "string_array",
+        prerequisite_commit_ids: "string_array",
+        created_by: "object",
+        message: "string",
+      },
     );
     const pack = await context.exchange.exportPack(
       command as unknown as Parameters<PackExchangeService["exportPack"]>[0],
@@ -1746,10 +1893,10 @@ function assertMethod(request: IncomingMessage, expected: "GET" | "POST"): void 
 function assertNoRequestBody(request: IncomingMessage): void {
   const contentLength = request.headers["content-length"];
   if (contentLength !== undefined && contentLength !== "0") {
-    throw invalidArgument("GET requests must not contain a body.");
+    throw invalidArgument("This operation must not contain a request body.");
   }
   if (request.headers["transfer-encoding"] !== undefined) {
-    throw invalidArgument("GET requests must not contain a body.");
+    throw invalidArgument("This operation must not contain a request body.");
   }
 }
 
@@ -1968,13 +2115,19 @@ function parseReleaseRecoveryPointCommand(input: unknown): {
 
 /** Structural command parsing; protocol-value validation stays in the Engine. */
 /** The command field shapes the Host checks before it trusts a body. */
-type CommandFieldType = "string" | "string_array" | "integer" | "object";
+type CommandFieldType =
+  | "boolean"
+  | "integer"
+  | "object"
+  | "object_array"
+  | "string"
+  | "string_array";
 
-function parseCommandObject(
+function parseCommandObject<const Keys extends readonly string[]>(
   input: unknown,
-  allowedKeys: readonly string[],
-  requiredKeys: readonly string[] = allowedKeys,
-  types: Readonly<Record<string, CommandFieldType>> = {},
+  allowedKeys: Keys,
+  requiredKeys: readonly Keys[number][],
+  types: Readonly<Record<Keys[number], CommandFieldType>>,
 ): JsonObject {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
     throw invalidArgument("The command body must be a JSON object.");
@@ -1994,19 +2147,27 @@ function parseCommandObject(
   // The Host is the trust boundary. Checking only field names lets a wrong type
   // reach the Engine, where `new Set("abc")` becomes three plausible state ids
   // and the caller gets a misleading not_found instead of the real complaint.
-  for (const [key, expected] of Object.entries(types)) {
+  for (const key of allowedKeys) {
     if (!(key in value) || value[key] === undefined) {
       continue;
     }
+    const expected = types[key as Keys[number]];
     const actual = value[key];
     const matches =
-      expected === "string"
+      expected === "boolean"
+        ? typeof actual === "boolean"
+        : expected === "string"
         ? typeof actual === "string"
         : expected === "integer"
           ? typeof actual === "number" && Number.isSafeInteger(actual)
           : expected === "string_array"
             ? Array.isArray(actual) && actual.every((item) => typeof item === "string")
-            : actual !== null && typeof actual === "object" && !Array.isArray(actual);
+            : expected === "object_array"
+              ? Array.isArray(actual) &&
+                actual.every(
+                  (item) => item !== null && typeof item === "object" && !Array.isArray(item),
+                )
+              : actual !== null && typeof actual === "object" && !Array.isArray(actual);
     if (!matches) {
       throw invalidArgument(`The ${key} command field must be ${COMMAND_TYPE_NAMES[expected]}.`);
     }
@@ -2015,10 +2176,12 @@ function parseCommandObject(
 }
 
 const COMMAND_TYPE_NAMES: Readonly<Record<CommandFieldType, string>> = {
+  boolean: "a boolean",
   string: "a string",
   string_array: "an array of strings",
   integer: "an integer",
   object: "an object",
+  object_array: "an array of objects",
 };
 
 function parseReviewIssueQuery(url: URL):

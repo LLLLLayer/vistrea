@@ -5,17 +5,29 @@ public struct StudioCoreAcceptanceRequest: Equatable, Sendable {
     public let requireConnectedRuntime: Bool
     public let requireCanvasState: Bool
     public let exerciseReversibleTuningAndQuality: Bool
+    public let expectedCollectionID: String?
+    public let expectedTuningPatchID: String?
+    public let leftBuildID: String?
+    public let rightBuildID: String?
 
     public init(
         expectedSnapshotID: String,
         requireConnectedRuntime: Bool = true,
         requireCanvasState: Bool = true,
-        exerciseReversibleTuningAndQuality: Bool = false
+        exerciseReversibleTuningAndQuality: Bool = false,
+        expectedCollectionID: String? = nil,
+        expectedTuningPatchID: String? = nil,
+        leftBuildID: String? = nil,
+        rightBuildID: String? = nil
     ) {
         self.expectedSnapshotID = expectedSnapshotID
         self.requireConnectedRuntime = requireConnectedRuntime
         self.requireCanvasState = requireCanvasState
         self.exerciseReversibleTuningAndQuality = exerciseReversibleTuningAndQuality
+        self.expectedCollectionID = expectedCollectionID
+        self.expectedTuningPatchID = expectedTuningPatchID
+        self.leftBuildID = leftBuildID
+        self.rightBuildID = rightBuildID
     }
 }
 
@@ -37,7 +49,10 @@ public struct StudioCoreAcceptanceResult: Codable, Equatable, Sendable {
     public let wikiNodeCount: Int
     public let designReferenceCount: Int
     public let tuningPreviewReverted: Bool
+    public let collectionLoaded: Bool
+    public let sourceHandoffActionable: Bool
     public let validationCompleted: Bool
+    public let buildDiffCompleted: Bool
     public let coreWorkflowCompleted: Bool
 
     private enum CodingKeys: String, CodingKey {
@@ -58,7 +73,10 @@ public struct StudioCoreAcceptanceResult: Codable, Equatable, Sendable {
         case wikiNodeCount = "wiki_node_count"
         case designReferenceCount = "design_reference_count"
         case tuningPreviewReverted = "tuning_preview_reverted"
+        case collectionLoaded = "collection_loaded"
+        case sourceHandoffActionable = "source_handoff_actionable"
         case validationCompleted = "validation_completed"
+        case buildDiffCompleted = "build_diff_completed"
         case coreWorkflowCompleted = "core_workflow_completed"
     }
 }
@@ -103,8 +121,31 @@ public enum StudioCoreAcceptanceWorkflow {
         guard model.snapshots.contains(where: { $0.id == request.expectedSnapshotID }) else {
             throw failure("The expected Snapshot is not present in the Workspace.")
         }
-        guard accepted(model.eventsPhase), accepted(model.wikiPhase), accepted(model.tuningPhase) else {
+        // A persisted local Workspace remains inspectable with no Runtime
+        // connected. In that mode the Host intentionally rejects the active
+        // tuning query, while events, Wiki, source handoff, and Quality must
+        // remain available. Device acceptance still requires the tuning pane.
+        guard accepted(model.eventsPhase),
+              accepted(model.wikiPhase),
+              (!request.requireConnectedRuntime || accepted(model.tuningPhase))
+        else {
             throw failure("A supporting Studio pane did not load.")
+        }
+
+        var collectionLoaded = false
+        if let expectedCollectionID = request.expectedCollectionID {
+            guard accepted(model.knowledgeCollectionsPhase),
+                  model.knowledgeCollections.contains(where: { $0.id == expectedCollectionID })
+            else {
+                throw failure("The expected Knowledge Collection did not load.")
+            }
+            await model.selectKnowledgeCollection(id: expectedCollectionID)
+            guard model.knowledgeCollectionDetailPhase == .content,
+                  model.selectedKnowledgeCollection?.id == expectedCollectionID
+            else {
+                throw failure("The expected Knowledge Collection did not open.")
+            }
+            collectionLoaded = true
         }
 
         await model.selectSnapshot(id: request.expectedSnapshotID)
@@ -147,7 +188,10 @@ public enum StudioCoreAcceptanceWorkflow {
                 graph: nil,
                 selectedScreenStateID: nil,
                 tuningPreviewReverted: false,
-                validationCompleted: false
+                collectionLoaded: collectionLoaded,
+                sourceHandoffActionable: false,
+                validationCompleted: false,
+                buildDiffCompleted: false
             )
         }
         guard graph.buildScope?.applicationVersion == scope.applicationVersion,
@@ -179,6 +223,8 @@ public enum StudioCoreAcceptanceWorkflow {
 
         var tuningPreviewReverted = false
         var validationCompleted = false
+        var sourceHandoffActionable = false
+        var buildDiffCompleted = false
         if request.exerciseReversibleTuningAndQuality {
             guard let selectedNode = model.selectedNode,
                   selectedNode.stableID != nil
@@ -240,6 +286,57 @@ public enum StudioCoreAcceptanceWorkflow {
             }
         }
 
+        if let patchID = request.expectedTuningPatchID {
+            let handoff = try await client.getTuningSourceSuggestions(patchID: patchID)
+            guard handoff.patchID == patchID,
+                  handoff.targetSnapshotID == request.expectedSnapshotID,
+                  !handoff.suggestions.isEmpty,
+                  handoff.suggestions.allSatisfy({
+                      $0.status == "actionable"
+                          && $0.sourceContext != nil
+                          && !$0.codingAgentInstructions.isEmpty
+                  })
+            else {
+                throw failure("The persisted tuning patch did not produce an actionable source handoff.")
+            }
+            sourceHandoffActionable = true
+        }
+
+        if request.expectedCollectionID != nil
+            || request.expectedTuningPatchID != nil
+            || request.leftBuildID != nil
+            || request.rightBuildID != nil
+        {
+            await model.validateSelectedSnapshot()
+            guard accepted(model.validationPhase),
+                  model.lastValidationRun != nil,
+                  model.validationError == nil
+            else {
+                throw failure("The persisted Snapshot did not complete local validation.")
+            }
+            validationCompleted = true
+        }
+
+        switch (request.leftBuildID, request.rightBuildID) {
+        case let (.some(leftBuildID), .some(rightBuildID)):
+            await model.compareBuilds(leftBuildID: leftBuildID, rightBuildID: rightBuildID)
+            guard model.buildDiffPhase == .content,
+                  let diff = model.lastBuildDiff,
+                  diff.leftBuild.id == leftBuildID,
+                  diff.rightBuild.id == rightBuildID,
+                  diff.summary.total > 0,
+                  !diff.entries.isEmpty,
+                  model.buildDiffError == nil
+            else {
+                throw failure("The persisted build pair did not produce a non-empty Build Diff.")
+            }
+            buildDiffCompleted = true
+        case (.none, .none):
+            break
+        default:
+            throw failure("Build Diff acceptance requires both build identifiers.")
+        }
+
         return result(
             model: model,
             status: status,
@@ -248,7 +345,10 @@ public enum StudioCoreAcceptanceWorkflow {
             graph: graph,
             selectedScreenStateID: stateID,
             tuningPreviewReverted: tuningPreviewReverted,
-            validationCompleted: validationCompleted
+            collectionLoaded: collectionLoaded,
+            sourceHandoffActionable: sourceHandoffActionable,
+            validationCompleted: validationCompleted,
+            buildDiffCompleted: buildDiffCompleted
         )
     }
 
@@ -271,7 +371,10 @@ public enum StudioCoreAcceptanceWorkflow {
         graph: CanvasGraph?,
         selectedScreenStateID: String?,
         tuningPreviewReverted: Bool,
-        validationCompleted: Bool
+        collectionLoaded: Bool,
+        sourceHandoffActionable: Bool,
+        validationCompleted: Bool,
+        buildDiffCompleted: Bool
     ) -> StudioCoreAcceptanceResult {
         StudioCoreAcceptanceResult(
             snapshotID: snapshot.id,
@@ -291,7 +394,10 @@ public enum StudioCoreAcceptanceWorkflow {
             wikiNodeCount: model.wikiNodes.count,
             designReferenceCount: model.designReferences.count,
             tuningPreviewReverted: tuningPreviewReverted,
+            collectionLoaded: collectionLoaded,
+            sourceHandoffActionable: sourceHandoffActionable,
             validationCompleted: validationCompleted,
+            buildDiffCompleted: buildDiffCompleted,
             coreWorkflowCompleted: true
         )
     }

@@ -54,4 +54,16 @@ final class StudioLaunchConfigurationTests: XCTestCase {
             .fixtureCanvasFailure
         )
     }
+
+    func testPersistedWorkspaceModeRequiresItsOwnExplicitArgument() {
+        let configuration = StudioLaunchConfiguration(
+            arguments: [
+                "VistreaStudio",
+                StudioLaunchConfiguration.uiTestingWorkspaceArgument,
+                StudioLaunchConfiguration.uiTestingPersistedWorkspaceArgument,
+            ]
+        )
+        XCTAssertEqual(configuration.content, .persistedWorkspace)
+        XCTAssertTrue(configuration.isUITesting)
+    }
 }

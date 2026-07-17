@@ -16,7 +16,17 @@ class StudioUITestCase: XCTestCase {
         static let workspaceMaintenance = "studio.workspace.maintenance"
         static let workspaceMaintenanceCreateRecoveryPoint =
             "studio.workspace.maintenance.create-recovery-point"
+        static let workspaceMaintenanceRecoveryPointReason =
+            "studio.workspace.maintenance.recovery-point-reason"
+        static let workspaceMaintenanceResult = "studio.workspace.maintenance.result"
         static let workspaceMaintenanceGarbage = "studio.workspace.maintenance.gc"
+        static let workspaceMaintenanceGarbageAnalyze = "studio.workspace.maintenance.gc-analyze"
+        static let workspaceMaintenanceGarbagePreview = "studio.workspace.maintenance.gc-preview"
+        static let workspaceMaintenanceGarbageApply = "studio.workspace.maintenance.gc-apply"
+        static let workspaceMaintenanceGarbageConfirmationField =
+            "studio.workspace.maintenance.gc-confirmation-field"
+        static let workspaceMaintenanceRestoreConfirmation =
+            "studio.workspace.maintenance.restore-confirmation"
         static let workspaceMaintenanceRecoverInterruptedRestore =
             "studio.workspace.maintenance.recover-interrupted-restore"
         static let workspaceMaintenanceRecoverStaleLock =
@@ -56,6 +66,10 @@ class StudioUITestCase: XCTestCase {
         static func canvasState(_ stateID: String) -> String {
             "studio.canvas.state.\(stateID)"
         }
+
+        static func workspaceMaintenanceRestore(_ recoveryPointID: String) -> String {
+            "studio.workspace.maintenance.restore.\(recoveryPointID)"
+        }
     }
 
     enum Fixture {
@@ -63,13 +77,36 @@ class StudioUITestCase: XCTestCase {
         static let catalogVariantStateID = "screenstate_019f0000-0000-7000-8000-0000000000c3"
 
         static var snapshotPath: String {
+            repositoryRoot
+                .appending(path: "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json")
+                .path
+        }
+
+        static var repositoryRoot: URL {
             var repositoryRoot = URL(fileURLWithPath: #filePath)
             for _ in 0..<4 {
                 repositoryRoot.deleteLastPathComponent()
             }
             return repositoryRoot
-                .appending(path: "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json")
-                .path
+        }
+    }
+
+    struct PersistedWorkspaceFixture: Decodable {
+        let rootURL: URL
+        let workspacePath: String
+        let recoveryPointID: String
+
+        private enum CodingKeys: String, CodingKey {
+            case workspacePath = "workspace_path"
+            case recoveryPointID = "recovery_point_id"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            workspacePath = try container.decode(String.self, forKey: .workspacePath)
+            recoveryPointID = try container.decode(String.self, forKey: .recoveryPointID)
+            rootURL = URL(fileURLWithPath: workspacePath, isDirectory: true)
+                .deletingLastPathComponent()
         }
     }
 
@@ -104,6 +141,84 @@ class StudioUITestCase: XCTestCase {
         XCTAssertTrue(
             waitUntil(timeout: 5) { application.state == .runningForeground },
             "Studio did not reach the foreground after launch."
+        )
+        return application
+    }
+
+    func preparePersistedWorkspaceFixture() throws -> PersistedWorkspaceFixture {
+        let environment = ProcessInfo.processInfo.environment
+        let nodePath = try XCTUnwrap(
+            environment["VISTREA_UI_TEST_NODE"],
+            "VISTREA_UI_TEST_NODE must name the CI Node.js executable."
+        )
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "vistrea-studio-ui-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let workspace = root.appending(path: "workspace", directoryHint: .isDirectory)
+        let manifest = root.appending(path: "fixture.json", directoryHint: .notDirectory)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: nodePath, isDirectory: false)
+        process.currentDirectoryURL = Fixture.repositoryRoot
+        process.arguments = [
+            Fixture.repositoryRoot
+                .appending(path: ".build/typescript/tools/acceptance/disposable-workspace.js")
+                .path,
+            "--workspace", workspace.path,
+            "--manifest", manifest.path,
+        ]
+        let standardOutput = Pipe()
+        let standardError = Pipe()
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+        try process.run()
+        process.waitUntilExit()
+        let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
+        XCTAssertEqual(
+            process.terminationStatus,
+            0,
+            "Disposable Workspace generation failed: \(String(decoding: errorData, as: UTF8.self))"
+        )
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "VistreaStudioUITests", code: Int(process.terminationStatus))
+        }
+        let decoded = try JSONDecoder().decode(
+            PersistedWorkspaceFixture.self,
+            from: Data(contentsOf: manifest)
+        )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: root)
+        }
+        return decoded
+    }
+
+    func launchPersistedStudio(_ fixture: PersistedWorkspaceFixture) throws -> XCUIApplication {
+        let environment = ProcessInfo.processInfo.environment
+        let hostResources = try XCTUnwrap(
+            environment["VISTREA_UI_TEST_HOST_RESOURCES"],
+            "VISTREA_UI_TEST_HOST_RESOURCES must contain HostRuntime."
+        )
+        let applicationSupport = fixture.rootURL
+            .appending(path: "application-support", directoryHint: .isDirectory)
+        let application = XCUIApplication()
+        application.launchArguments = ["--ui-testing-persisted-workspace"]
+        application.launchEnvironment["VISTREA_UI_TEST_WORKSPACE_PATH"] = fixture.workspacePath
+        application.launchEnvironment["VISTREA_UI_TEST_HOST_RESOURCES"] = hostResources
+        application.launchEnvironment["VISTREA_UI_TEST_APPLICATION_SUPPORT_PATH"] =
+            applicationSupport.path
+        application.launch()
+        addTeardownBlock { @MainActor in
+            if application.state != .notRunning {
+                application.terminate()
+            }
+        }
+        XCTAssertTrue(
+            waitUntil(timeout: 15) { application.state == .runningForeground },
+            "Studio did not reach the foreground with the persisted fixture."
         )
         return application
     }
@@ -217,6 +332,24 @@ class StudioUITestCase: XCTestCase {
         XCTAssertTrue(
             application.staticTexts[label].waitForExistence(timeout: timeout),
             "Expected visible text \(label).",
+            file: file,
+            line: line
+        )
+    }
+
+    func requireTextContaining(
+        _ fragment: String,
+        in application: XCUIApplication,
+        timeout: TimeInterval = 8,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let result = application.staticTexts
+            .matching(NSPredicate(format: "label CONTAINS %@", fragment))
+            .firstMatch
+        XCTAssertTrue(
+            result.waitForExistence(timeout: timeout),
+            "Expected visible text containing \(fragment).",
             file: file,
             line: line
         )

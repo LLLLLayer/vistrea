@@ -4,9 +4,10 @@ import VistreaStudioCore
 
 /// A deterministic, isolated launch surface for macOS UI automation. The
 /// production application never infers this mode from environment state: an
-/// explicit process argument is required, and the mode always uses the
-/// in-memory canonical Fixture Workspace instead of starting a Host or reading
-/// the user's recent Workspace selection.
+/// explicit process argument is required. Most modes use the in-memory
+/// canonical Fixture Workspace; the persisted mode starts a managed Host only
+/// against caller-supplied disposable paths and never reads the user's recent
+/// Workspace selection.
 struct StudioLaunchConfiguration: Equatable {
     enum Content: Equatable {
         case production
@@ -14,17 +15,25 @@ struct StudioLaunchConfiguration: Equatable {
         case fixtureWelcome
         case fixtureCanvasEmpty
         case fixtureCanvasFailure
+        case persistedWorkspace
     }
 
     static let uiTestingWorkspaceArgument = "--ui-testing"
     static let uiTestingWelcomeArgument = "--ui-testing-welcome"
     static let uiTestingCanvasEmptyArgument = "--ui-testing-canvas-empty"
     static let uiTestingCanvasFailureArgument = "--ui-testing-canvas-error"
+    static let uiTestingPersistedWorkspaceArgument = "--ui-testing-persisted-workspace"
+    static let uiTestingWorkspacePathEnvironment = "VISTREA_UI_TEST_WORKSPACE_PATH"
+    static let uiTestingHostResourcesEnvironment = "VISTREA_UI_TEST_HOST_RESOURCES"
+    static let uiTestingApplicationSupportEnvironment =
+        "VISTREA_UI_TEST_APPLICATION_SUPPORT_PATH"
 
     let content: Content
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
-        if arguments.contains(Self.uiTestingCanvasFailureArgument) {
+        if arguments.contains(Self.uiTestingPersistedWorkspaceArgument) {
+            content = .persistedWorkspace
+        } else if arguments.contains(Self.uiTestingCanvasFailureArgument) {
             content = .fixtureCanvasFailure
         } else if arguments.contains(Self.uiTestingCanvasEmptyArgument) {
             content = .fixtureCanvasEmpty
@@ -65,13 +74,18 @@ enum StudioAccessibilityID {
         "studio.workspace.maintenance.recovery-points"
     static let workspaceMaintenanceCreateRecoveryPoint =
         "studio.workspace.maintenance.create-recovery-point"
+    static let workspaceMaintenanceRecoveryPointReason =
+        "studio.workspace.maintenance.recovery-point-reason"
     static let workspaceMaintenanceRestoreConfirmation =
         "studio.workspace.maintenance.restore-confirmation"
     static let workspaceMaintenanceGarbage = "studio.workspace.maintenance.gc"
+    static let workspaceMaintenanceGarbageAnalyze = "studio.workspace.maintenance.gc-analyze"
     static let workspaceMaintenanceGarbagePreview = "studio.workspace.maintenance.gc-preview"
     static let workspaceMaintenanceGarbageApply = "studio.workspace.maintenance.gc-apply"
     static let workspaceMaintenanceGarbageConfirmation =
         "studio.workspace.maintenance.gc-confirmation"
+    static let workspaceMaintenanceGarbageConfirmationField =
+        "studio.workspace.maintenance.gc-confirmation-field"
     static let workspaceMaintenanceRecoverInterruptedRestore =
         "studio.workspace.maintenance.recover-interrupted-restore"
     static let workspaceMaintenanceRecoverStaleLock =
