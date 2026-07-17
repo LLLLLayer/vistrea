@@ -210,6 +210,10 @@ class StudioUITestCase: XCTestCase {
         application.launchEnvironment["VISTREA_UI_TEST_HOST_RESOURCES"] = hostResources
         application.launchEnvironment["VISTREA_UI_TEST_APPLICATION_SUPPORT_PATH"] =
             applicationSupport.path
+        // The disposable candidate is intentionally new. Select the same
+        // explicit zero-age policy as packaged acceptance while production
+        // keeps the conservative seven-day default.
+        application.launchEnvironment["VISTREA_UI_TEST_GC_MINIMUM_AGE_DAYS"] = "0"
         application.launch()
         addTeardownBlock { @MainActor in
             if application.state != .notRunning {

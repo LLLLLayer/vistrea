@@ -62,6 +62,9 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         workspaceMaintenanceModel = WorkspaceMaintenanceViewModel(
             client: composition.managedHost?.client
         )
+        if let minimumAgeDays = launchConfiguration.garbageMinimumAgeDaysOverride {
+            workspaceMaintenanceModel.garbageMinimumAgeDays = minimumAgeDays
+        }
         windowContent = composition.opensWelcome ? .welcome : .workspace
         workspaceMessage = composition.startupMessage
         selectedManagerWorkspaceURL = composition.managedHost?.workspaceURL ??

@@ -27,10 +27,16 @@ struct StudioLaunchConfiguration: Equatable {
     static let uiTestingHostResourcesEnvironment = "VISTREA_UI_TEST_HOST_RESOURCES"
     static let uiTestingApplicationSupportEnvironment =
         "VISTREA_UI_TEST_APPLICATION_SUPPORT_PATH"
+    static let uiTestingGarbageMinimumAgeDaysEnvironment =
+        "VISTREA_UI_TEST_GC_MINIMUM_AGE_DAYS"
 
     let content: Content
+    let garbageMinimumAgeDaysOverride: Int?
 
-    init(arguments: [String] = ProcessInfo.processInfo.arguments) {
+    init(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         if arguments.contains(Self.uiTestingPersistedWorkspaceArgument) {
             content = .persistedWorkspace
         } else if arguments.contains(Self.uiTestingCanvasFailureArgument) {
@@ -43,6 +49,16 @@ struct StudioLaunchConfiguration: Equatable {
             content = .fixtureWorkspace
         } else {
             content = .production
+        }
+
+        if content == .persistedWorkspace,
+           let rawValue = environment[Self.uiTestingGarbageMinimumAgeDaysEnvironment],
+           let value = Int(rawValue),
+           (0...365).contains(value)
+        {
+            garbageMinimumAgeDaysOverride = value
+        } else {
+            garbageMinimumAgeDaysOverride = nil
         }
     }
 
