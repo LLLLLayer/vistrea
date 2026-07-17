@@ -158,6 +158,8 @@ jobs:
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
             -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Build.xcresult" \
             -parallel-testing-enabled NO \
+            VISTREA_UI_TEST_NODE="$VISTREA_UI_TEST_NODE" \
+            VISTREA_UI_TEST_HOST_RESOURCES="$VISTREA_UI_TEST_HOST_RESOURCES" \
             build-for-testing \
             | tee "$RUNNER_TEMP/studio-ui-build.log"
 
@@ -172,6 +174,8 @@ jobs:
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
             -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Tests.xcresult" \
             -parallel-testing-enabled NO \
+            VISTREA_UI_TEST_NODE="$VISTREA_UI_TEST_NODE" \
+            VISTREA_UI_TEST_HOST_RESOURCES="$VISTREA_UI_TEST_HOST_RESOURCES" \
             test-without-building \
             | tee "$RUNNER_TEMP/studio-ui-tests.log"
 
