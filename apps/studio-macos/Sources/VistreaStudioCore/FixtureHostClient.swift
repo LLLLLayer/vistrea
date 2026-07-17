@@ -8,13 +8,34 @@ public actor FixtureHostClient: HostClient {
     private let eventTimeline: EventTimeline
     private var reviewIssues: [ReviewIssueSummary]
     private var canvasGraph: CanvasGraph?
+    private let canvasGraphFailureMessage: String?
     private var wikiDetails: [WikiNodeDetail]
+    private var knowledgeCollectionsByID: [String: KnowledgeCollectionSummary] = [:]
+    private var validationRunsByID: [String: ValidationRunSummary] = [:]
+    private var validationFindingsByID: [String: ValidationFindingSummary] = [:]
+    private var buildDiffsByID: [String: BuildDiffSummary] = [:]
     private var designReferences: [DesignReferenceDetail]
     private var designComparisons: [DesignComparisonDetail] = []
+    private var recaptureSnapshots: [RuntimeSnapshot]
+
+    private struct PromotedIssueSource {
+        let comparisonID: String
+        let category: String
+        let nodeID: String
+        let stableID: String?
+    }
+
+    private var promotedIssueSources: [String: PromotedIssueSource] = [:]
+    private var promotedDifferenceIssueIDs: [String: String] = [:]
 
     private struct StoredTuningPatch {
         let summary: TuningPatchSummary
-        let changes: [TuningChangeDraft]
+        let changes: [StoredTuningChange]
+    }
+
+    private struct StoredTuningChange {
+        let id: String
+        let draft: TuningChangeDraft
     }
 
     private struct StoredWikiLink {
@@ -42,7 +63,11 @@ public actor FixtureHostClient: HostClient {
     private var screenStatesByID: [String: ScreenStateDetail] = [:]
     private var wikiLinks: [StoredWikiLink] = []
     private let automationConfigured: Bool
+    private let failActiveTuningReloadWhileApplicationIsActive: Bool
     private var explorationRun: ScriptedExplorationRun?
+    /// Captures the most recent preview lifetime so acceptance tests can prove
+    /// that automated probes never request an unbounded Runtime override.
+    public private(set) var lastTuningPreviewTTLMilliseconds: Int?
     /// How many times the scripted exploration Operation was polled; lets
     /// tests prove the poll loop stopped.
     public private(set) var explorationPollCount = 0
@@ -73,17 +98,24 @@ public actor FixtureHostClient: HostClient {
         eventTimeline: EventTimeline = EventTimeline(events: [], reportedGaps: []),
         reviewIssues: [ReviewIssueSummary] = [],
         canvasGraph: CanvasGraph? = nil,
+        canvasGraphFailureMessage: String? = nil,
         wikiNodes: [WikiNodeSummary] = [],
         designReferences: [DesignReferenceDetail]? = nil,
-        automationConfigured: Bool = true
+        recaptureSnapshots: [RuntimeSnapshot] = [],
+        automationConfigured: Bool = true,
+        failActiveTuningReloadWhileApplicationIsActive: Bool = false
     ) {
         self.status = status
         self.automationConfigured = automationConfigured
+        self.failActiveTuningReloadWhileApplicationIsActive =
+            failActiveTuningReloadWhileApplicationIsActive
         snapshotsByID = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.snapshotID.rawValue, $0) })
         self.objectsByHash = objectsByHash
         self.eventTimeline = eventTimeline
         self.reviewIssues = reviewIssues
         self.canvasGraph = canvasGraph
+        self.canvasGraphFailureMessage = canvasGraphFailureMessage
+        self.recaptureSnapshots = recaptureSnapshots
         wikiDetails = wikiNodes.map { node in
             WikiNodeDetail(
                 wikiNodeID: node.wikiNodeID,
@@ -138,6 +170,15 @@ public actor FixtureHostClient: HostClient {
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
         screenGraphLoadCount += 1
+        if let canvasGraphFailureMessage {
+            throw HostClientError.server(
+                statusCode: 503,
+                requestID: nil,
+                code: "fixture_canvas_unavailable",
+                message: canvasGraphFailureMessage,
+                retryable: true
+            )
+        }
         guard let canvasGraph else {
             throw HostClientError.server(
                 statusCode: 404,
@@ -148,6 +189,28 @@ public actor FixtureHostClient: HostClient {
             )
         }
         return canvasGraph
+    }
+
+    public func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        let graph = try await getScreenGraph(projectID: projectID, applicationID: applicationID)
+        return CanvasGraph(
+            screenGraphID: graph.screenGraphID,
+            revision: graph.revision,
+            entryStateIDs: graph.entryStateIDs,
+            states: graph.states,
+            transitions: graph.transitions,
+            buildScope: CanvasBuildScope(
+                buildID: buildID,
+                applicationVersion: applicationVersion,
+                screenStateIDs: graph.states.map(\.id),
+                transitionIDs: graph.transitions.map(\.id)
+            )
+        )
     }
 
     public func searchWikiNodes(text: String?) async throws -> WikiNodePage {
@@ -170,6 +233,168 @@ public actor FixtureHostClient: HostClient {
             return ReviewIssuePage(items: reviewIssues)
         }
         return ReviewIssuePage(items: reviewIssues.filter { states.contains($0.state) })
+    }
+
+    public func validateSnapshot(
+        _ draft: ValidateSnapshotDraft
+    ) async throws -> ValidationOutcomeSummary {
+        guard let snapshot = snapshotsByID[draft.snapshotID] else {
+            throw Self.serverError(400, code: "invalid_argument", message: "The Snapshot is not persisted.")
+        }
+        let nodeID = snapshot.trees.first?.payload.inlineNodes?.first?.nodeID.rawValue
+            ?? "node_019f0000-0000-7000-8000-000000000001"
+        return makeValidationOutcome(
+            target: StudioResourceRef(kind: "runtime_snapshot", id: draft.snapshotID),
+            finding: (
+                ruleID: "accessibility.minimum-touch-target",
+                category: "accessibility",
+                severity: "warning",
+                message: "Fixture validation demonstrates a reviewable touch-target finding.",
+                subject: StudioResourceRef(kind: "ui_node", id: nodeID, version: draft.snapshotID)
+            )
+        )
+    }
+
+    public func validateScreenGraph(
+        _ draft: ValidateScreenGraphDraft
+    ) async throws -> ValidationOutcomeSummary {
+        guard let canvasGraph else {
+            throw Self.serverError(400, code: "invalid_argument", message: "The Screen Graph is not persisted.")
+        }
+        return makeValidationOutcome(
+            target: StudioResourceRef(kind: "screen_graph", id: canvasGraph.screenGraphID),
+            finding: nil
+        )
+    }
+
+    public func getValidationRun(id: String) async throws -> ValidationRunSummary {
+        guard let run = validationRunsByID[id] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        return run
+    }
+
+    public func listValidationFindings(runID: String?) async throws -> ValidationFindingPage {
+        let findings = validationFindingsByID.values
+            .filter { runID == nil || $0.validationRunID == runID }
+            .sorted { $0.findingID < $1.findingID }
+        return ValidationFindingPage(items: findings)
+    }
+
+    public func suppressValidationFinding(
+        id: String,
+        _ draft: SuppressValidationFindingDraft
+    ) async throws -> ValidationFindingSummary {
+        guard let current = validationFindingsByID[id] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard current.status == "open", current.revision == draft.expectedFindingRevision else {
+            throw Self.serverError(409, code: "conflict", message: "The Finding revision is stale.")
+        }
+        let updated = ValidationFindingSummary(
+            findingID: current.findingID,
+            validationRunID: current.validationRunID,
+            revision: current.revision + 1,
+            ruleID: current.ruleID,
+            category: current.category,
+            severity: current.severity,
+            status: "suppressed",
+            message: current.message,
+            subject: current.subject,
+            expected: current.expected,
+            actual: current.actual
+        )
+        validationFindingsByID[id] = updated
+        if let run = validationRunsByID[current.validationRunID] {
+            let counts = run.findingCounts
+            validationRunsByID[run.id] = ValidationRunSummary(
+                validationRunID: run.validationRunID,
+                operationID: run.operationID,
+                target: run.target,
+                state: run.state,
+                revision: run.revision + 1,
+                findingCounts: ValidationFindingCounts(
+                    total: counts.total,
+                    open: counts.open > 0 ? counts.open - 1 : 0,
+                    suppressed: counts.suppressed + 1,
+                    resolved: counts.resolved,
+                    bySeverity: counts.bySeverity
+                )
+            )
+        }
+        return updated
+    }
+
+    public func compareBuilds(_ draft: BuildDiffCommandDraft) async throws -> BuildDiffSummary {
+        let observedBuildIDs = Set(snapshotsByID.values.map { $0.runtimeContext.buildID.rawValue })
+        guard draft.leftBuildID != draft.rightBuildID,
+              observedBuildIDs.contains(draft.leftBuildID),
+              observedBuildIDs.contains(draft.rightBuildID)
+        else {
+            throw Self.serverError(
+                400,
+                code: "invalid_argument",
+                message: "Both distinct builds must be observed in this fixture Workspace."
+            )
+        }
+        let entry = BuildDiffEntrySummary(
+            entryID: mintIdentifier("diffentry"),
+            kind: "changed",
+            domains: ["structural"],
+            severity: "info",
+            summary: "Fixture comparison demonstrates a build-scoped structural change.",
+            leftSubject: StudioResourceRef(
+                kind: "build",
+                id: draft.leftBuildID
+            ),
+            rightSubject: StudioResourceRef(
+                kind: "build",
+                id: draft.rightBuildID
+            )
+        )
+        let diff = BuildDiffSummary(
+            buildDiffID: mintIdentifier("builddiff"),
+            operationID: mintIdentifier("operation"),
+            leftBuild: StudioResourceRef(kind: "build", id: draft.leftBuildID),
+            rightBuild: StudioResourceRef(kind: "build", id: draft.rightBuildID),
+            summary: BuildDiffCounts(
+                total: 1,
+                added: 0,
+                removed: 0,
+                changed: 1,
+                regressed: 0,
+                improved: 0
+            ),
+            entries: [entry]
+        )
+        buildDiffsByID[diff.id] = diff
+        return diff
+    }
+
+    public func getBuildDiff(id: String) async throws -> BuildDiffSummary {
+        guard let diff = buildDiffsByID[id] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        return diff
+    }
+
+    public func listReviewIssues(
+        states: [String]?,
+        screenStateID: String?
+    ) async throws -> ReviewIssuePage {
+        let stateFiltered: [ReviewIssueSummary]
+        if let screenStateID {
+            let detail = try await getScreenState(id: screenStateID)
+            stateFiltered = reviewIssues.filter {
+                $0.targetSnapshotID == detail.canonicalSnapshotID
+            }
+        } else {
+            stateFiltered = reviewIssues
+        }
+        guard let states else {
+            return ReviewIssuePage(items: stateFiltered)
+        }
+        return ReviewIssuePage(items: stateFiltered.filter { states.contains($0.state) })
     }
 
     public func getEventTimeline(eventEpochID: String?) async throws -> EventTimeline {
@@ -243,7 +468,16 @@ public actor FixtureHostClient: HostClient {
         guard !draft.title.isEmpty, !draft.changes.isEmpty else {
             throw Self.serverError(400, code: "invalid_argument", message: "The request was rejected as invalid.")
         }
-        for change in draft.changes where change.property != "alpha" {
+        let tuningAllowlist: Set<String> = [
+            "content_insets",
+            "spacing",
+            "font",
+            "foreground_color",
+            "background_color",
+            "alpha",
+            "corner_radius",
+        ]
+        for change in draft.changes where !tuningAllowlist.contains(change.property) {
             throw Self.serverError(
                 422,
                 code: "unsupported",
@@ -257,14 +491,49 @@ public actor FixtureHostClient: HostClient {
             status: "draft",
             targetSnapshotID: draft.targetSnapshotID
         )
-        tuningPatchesByID[summary.patchID] = StoredTuningPatch(summary: summary, changes: draft.changes)
+        tuningPatchesByID[summary.patchID] = StoredTuningPatch(
+            summary: summary,
+            changes: draft.changes.map {
+                StoredTuningChange(id: mintIdentifier("tuningchange"), draft: $0)
+            }
+        )
         return summary
+    }
+
+    public func getTuningSourceSuggestions(
+        patchID: String
+    ) async throws -> TuningSourceSuggestionResult {
+        guard let stored = tuningPatchesByID[patchID] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        return TuningSourceSuggestionResult(
+            patchID: patchID,
+            patchRevision: stored.summary.revision,
+            targetSnapshotID: stored.summary.targetSnapshotID,
+            suggestions: stored.changes.map { change in
+                let stableID = change.draft.target.stableID
+                return TuningSourceSuggestionSummary(
+                    tuningChangeID: change.id,
+                    property: change.draft.property,
+                    stableID: stableID,
+                    sourceContext: nil,
+                    status: "needs_source_mapping",
+                    originalValue: Self.jsonValue(change.draft.originalValue),
+                    suggestedValue: Self.jsonValue(change.draft.previewValue),
+                    codingAgentInstructions: [
+                        "Locate the source element that emits stable ID \(stableID ?? change.draft.target.nodeID).",
+                        "Update \(change.draft.property) to match the verified preview without changing runtime-only instrumentation.",
+                    ]
+                )
+            }
+        )
     }
 
     public func applyTuningPatch(
         patchID: String,
         previewTTLMilliseconds: Int?
     ) async throws -> TuningApplicationSummary {
+        lastTuningPreviewTTLMilliseconds = previewTTLMilliseconds
         guard let stored = tuningPatchesByID[patchID] else {
             throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
         }
@@ -272,8 +541,9 @@ public actor FixtureHostClient: HostClient {
         let latestSnapshotID = latestSnapshot()?.snapshotID.rawValue
         var applied: [AppliedTuningChangeSummary] = []
         var rejected: [RejectedTuningChangeSummary] = []
-        for change in stored.changes {
-            let changeID = mintIdentifier("tuningchange")
+        for storedChange in stored.changes {
+            let change = storedChange.draft
+            let changeID = storedChange.id
             if stored.summary.targetSnapshotID != latestSnapshotID {
                 rejected.append(
                     RejectedTuningChangeSummary(
@@ -345,6 +615,13 @@ public actor FixtureHostClient: HostClient {
         let active = tuningApplicationsByID.values
             .filter { $0.status == "active" || $0.status == "partially_active" }
             .sorted { $0.tuningApplicationID < $1.tuningApplicationID }
+        if failActiveTuningReloadWhileApplicationIsActive, !active.isEmpty {
+            throw Self.serverError(
+                503,
+                code: "fixture_tuning_reload_failed",
+                message: "The fixture rejected the active tuning reload."
+            )
+        }
         return TuningApplicationPage(items: active)
     }
 
@@ -386,10 +663,160 @@ public actor FixtureHostClient: HostClient {
             category: current.category,
             severity: current.severity,
             state: request.toState,
-            updatedAt: mintTimestamp()
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: current.targetSnapshotID
         )
         reviewIssues[index] = updated
         return updated
+    }
+
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary {
+        guard let comparison = designComparisons.first(where: { $0.comparisonID == comparisonID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard let difference = comparison.differences.first(where: { $0.differenceID == request.differenceID }) else {
+            throw Self.serverError(404, code: "not_found", message: "The Design Difference does not exist.")
+        }
+        let duplicateKey = "\(comparisonID)|\(request.differenceID)"
+        if promotedDifferenceIssueIDs[duplicateKey] != nil {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The Design Difference already has a Review Issue."
+            )
+        }
+        guard let runtimeTarget = difference.runtimeTarget else {
+            throw Self.serverError(
+                409,
+                code: "integrity_error",
+                message: "The Design Difference has no resolvable Runtime target."
+            )
+        }
+        let targetLabel = runtimeTarget.stableID ?? runtimeTarget.nodeID
+        let issue = ReviewIssueSummary(
+            issueID: mintIdentifier("issue"),
+            revision: 1,
+            title: request.title ?? "Design \(difference.category) differs on \(targetLabel)",
+            category: difference.category,
+            severity: difference.severity,
+            state: "open",
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: comparison.targetSnapshotID
+        )
+        reviewIssues.append(issue)
+        promotedIssueSources[issue.issueID] = PromotedIssueSource(
+            comparisonID: comparisonID,
+            category: difference.category,
+            nodeID: runtimeTarget.nodeID,
+            stableID: runtimeTarget.stableID
+        )
+        promotedDifferenceIssueIDs[duplicateKey] = issue.issueID
+        return issue
+    }
+
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult {
+        try requireConnectedRuntime()
+        guard let issueIndex = reviewIssues.firstIndex(where: { $0.issueID == id }) else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        let current = reviewIssues[issueIndex]
+        guard current.revision == request.expectedRevision else {
+            throw Self.serverError(409, code: "conflict", message: "The Review Issue revision is stale.")
+        }
+        guard current.state == "ready_for_verification" else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "Only a Review Issue that is ready for verification can be recaptured."
+            )
+        }
+        guard let source = promotedIssueSources[id],
+              let originalSnapshotID = current.targetSnapshotID,
+              let originalSnapshot = snapshotsByID[originalSnapshotID]
+        else {
+            throw HostClientError.fixtureUnavailable(
+                "Fresh-build recapture requires explicit fixture evidence for a promoted Design Difference."
+            )
+        }
+        guard !recaptureSnapshots.isEmpty else {
+            throw HostClientError.fixtureUnavailable(
+                "Fresh-build recapture requires a connected Runtime; fixture mode does not invent acceptance evidence."
+            )
+        }
+        guard let originalComparison = designComparisons.first(where: {
+            $0.comparisonID == source.comparisonID
+        }) else {
+            throw Self.serverError(
+                409,
+                code: "integrity_error",
+                message: "The promoted Design Comparison no longer exists."
+            )
+        }
+        let captured = recaptureSnapshots.removeFirst()
+        guard captured.runtimeContext.buildID != originalSnapshot.runtimeContext.buildID else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "Design acceptance requires a capture from a different real build."
+            )
+        }
+        snapshotsByID[captured.snapshotID.rawValue] = captured
+        let comparison = try await runDesignComparison(
+            DesignComparisonCommand(
+                designReferenceID: originalComparison.designReferenceID,
+                targetSnapshotID: captured.snapshotID.rawValue,
+                includePixel: true,
+                completedBy: request.verifiedBy
+            )
+        )
+        guard let latestIndex = reviewIssues.firstIndex(where: { $0.issueID == id }),
+              reviewIssues[latestIndex].revision == request.expectedRevision
+        else {
+            throw Self.serverError(409, code: "conflict", message: "The Review Issue revision is stale.")
+        }
+        let matchingDifference = comparison.differences.first { difference in
+            guard difference.category == source.category else { return false }
+            if let stableID = source.stableID {
+                return difference.runtimeTarget?.stableID == stableID
+            }
+            return difference.runtimeTarget?.nodeID == source.nodeID
+        }
+        let result = comparison.quality != "complete"
+            ? "inconclusive"
+            : matchingDifference == nil ? "passed" : "failed"
+        let verification = ReviewVerificationSummary(
+            verificationRecordID: mintIdentifier("verification"),
+            issueID: id,
+            issueRevision: request.expectedRevision,
+            basis: "real_build",
+            result: result,
+            verifiedSnapshotID: captured.snapshotID.rawValue,
+            verifiedBuildID: captured.runtimeContext.buildID.rawValue,
+            verifiedAt: mintTimestamp()
+        )
+        let updated = ReviewIssueSummary(
+            issueID: current.issueID,
+            revision: current.revision + 1,
+            title: current.title,
+            category: current.category,
+            severity: current.severity,
+            state: result == "passed" ? "resolved" : "in_progress",
+            updatedAt: mintTimestamp(),
+            targetSnapshotID: current.targetSnapshotID
+        )
+        reviewIssues[latestIndex] = updated
+        return RecaptureReviewIssueResult(
+            snapshot: captured,
+            comparison: comparison,
+            verification: verification,
+            issue: updated
+        )
     }
 
     // MARK: - Deep Wiki writes
@@ -460,6 +887,93 @@ public actor FixtureHostClient: HostClient {
         return updated
     }
 
+    public func listKnowledgeCollections(
+        text: String?,
+        publicationStates: [String]?
+    ) async throws -> KnowledgeCollectionPage {
+        let needle = text?.lowercased()
+        let items = knowledgeCollectionsByID.values
+            .filter { collection in
+                let matchesText = needle.map {
+                    collection.name.lowercased().contains($0)
+                        || (collection.summary?.lowercased().contains($0) ?? false)
+                } ?? true
+                let matchesPublication = publicationStates.map {
+                    $0.contains(collection.publication.state)
+                } ?? true
+                return matchesText && matchesPublication
+            }
+            .sorted { lhs, rhs in
+                if lhs.name == rhs.name { return lhs.collectionID < rhs.collectionID }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+        return KnowledgeCollectionPage(items: items)
+    }
+
+    public func getKnowledgeCollection(id: String) async throws -> KnowledgeCollectionSummary {
+        guard let collection = knowledgeCollectionsByID[id] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        return collection
+    }
+
+    public func createKnowledgeCollection(
+        _ draft: KnowledgeCollectionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        try validateCollectionMembership(
+            name: draft.name,
+            nodeIDs: draft.nodeIDs,
+            entryNodeIDs: draft.entryNodeIDs
+        )
+        let collection = KnowledgeCollectionSummary(
+            collectionID: mintIdentifier("collection"),
+            revision: 1,
+            name: draft.name,
+            summary: draft.summary,
+            nodeIDs: draft.nodeIDs,
+            linkIDs: draft.linkIDs,
+            entryNodeIDs: draft.entryNodeIDs,
+            publication: KnowledgeCollectionPublication(state: "draft")
+        )
+        knowledgeCollectionsByID[collection.collectionID] = collection
+        return collection
+    }
+
+    public func reviseKnowledgeCollection(
+        id: String,
+        _ draft: KnowledgeCollectionRevisionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        guard let current = knowledgeCollectionsByID[id] else {
+            throw Self.serverError(404, code: "not_found", message: "The requested resource does not exist.")
+        }
+        guard draft.expectedRevision == current.revision else {
+            throw Self.serverError(
+                409,
+                code: "conflict",
+                message: "The request conflicts with the current Workspace state."
+            )
+        }
+        let nodeIDs = draft.nodeIDs ?? current.nodeIDs
+        let entryNodeIDs = draft.entryNodeIDs ?? current.entryNodeIDs
+        try validateCollectionMembership(
+            name: draft.name ?? current.name,
+            nodeIDs: nodeIDs,
+            entryNodeIDs: entryNodeIDs
+        )
+        let updated = KnowledgeCollectionSummary(
+            collectionID: current.collectionID,
+            revision: current.revision + 1,
+            name: draft.name ?? current.name,
+            summary: draft.summary ?? current.summary,
+            nodeIDs: nodeIDs,
+            linkIDs: draft.linkIDs ?? current.linkIDs,
+            entryNodeIDs: entryNodeIDs,
+            publication: KnowledgeCollectionPublication(state: "draft")
+        )
+        knowledgeCollectionsByID[id] = updated
+        return updated
+    }
+
     // MARK: - Canvas Screen State details and knowledge links
 
     public func getScreenState(id: String) async throws -> ScreenStateDetail {
@@ -486,6 +1000,41 @@ public actor FixtureHostClient: HostClient {
         )
         screenStatesByID[id] = detail
         return detail
+    }
+
+    public func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail {
+        let detail = try await getScreenState(id: id)
+        guard let snapshot = snapshotsByID.values
+            .filter({
+                $0.runtimeContext.applicationVersion == applicationVersion
+                    && $0.runtimeContext.buildID.rawValue == buildID
+            })
+            .max(by: {
+                $0.capturedAt.wallTime.rawValue < $1.capturedAt.wallTime.rawValue
+            })
+        else {
+            throw Self.serverError(
+                404,
+                code: "not_found",
+                message: "The Screen State was not observed in the requested build scope."
+            )
+        }
+        return ScreenStateDetail(
+            screenStateID: detail.screenStateID,
+            revision: detail.revision,
+            title: detail.title,
+            kind: detail.kind,
+            status: detail.status,
+            canonicalSnapshotID: snapshot.snapshotID.rawValue,
+            firstSeen: detail.firstSeen,
+            lastSeen: detail.lastSeen,
+            labels: detail.labels,
+            summary: detail.summary
+        )
     }
 
     public func createWikiLink(_ draft: WikiLinkDraft) async throws -> WikiLinkSummary {
@@ -1086,6 +1635,53 @@ public actor FixtureHostClient: HostClient {
         })
     }
 
+    private static func jsonValue(_ value: TuningPropertyValueDraft) -> JSONValue {
+        let emptyExtensions: JSONValue = .object([:])
+        switch value {
+        case let .number(number, unit):
+            return .object([
+                "kind": .string("number"),
+                "value": .number(number),
+                "unit": .string(unit),
+                "extensions": emptyExtensions,
+            ])
+        case let .color(red, green, blue, alpha):
+            return .object([
+                "kind": .string("color_rgba"),
+                "value": .object([
+                    "red": .number(red),
+                    "green": .number(green),
+                    "blue": .number(blue),
+                    "alpha": .number(alpha),
+                ]),
+                "color_space": .string("srgb"),
+                "extensions": emptyExtensions,
+            ])
+        case let .font(family, size, weight, style):
+            return .object([
+                "kind": .string("font"),
+                "value": .object([
+                    "family": .string(family),
+                    "size": .number(size),
+                    "weight": .integer(Int64(weight)),
+                    "style": .string(style),
+                ]),
+                "extensions": emptyExtensions,
+            ])
+        case let .insets(top, leading, bottom, trailing):
+            return .object([
+                "kind": .string("insets"),
+                "value": .object([
+                    "top": .number(top),
+                    "leading": .number(leading),
+                    "bottom": .number(bottom),
+                    "trailing": .number(trailing),
+                ]),
+                "extensions": emptyExtensions,
+            ])
+        }
+    }
+
     private func snapshotContainsNode(snapshotID: String, nodeID: String) -> Bool {
         guard let snapshot = snapshotsByID[snapshotID] else {
             return false
@@ -1093,6 +1689,90 @@ public actor FixtureHostClient: HostClient {
         return snapshot.trees.contains { tree in
             tree.payload.inlineNodes?.contains(where: { $0.nodeID.rawValue == nodeID }) ?? false
         }
+    }
+
+    private func validateCollectionMembership(
+        name: String,
+        nodeIDs: [String],
+        entryNodeIDs: [String]
+    ) throws {
+        let nodeSet = Set(nodeIDs)
+        let entrySet = Set(entryNodeIDs)
+        guard !name.isEmpty,
+              !nodeSet.isEmpty,
+              nodeSet.count == nodeIDs.count,
+              !entrySet.isEmpty,
+              entrySet.count == entryNodeIDs.count,
+              entrySet.isSubset(of: nodeSet),
+              nodeSet.allSatisfy({ id in wikiDetails.contains(where: { $0.wikiNodeID == id }) })
+        else {
+            throw Self.serverError(
+                400,
+                code: "invalid_argument",
+                message: "The Knowledge Collection membership is invalid."
+            )
+        }
+    }
+
+    private func makeValidationOutcome(
+        target: StudioResourceRef,
+        finding: (
+            ruleID: String,
+            category: String,
+            severity: String,
+            message: String,
+            subject: StudioResourceRef
+        )?
+    ) -> ValidationOutcomeSummary {
+        let runID = mintIdentifier("validationrun")
+        let findings: [ValidationFindingSummary]
+        if let finding {
+            findings = [
+                ValidationFindingSummary(
+                    findingID: mintIdentifier("finding"),
+                    validationRunID: runID,
+                    revision: 1,
+                    ruleID: finding.ruleID,
+                    category: finding.category,
+                    severity: finding.severity,
+                    status: "open",
+                    message: finding.message,
+                    subject: finding.subject,
+                    expected: .object(["minimum": .number(44)]),
+                    actual: .object(["measured": .number(32)])
+                ),
+            ]
+        } else {
+            findings = []
+        }
+        let warningCount: UInt64 = findings.contains(where: { $0.severity == "warning" }) ? 1 : 0
+        let errorCount: UInt64 = findings.contains(where: { $0.severity == "error" }) ? 1 : 0
+        let criticalCount: UInt64 = findings.contains(where: { $0.severity == "critical" }) ? 1 : 0
+        let infoCount = UInt64(findings.count) - warningCount - errorCount - criticalCount
+        let run = ValidationRunSummary(
+            validationRunID: runID,
+            operationID: mintIdentifier("operation"),
+            target: target,
+            state: "succeeded",
+            revision: 2,
+            findingCounts: ValidationFindingCounts(
+                total: UInt64(findings.count),
+                open: UInt64(findings.count),
+                suppressed: 0,
+                resolved: 0,
+                bySeverity: ValidationSeverityCounts(
+                    info: infoCount,
+                    warning: warningCount,
+                    error: errorCount,
+                    critical: criticalCount
+                )
+            )
+        )
+        validationRunsByID[run.id] = run
+        for finding in findings {
+            validationFindingsByID[finding.id] = finding
+        }
+        return ValidationOutcomeSummary(run: run, findings: findings)
     }
 
     /// Mirrors the live Host: tuning routes require an authorized Runtime.
@@ -1165,6 +1845,14 @@ public struct UnavailableHostClient: HostClient {
         id: String,
         _ request: ReviewIssueTransitionRequest
     ) async throws -> ReviewIssueSummary { throw error }
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary { throw error }
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult { throw error }
     public func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail { throw error }
     public func getWikiNode(id: String) async throws -> WikiNodeDetail { throw error }
     public func reviseWikiNode(id: String, _ draft: WikiNodeRevisionDraft) async throws -> WikiNodeDetail {
@@ -1304,7 +1992,8 @@ public enum FixtureWorkspace {
                 category: "layout",
                 severity: "minor",
                 state: "open",
-                updatedAt: "2026-07-12T00:00:00Z"
+                updatedAt: "2026-07-12T00:00:00Z",
+                targetSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000002"
             ),
         ]
     }

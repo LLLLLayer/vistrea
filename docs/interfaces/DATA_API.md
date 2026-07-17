@@ -31,10 +31,16 @@ interface WorkspaceRepository {
   registerVerifiedObjects(objects: ObjectRef[]): void;
   beginUnitOfWork(mode: "read" | "write"): DataUnitOfWork;
   checkHealth(): WorkspaceHealth;
-  applyMigrations(target_version?: uint32): MigrationResult;
-  backup(command: BackupWorkspaceCommand): ObjectRef;
+  applyMigrations(target_version?: uint32): Promise<MigrationResult>;
+  backup(command: BackupWorkspaceCommand): Promise<ObjectRef>;
   compact(command: CompactWorkspaceCommand): CompactWorkspaceResult;
-  restore(command: RestoreWorkspaceCommand): WorkspaceDescriptor;
+  restore(command: RestoreWorkspaceCommand): Promise<WorkspaceRestoreResult>;
+}
+
+interface WorkspaceMaintenancePort {
+  createRecoveryPoint(command: BackupWorkspaceCommand): Promise<WorkspaceRecoveryPoint>;
+  listRecoveryPoints(): Promise<WorkspaceRecoveryPoint[]>;
+  releaseRecoveryPoint(command: ReleaseWorkspaceRecoveryPointCommand): Promise<WorkspaceRecoveryPoint>;
 }
 ```
 
@@ -48,6 +54,56 @@ interface WorkspaceRepository {
 - Object writes that succeed before a metadata rollback become unreachable candidates and are reclaimed later by Workspace GC.
 - `registerVerifiedObjects` records only canonical metadata returned by a successful Object Store write. It is idempotent for equal values, rejects conflicting metadata for one hash, and does not by itself make an Object reachable from a Snapshot, Working Set, or Commit.
 - Revisioned creates and updates follow the shared `1`, `N`, `N + 1` rule in `COMMON_CONTRACTS.md`; repositories reject stale preconditions and submitted revision jumps.
+
+### Workspace lifecycle maintenance
+
+`WorkspaceMaintenancePort` is the online-safe Engine boundary for manual and
+pre-migration recovery points. A `WorkspaceRecoveryPoint` projects the backup
+ObjectRef, source, reason, creation time, schema version, metadata generation,
+and complete retention-policy state without exposing Object Store sidecars or
+paths. Releasing a policy changes retention only; a later plan-bound GC decides
+whether the backup and its otherwise unreachable closure are collectible.
+
+The production local composition implements the lifecycle boundary through
+`LocalDataWorkspace` while the manifest/bootstrap portion of the complete
+`WorkspaceRepository` remains separate:
+
+- `backup` is the only maintenance operation allowed while the Workspace is
+  open. It refuses active Units of Work and temporarily rejects new Units of
+  Work and ObjectRef registration, uses SQLite's online backup API,
+  independently runs schema, ledger, `quick_check`, foreign-key, catalog, and
+  metadata validation, then stores and pins the resulting ObjectRef. The result
+  is a metadata recovery point: while retained, its complete reachable
+  ObjectRef closure is also a GC root.
+- Opening an existing older schema creates that verified and pinned backup
+  before synchronously authorizing any migration SQL. A failed migration rolls
+  the complete batch back and keeps the recovery object.
+- `restore` is offline and lock-exclusive. Before creating a journal or changing
+  `metadata.sqlite`, it verifies the stored backup plus the existence, payload
+  hash, and canonical catalog metadata of every reachable ObjectRef. It
+  preserves the old database/WAL/SHM files under `.recovery/` and uses a durable
+  restore journal. Normal open refuses an interrupted restore until explicit
+  recovery rolls the preserved files back.
+- local garbage collection is offline, dry-run by default, and applies a
+  minimum-age grace period. Its mark set includes every live metadata ObjectRef,
+  Commit ancestry rooted by Refs, Tags, Working Sets and live resources, plus
+  active Object Store retention policies and the reachable closure of every
+  retained Workspace metadata backup. A dry run returns `plan_digest` for the
+  exact generation, catalog cleanup, and physical deletion plan. Destructive
+  collection requires that value from the immediately preceding matching dry
+  run as `expected_plan_digest` and fails with a retryable conflict when
+  recomputation differs. Catalog rows are removed only after a same-transaction
+  reachability recheck and before physical deletion, so a crash can leave a
+  repairable unregistered orphan but never a registered missing payload.
+- stale `.host.lock` recovery is explicit and succeeds only for a valid lock
+  whose PID is definitely absent. The original lock is retained as recovery
+  evidence; live, inaccessible, malformed, or symlinked locks fail closed.
+
+Explicit pack and readable exports receive indefinite retention policies.
+Unreferenced capture payloads remain unpinned and become GC candidates after
+the grace period. `ObjectStore.unpin(hash, policy_id)` explicitly releases a
+named policy, after which the ordinary reachability and age rules decide
+whether GC may delete the object.
 
 ## 3. Snapshot and observation ports
 
@@ -96,6 +152,7 @@ interface WikiRepository {
   update(node: WikiNode, precondition: RevisionPrecondition): WikiNode;
   get(node_id: string, at?: VersionSelector): WikiNode;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
+  getLink(link_id: string, at?: VersionSelector): WikiLink;
   unlink(link_id: string, precondition: RevisionPrecondition): void;
   backlinks(node_id: string, page?: PageRequest): Page<WikiLink>;
   related(ref: ResourceRef, page?: PageRequest): Page<WikiNode>;
@@ -110,6 +167,8 @@ interface WikiRepository {
 ```
 
 `unlink` removes the live link and persists its next-revision deletion evidence in the same Unit of Work. The owning Engine command includes that deletion in its Working Set/Commit; a historical version can still reconstruct the prior link.
+
+Knowledge Collection publication writes a canonical `KnowledgeGraph` bundle to the Object Store first, registers its verified `ObjectRef`, then creates a Working Set, Commit, CAS Ref update, and published Collection projection in one metadata Unit of Work. The bundle contains the pre-publication draft Collection so its own `commit_id` never creates a circular content hash; the mutable projection carries the returned Commit/Ref identity.
 
 ## 6. Design review port
 
@@ -147,6 +206,8 @@ interface DesignReviewRepository {
 ```
 
 Design Comparisons and Verification Records are immutable evidence. References, mappings, Review Issues, Tuning Patches, and Tuning Applications are revisioned mutable resources and require optimistic concurrency after creation.
+
+`ReviewIssueQuery.screen_state_id` restricts results to issues whose `runtime_target.snapshot_id` appears in an Observation owned by that Screen State. This is a Data-port query, not a Studio-side approximation, so in-memory and SQLite Workspaces return identical state-scoped issue sets.
 
 ## 7. Validation and operation ports
 
@@ -248,12 +309,19 @@ interface ObjectStore {
   open(hash: string, range?: ByteRange): Promise<ByteStream>;
   has(hashes: readonly string[]): Promise<ReadonlySet<string>>;
   pin(hash: string, policy: RetentionPolicy): Promise<void>;
+  unpin(hash: string, policy_id: string): Promise<void>;
   inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef>;
   deletePhysical(hash: string): Promise<void>;
 }
 ```
 
-`put` hashes the exact encoded byte stream and verifies `expected_hash` before success. Compression and optional encryption descriptors remain immutable `ObjectRef` metadata; neither changes encoded-byte identity. The Object Store does not decide reachability. Workspace Engine GC computes protected hashes from Version Repository refs, commits, pins, Working Sets, and retention policy, then invokes the internal `deletePhysical` operation.
+`put` hashes the exact encoded byte stream and verifies `expected_hash` before
+success. Compression and optional encryption descriptors remain immutable
+`ObjectRef` metadata; neither changes encoded-byte identity. `unpin` releases
+only the named policy and is idempotent; it never deletes bytes. The Object
+Store does not decide reachability. Offline Workspace GC computes protected
+hashes from live metadata, Commit roots and ancestry, Working Sets, retention
+policy, and object age, then invokes the internal `deletePhysical` operation.
 
 ## 10. Search port
 
@@ -287,6 +355,8 @@ interface SyncClient {
   resolveConflict(command: ResolveSyncConflictCommand): SyncConflictResolution;
 }
 ```
+
+`ExportReadableCommand` names one published `collection_id` and an optional unique subset of `markdown` and `html`. The exporter resolves the Collection's immutable Commit `wiki` root, verifies its bytes and canonical protocol value, and writes deterministic readable objects; it never renders mutable draft state.
 
 Pack and sync use the same Commit Manifest and ObjectRef formats.
 

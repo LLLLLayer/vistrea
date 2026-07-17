@@ -21,24 +21,33 @@ The repository structure must ensure:
 vistrea/
 ├── .github/
 │   └── workflows/
-│       └── protocol-contracts.yml
+│       └── pull-request-ci.yml  # seven independent Node and native PR gates
 ├── .gitignore
 ├── .node-version
 ├── AGENTS.md
 ├── CLAUDE.md -> AGENTS.md
 ├── README.md
+├── vistrea.project.json        # source-owned Markdown roots browsed by Studio
 ├── package.json
 ├── pnpm-lock.yaml
 ├── apps/
 │   ├── README.md
 │   ├── host/                    # production Host composition and Local API
 │   │   ├── README.md
+│   │   ├── local-api-contracts.ts # public composition contracts
 │   │   ├── local-api.ts
 │   │   ├── local-host.ts
-│   │   └── serve.ts
+│   │   ├── serve.ts
+│   │   └── workspace-maintenance.ts # strict one-shot offline maintenance runner
 │   └── studio-macos/            # native SwiftUI Studio workspace
+│       ├── Package.resolved      # pinned remote release dependency identity
 │       ├── Package.swift
+│       ├── Resources/            # generated app-bundle metadata template
 │       ├── Sources/
+│       │   ├── VistreaStudioCore/        # Host and maintenance client contracts
+│       │   ├── VistreaStudioHostRuntime/ # embedded Host and one-shot runner lifecycle
+│       │   ├── VistreaStudioApp/         # Canvas, Inspector, and Workspace Manager UI
+│       │   └── VistreaStudioAcceptanceProbe/
 │       ├── Tests/
 │       └── README.md
 ├── protocol/
@@ -101,10 +110,15 @@ vistrea/
 │   │   ├── README.md
 │   │   ├── validation-engine.ts
 │   │   └── build-diff-engine.ts
-│   ├── workspace/               # README-only reserved use cases
+│   ├── workspace/
+│   │   ├── README.md
+│   │   └── workspace-maintenance-engine.ts # recovery-point application use cases
 │   ├── operations/              # README-only reserved use cases
 │   ├── versioning/              # README-only reserved use cases
-│   └── sync/                    # README-only reserved use cases
+│   └── sync/
+│       ├── README.md
+│       ├── index.ts
+│       └── workspace-sync-engine.ts # local/Hub ref synchronization use cases
 ├── data/
 │   ├── README.md
 │   ├── api/
@@ -136,11 +150,17 @@ vistrea/
 │   ├── README.md
 │   └── hub/
 │       ├── README.md
-│       ├── hub-server.ts        # optional loopback pack relay
+│       ├── audit-store.ts       # operational append-only audit port and JSONL store
+│       ├── directory-store.ts   # private organization/team roles; never bearer tokens
+│       ├── permission-store.ts  # private durable project roles; never bearer tokens
+│       ├── hub-server.ts        # RBAC pack relay, team inheritance, audit, activity
+│       ├── index.ts
 │       └── main.ts
 ├── integrations/
 │   ├── README.md
 │   ├── shared/                  # strict authenticated Host client
+│   │   ├── host-local-client-errors.ts # canonical client error boundary
+│   │   └── host-operation-manifest.ts # executable Host/CLI operation parity
 │   ├── cli/
 │   │   ├── README.md
 │   │   ├── cli.ts
@@ -150,6 +170,7 @@ vistrea/
 │   │   └── skills/
 │   ├── skills/
 │   │   ├── README.md
+│   │   ├── vistrea-explore-ui/
 │   │   ├── vistrea-inspect-runtime/
 │   │   ├── vistrea-review-design/
 │   │   ├── vistrea-tune-ui/
@@ -180,6 +201,7 @@ vistrea/
 │   │   ├── README.md
 │   │   ├── protocol-fixtures.test.mjs
 │   │   ├── strict-json.test.mjs
+│   │   ├── operation-parity.test.ts
 │   │   └── …                    # Data, SQLite, Object Store, and pack contracts
 │   ├── integration/
 │   │   ├── README.md
@@ -195,11 +217,13 @@ vistrea/
 │       └── android-real-automation-loop.test.ts
 ├── tools/
 │   ├── README.md
-│   └── protocol/
-│       ├── phase0a2-semantic-checks.mjs
-│       ├── semantic-checks.mjs
-│       ├── strict-json.mjs
-│       └── validate-fixtures.mjs
+│   ├── ci/                      # pinned CI-only tool bootstrap
+│   ├── protocol/
+│   │   ├── phase0a2-semantic-checks.mjs
+│   │   ├── semantic-checks.mjs
+│   │   ├── strict-json.mjs
+│   │   └── validate-fixtures.mjs
+│   └── release/                  # Studio Host runtime and local bundle tooling
 └── docs/
     ├── README.md
     ├── PROJECT_OVERVIEW.md
@@ -235,7 +259,14 @@ vistrea/
     │   ├── 0004-host-data-and-sqlite-migrations.md
     │   ├── 0005-ios-first-vertical-loop.md
     │   ├── 0006-vistrea-pack-container.md
-    │   └── 0007-screen-state-identity-and-device-automation.md
+    │   ├── 0007-screen-state-identity-and-device-automation.md
+    │   ├── 0008-cli-only-agent-adapter.md
+    │   ├── 0009-direct-macos-distribution.md
+    │   ├── 0010-physical-runtime-tls.md
+    │   ├── 0011-hub-rbac-and-operational-audit.md
+    │   └── 0012-hub-team-inheritance.md
+    ├── release/
+    │   └── STUDIO_MACOS_RELEASE.md
     └── roadmap/
         └── README.md
 ```
@@ -331,7 +362,10 @@ Runtime data is not source code:
 .vistrea/
 ├── workspace.json
 ├── .host.lock
+├── .restore-journal.json        # present only after an interrupted restore
 ├── metadata.sqlite
+├── .maintenance/                # transient same-volume maintenance staging
+├── .recovery/                   # preserved restore and stale-lock evidence
 ├── objects/
 ├── refs/
 ├── exports/
@@ -351,11 +385,17 @@ The first implementation keeps the language-neutral contracts while using toolch
 - Swift Package Manager for iOS Runtime modules and native SwiftUI Studio;
 - Gradle/Kotlin Android libraries with Debug/Internal Runtime transport excluded from Release artifacts;
 - UIKit and Android View as the verified initial native adapters, plus SwiftUI and Compose semantics annotation bridges feeding the same capture;
-- authenticated, bounded JSON-lines Runtime transport and an authenticated loopback HTTP Local API;
+- authenticated, bounded JSON-lines Runtime transport over literal loopback or
+  exact-IP pinned TLS for physical iOS, plus an independently authenticated
+  loopback HTTP Local API;
 - `adb` and WebDriverAgent device automation providers behind one Engine port;
 - a headless CI gate and an optional loopback Hub pack relay over the same contracts.
 
-Future full SwiftUI/Compose semantic-tree capture, physical-device tunneling, CI packaging, and Hub deployment projects must preserve the documented public boundaries. Toolchain-specific layouts must not create competing protocol, Engine, or Data models.
+Future SwiftUI-native capture, Compose rendering-side visual adapters,
+automatic physical-device discovery and hardware acceptance, formal macOS
+distribution, and Hub deployment projects must preserve the documented
+public boundaries. Toolchain-specific layouts must not create competing
+protocol, Engine, or Data models.
 
 ## 8. Parallel development
 

@@ -39,6 +39,40 @@ public enum EventTimelinePhase: Equatable, Sendable {
     case failure(String)
 }
 
+public enum HubSyncPhase: Equatable, Sendable {
+    case idle
+    case connecting
+    case connected
+    case failure(String)
+}
+
+public enum HubSyncTransferDirection: String, Equatable, Sendable {
+    case fetch
+    case push
+}
+
+public struct HubSyncTransferSummary: Equatable, Sendable {
+    public let direction: HubSyncTransferDirection
+    public let importedCommitCount: Int
+    public let importedObjectCount: Int
+    public let advancedRefCount: Int
+    public let conflicts: [HubSyncConflict]
+
+    public init(
+        direction: HubSyncTransferDirection,
+        importedCommitCount: Int,
+        importedObjectCount: Int,
+        advancedRefCount: Int,
+        conflicts: [HubSyncConflict]
+    ) {
+        self.direction = direction
+        self.importedCommitCount = importedCommitCount
+        self.importedObjectCount = importedObjectCount
+        self.advancedRefCount = advancedRefCount
+        self.conflicts = conflicts
+    }
+}
+
 @MainActor
 public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var contentPhase: WorkspaceContentPhase = .idle
@@ -65,6 +99,24 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var canvasStates: [CanvasLayout.PositionedState] = []
     @Published public private(set) var wikiPhase: EventTimelinePhase = .idle
     @Published public private(set) var wikiNodes: [WikiNodeSummary] = []
+    @Published public internal(set) var knowledgeCollectionsPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var knowledgeCollections: [KnowledgeCollectionSummary] = []
+    @Published public internal(set) var selectedKnowledgeCollectionID: String?
+    @Published public internal(set) var selectedKnowledgeCollection: KnowledgeCollectionSummary?
+    @Published public internal(set) var knowledgeCollectionDetailPhase: SnapshotDetailPhase = .idle
+    @Published public internal(set) var knowledgeCollectionError: String?
+    @Published public internal(set) var knowledgeCollectionConflictNote: String?
+    @Published public internal(set) var isSavingKnowledgeCollection = false
+    @Published public internal(set) var validationPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var lastValidationRun: ValidationRunSummary?
+    @Published public internal(set) var validationFindings: [ValidationFindingSummary] = []
+    @Published public internal(set) var validationError: String?
+    @Published public internal(set) var isValidating = false
+    @Published public internal(set) var suppressingFindingIDs: Set<String> = []
+    @Published public internal(set) var buildDiffPhase: EventTimelinePhase = .idle
+    @Published public internal(set) var lastBuildDiff: BuildDiffSummary?
+    @Published public internal(set) var buildDiffError: String?
+    @Published public internal(set) var isComparingBuilds = false
     @Published public private(set) var layerBoxes: [LayerBox3D] = []
     @Published public private(set) var isRefreshing = false
     @Published public private(set) var isCapturing = false
@@ -74,7 +126,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     // authorized Debug Runtime; Studio itself ships no build-time guard.
     @Published public private(set) var tuningPhase: EventTimelinePhase = .idle
     @Published public private(set) var activeTuning: [TuningApplicationSummary] = []
+    @Published public private(set) var lastTuningPatch: TuningPatchSummary?
     @Published public private(set) var lastTuningApplication: TuningApplicationSummary?
+    @Published public private(set) var tuningSourceSuggestionsPhase: EventTimelinePhase = .idle
+    @Published public private(set) var tuningSourceSuggestions: [TuningSourceSuggestionSummary] = []
     @Published public private(set) var tuningError: String?
     @Published public private(set) var isApplyingTuning = false
     @Published public private(set) var revertingTuningIDs: Set<String> = []
@@ -86,6 +141,9 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isTransitioningIssue = false
     @Published public private(set) var issueTransitionError: String?
     @Published public private(set) var issueConflictNote: String?
+    @Published public private(set) var isRecapturingIssue = false
+    @Published public private(set) var issueVerificationError: String?
+    @Published public private(set) var lastIssueVerification: RecaptureReviewIssueResult?
 
     // Deep Wiki editing state.
     @Published public private(set) var isSavingWikiNode = false
@@ -137,18 +195,38 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     @Published public private(set) var isComparingDesign = false
     @Published public private(set) var designComparisonError: String?
     @Published public private(set) var selectedDifferenceID: String?
+    @Published public private(set) var isPromotingDifference = false
+    @Published public private(set) var differenceIssueError: String?
+    @Published public private(set) var lastPromotedIssue: ReviewIssueSummary?
 
     // Exploration Operation state (device automation Host capability).
-    @Published public private(set) var explorationOperationID: String?
-    @Published public private(set) var explorationState: String?
-    @Published public private(set) var explorationProgress: ExplorationProgressSummary?
-    @Published public private(set) var explorationLastEventMessage: String?
-    @Published public private(set) var explorationReport: ExplorationReportSummary?
-    @Published public private(set) var explorationError: String?
-    @Published public private(set) var isExploring = false
-    @Published public private(set) var isCancellingExploration = false
+    // Internal setters let the exploration workflow live in a focused file
+    // while preserving read-only access for package consumers.
+    @Published public internal(set) var explorationOperationID: String?
+    @Published public internal(set) var explorationState: String?
+    @Published public internal(set) var explorationProgress: ExplorationProgressSummary?
+    @Published public internal(set) var explorationLastEventMessage: String?
+    @Published public internal(set) var explorationReport: ExplorationReportSummary?
+    @Published public internal(set) var explorationError: String?
+    @Published public internal(set) var isExploring = false
+    @Published public internal(set) var isCancellingExploration = false
 
-    private let client: any HostClient
+    // Optional Hub collaboration. The credential stays only in `hubRemote`
+    // for this model lifetime and is never published into SwiftUI state.
+    @Published public internal(set) var hubSyncPhase: HubSyncPhase = .idle
+    @Published public internal(set) var hubSyncStatus: HubSyncStatus?
+    @Published public internal(set) var hubSyncActivity: [HubSyncActivityEvent] = []
+    @Published public internal(set) var hubSyncError: String?
+    @Published public internal(set) var hubActivityError: String?
+    @Published public internal(set) var lastHubTransfer: HubSyncTransferSummary?
+    @Published public internal(set) var isHubTransferring = false
+    @Published public internal(set) var isHubActivityLoading = false
+    var hubRemote: HubSyncRemote?
+    var hubRefNames: [String] = []
+    var hubActivityCursor: UInt64 = 0
+    var hubSyncGeneration = 0
+
+    let client: any HostClient
     private var selectionGeneration = 0
     // Per-pane request generations: a slow older response must never
     // overwrite the state a newer request already applied.
@@ -159,13 +237,18 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         try await Task.sleep(nanoseconds: 2_000_000_000)
     }
     private var wikiGeneration = 0
+    var knowledgeCollectionsGeneration = 0
+    var knowledgeCollectionDetailGeneration = 0
+    var validationGeneration = 0
+    var buildDiffGeneration = 0
     private var issuesGeneration = 0
     private var eventsGeneration = 0
     private var tuningGeneration = 0
+    private var tuningSourceSuggestionsGeneration = 0
     private var issueDetailGeneration = 0
     private var wikiEditGeneration = 0
     private var canvasStateGeneration = 0
-    private var explorationGeneration = 0
+    var explorationGeneration = 0
     private var designReferencesGeneration = 0
     private var designReferenceGeneration = 0
     private var designComparisonsGeneration = 0
@@ -173,6 +256,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     // exploration can refresh the same graph.
     private var lastCanvasProjectID: String?
     private var lastCanvasApplicationID: String?
+    private var lastCanvasApplicationVersion: String?
+    private var lastCanvasBuildID: String?
 
     /// Sleeps between exploration polls. Production always waits the fixed
     /// one-second interval — the pane never polls faster — while tests
@@ -196,6 +281,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         contentPhase = .loading
         connectionPhase = .checking
         operationError = nil
+        resetQualityWorkspace()
 
         do {
             connectionPhase = .available(try await client.getStatus())
@@ -204,8 +290,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
 
         await loadEventTimeline()
-        await loadReviewIssues()
         await loadWiki(text: nil)
+        await loadKnowledgeCollections(text: nil)
         await loadActiveTuning()
 
         do {
@@ -215,12 +301,18 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             if let scope = selectedScope {
                 // The Canvas is the landing surface for the selected scope:
                 // it loads with the scope, before any Snapshot is selected.
-                await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
+                await loadCanvas(
+                    projectID: scope.projectID,
+                    applicationID: scope.applicationID,
+                    applicationVersion: scope.applicationVersion,
+                    buildID: scope.buildID
+                )
             } else {
                 canvasPhase = .empty
                 canvasGraph = nil
                 canvasStates = []
             }
+            await loadReviewIssues()
             guard !snapshots.isEmpty else {
                 clearSelection()
                 contentPhase = .empty
@@ -255,8 +347,14 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             return
         }
         selectedScope = scope
+        resetQualityWorkspace()
         await selectCanvasState(id: nil)
-        await loadCanvas(projectID: scope.projectID, applicationID: scope.applicationID)
+        await loadCanvas(
+            projectID: scope.projectID,
+            applicationID: scope.applicationID,
+            applicationVersion: scope.applicationVersion,
+            buildID: scope.buildID
+        )
     }
 
     /// Re-derives the scopes from the current Snapshot list. A still-available
@@ -343,21 +441,42 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     }
 
     /// Reloads the materialized Screen Graph for the Canvas.
-    public func loadCanvas(projectID: String, applicationID: String) async {
+    public func loadCanvas(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String? = nil,
+        buildID: String? = nil
+    ) async {
         lastCanvasProjectID = projectID
         lastCanvasApplicationID = applicationID
+        lastCanvasApplicationVersion = applicationVersion
+        lastCanvasBuildID = buildID
         canvasGeneration += 1
         let generation = canvasGeneration
         canvasPhase = .loading
         do {
-            let graph = try await client.getScreenGraph(
-                projectID: projectID,
-                applicationID: applicationID
-            )
+            let graph: CanvasGraph
+            if let applicationVersion, let buildID {
+                graph = try await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    applicationVersion: applicationVersion,
+                    buildID: buildID
+                )
+            } else {
+                graph = try await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID
+                )
+            }
             guard generation == canvasGeneration else {
                 return
             }
             applyCanvasGraph(graph)
+            if let stateID = selectedCanvasStateID,
+               !graph.states.contains(where: { $0.id == stateID }) {
+                await selectCanvasState(id: nil)
+            }
         } catch {
             guard generation == canvasGeneration else {
                 return
@@ -373,6 +492,20 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 canvasPhase = .failure(Self.message(for: error))
             }
         }
+    }
+
+    private func reloadCanvasForLastScope() async {
+        guard let projectID = lastCanvasProjectID,
+              let applicationID = lastCanvasApplicationID
+        else {
+            return
+        }
+        await loadCanvas(
+            projectID: projectID,
+            applicationID: applicationID,
+            applicationVersion: lastCanvasApplicationVersion,
+            buildID: lastCanvasBuildID
+        )
     }
 
     private func applyCanvasGraph(_ graph: CanvasGraph) {
@@ -423,10 +556,22 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                   let applicationID = lastCanvasApplicationID else {
                 continue
             }
-            guard let current = try? await client.getScreenGraph(
-                projectID: projectID,
-                applicationID: applicationID
-            ) else {
+            let current: CanvasGraph?
+            if let applicationVersion = lastCanvasApplicationVersion,
+               let buildID = lastCanvasBuildID {
+                current = try? await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID,
+                    applicationVersion: applicationVersion,
+                    buildID: buildID
+                )
+            } else {
+                current = try? await client.getScreenGraph(
+                    projectID: projectID,
+                    applicationID: applicationID
+                )
+            }
+            guard let current else {
                 // A transient read failure must not tear the visible pane down.
                 continue
             }
@@ -435,6 +580,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             }
             if current.revision != canvasGraph?.revision {
                 applyCanvasGraph(current)
+                if let stateID = selectedCanvasStateID,
+                   !current.states.contains(where: { $0.id == stateID }) {
+                    await selectCanvasState(id: nil)
+                }
             }
         }
     }
@@ -460,13 +609,26 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
-    /// Reloads the persisted Review Issues, most recently updated first.
+    /// Reloads Review Issues for the selected Screen State, most recently
+    /// updated first. With no selected state the pane is deliberately empty;
+    /// Studio never falls back to an application-wide issue list.
     public func loadReviewIssues() async {
         issuesGeneration += 1
         let generation = issuesGeneration
+        guard let screenStateID = selectedCanvasStateID else {
+            reviewIssues = []
+            issuesPhase = .empty
+            selectedIssueID = nil
+            selectedIssue = nil
+            issueDetailPhase = .idle
+            return
+        }
         issuesPhase = .loading
         do {
-            let page = try await client.listReviewIssues(states: nil)
+            let page = try await client.listReviewIssues(
+                states: nil,
+                screenStateID: screenStateID
+            )
             guard generation == issuesGeneration else {
                 return
             }
@@ -534,9 +696,31 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
     }
 
-    /// Creates a single-change alpha Tuning Patch bound to the selected node
-    /// and applies it with the selected Snapshot as the expected Snapshot.
-    public func previewAlpha(_ value: Double) async {
+    /// Creates a single-change alpha Tuning Patch bound to the selected node.
+    public func previewAlpha(
+        _ value: Double,
+        previewTTLMilliseconds: Int? = nil
+    ) async {
+        guard let node = selectedNode else {
+            tuningError = "Select a node with a stable ID to preview tuning."
+            return
+        }
+        await previewTuning(
+            property: "alpha",
+            originalValue: .number(value: node.alpha ?? 1, unit: "ratio"),
+            previewValue: .number(value: value, unit: "ratio"),
+            previewTTLMilliseconds: previewTTLMilliseconds
+        )
+    }
+
+    /// Creates and applies one reversible visual-property preview. The Runtime
+    /// re-reads the original value and rejects stale or unsupported targets.
+    public func previewTuning(
+        property: String,
+        originalValue: TuningPropertyValueDraft,
+        previewValue: TuningPropertyValueDraft,
+        previewTTLMilliseconds: Int? = nil
+    ) async {
         guard !isApplyingTuning else {
             return
         }
@@ -549,9 +733,13 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         isApplyingTuning = true
         tuningError = nil
+        tuningSourceSuggestionsGeneration += 1
+        lastTuningPatch = nil
+        tuningSourceSuggestions = []
+        tuningSourceSuggestionsPhase = .idle
         defer { isApplyingTuning = false }
         let draft = TuningPatchDraft(
-            title: "Studio alpha preview for \(stableID)",
+            title: "Studio \(property) preview for \(stableID)",
             targetSnapshotID: snapshot.id,
             changes: [
                 TuningChangeDraft(
@@ -561,24 +749,65 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                         nodeID: node.id,
                         stableID: stableID
                     ),
-                    property: "alpha",
-                    originalValue: TuningNumberValueDraft(value: node.alpha ?? 1),
-                    previewValue: TuningNumberValueDraft(value: value)
+                    property: property,
+                    originalValue: originalValue,
+                    previewValue: previewValue
                 ),
             ],
             createdBy: .studio
         )
         do {
             let patch = try await client.createTuningPatch(draft)
+            lastTuningPatch = patch
             lastTuningApplication = try await client.applyTuningPatch(
                 patchID: patch.patchID,
-                previewTTLMilliseconds: nil
+                previewTTLMilliseconds: previewTTLMilliseconds
             )
         } catch {
             tuningError = Self.message(for: error)
             return
         }
         await loadActiveTuning()
+    }
+
+    /// Generates a source-oriented handoff from the exact persisted Tuning
+    /// Patch that produced the latest preview. The Host explicitly reports
+    /// missing source mapping instead of inventing a file path.
+    public func loadTuningSourceSuggestions() async {
+        guard let patch = lastTuningPatch else {
+            tuningSourceSuggestions = []
+            tuningSourceSuggestionsPhase = .failure(
+                "Apply a tuning preview before preparing a source handoff."
+            )
+            return
+        }
+        tuningSourceSuggestionsGeneration += 1
+        let generation = tuningSourceSuggestionsGeneration
+        tuningSourceSuggestionsPhase = .loading
+        do {
+            let result = try await client.getTuningSourceSuggestions(patchID: patch.patchID)
+            guard generation == tuningSourceSuggestionsGeneration,
+                  lastTuningPatch?.patchID == patch.patchID
+            else {
+                return
+            }
+            guard result.patchID == patch.patchID,
+                  result.patchRevision == patch.revision,
+                  result.targetSnapshotID == patch.targetSnapshotID
+            else {
+                throw HostClientError.decoding(
+                    "The source handoff does not match the selected Tuning Patch."
+                )
+            }
+            tuningSourceSuggestions = result.suggestions
+            tuningSourceSuggestionsPhase = result.suggestions.isEmpty ? .empty : .content
+        } catch {
+            guard generation == tuningSourceSuggestionsGeneration else {
+                return
+            }
+            tuningSourceSuggestions = []
+            tuningSourceSuggestionsPhase = .failure(Self.message(for: error))
+        }
     }
 
     /// Reverts one active tuning preview and refreshes the active list.
@@ -619,6 +848,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         selectedIssueID = id
         issueTransitionError = nil
         issueConflictNote = nil
+        issueVerificationError = nil
+        lastIssueVerification = nil
         guard let id else {
             selectedIssue = nil
             issueDetailPhase = .idle
@@ -650,6 +881,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         isTransitioningIssue = true
         issueTransitionError = nil
         issueConflictNote = nil
+        issueVerificationError = nil
         defer { isTransitioningIssue = false }
         do {
             let updated = try await client.transitionReviewIssue(
@@ -671,6 +903,57 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 await reloadIssueAfterConflict(issueID: issue.issueID)
             } else {
                 issueTransitionError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// Captures a different real build and asks the Host to rerun the design
+    /// comparison before recording an immutable verification. The captured
+    /// Snapshot joins Evidence and scope discovery, but Studio preserves the
+    /// user's current Inspector selection until they explicitly open it.
+    public func recaptureAndVerifySelectedIssue() async {
+        guard !isRecapturingIssue, let issue = selectedIssue else {
+            return
+        }
+        guard issue.state == "ready_for_verification" else {
+            issueVerificationError =
+                "Move the Review Issue to ready_for_verification before recapturing."
+            return
+        }
+        isRecapturingIssue = true
+        issueVerificationError = nil
+        issueConflictNote = nil
+        lastIssueVerification = nil
+        defer { isRecapturingIssue = false }
+        do {
+            let result = try await client.recaptureAndVerifyReviewIssue(
+                id: issue.issueID,
+                RecaptureReviewIssueRequest(
+                    expectedRevision: issue.revision,
+                    verifiedBy: .studio
+                )
+            )
+            let item = SnapshotListItem(snapshot: result.snapshot)
+            snapshots.removeAll(where: { $0.id == item.id })
+            snapshots.insert(item, at: 0)
+            applyDerivedScopes()
+            contentPhase = .content
+            applyIssueToList(result.issue)
+            if selectedIssueID == issue.issueID {
+                selectedIssue = result.issue
+                issueDetailPhase = .content
+                lastIssueVerification = result
+            }
+        } catch {
+            guard selectedIssueID == issue.issueID else {
+                return
+            }
+            if Self.isConflict(error) {
+                issueConflictNote =
+                    "This issue or build changed elsewhere. The latest issue revision is shown; review it before retrying."
+                await reloadIssueAfterConflict(issueID: issue.issueID)
+            } else {
+                issueVerificationError = Self.message(for: error)
             }
         }
     }
@@ -798,12 +1081,21 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         canvasStateDetail = nil
         guard let id else {
             canvasStatePhase = .idle
+            await loadReviewIssues()
             return
         }
         canvasStatePhase = .loading
         let detail: ScreenStateDetail
         do {
-            detail = try await client.getScreenState(id: id)
+            if let scope = selectedScope {
+                detail = try await client.getScreenState(
+                    id: id,
+                    applicationVersion: scope.applicationVersion,
+                    buildID: scope.buildID
+                )
+            } else {
+                detail = try await client.getScreenState(id: id)
+            }
             guard generation == canvasStateGeneration else {
                 return
             }
@@ -814,8 +1106,10 @@ public final class SnapshotWorkspaceModel: ObservableObject {
                 return
             }
             canvasStatePhase = .failure(Self.message(for: error))
+            await loadReviewIssues()
             return
         }
+        await loadReviewIssues()
         // The single-screen Inspector follows the STATE: its canonical
         // observation Snapshot drives the screenshot, the 2D tree, the node
         // properties, and the 3D layers — not whichever capture the Evidence
@@ -992,7 +1286,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         mergeSelectionStateIDs = []
         mergeDecisionRevision = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         return true
     }
 
@@ -1074,7 +1368,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         splitDecisionRevision = nil
         splitDecisionStateID = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         await selectCanvasState(id: stateID)
         return true
     }
@@ -1182,7 +1476,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         annotationDecisionRevision = nil
         annotationDecisionStateID = nil
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
         await selectCanvasState(id: stateID)
         return true
     }
@@ -1199,7 +1493,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
     ) async {
         if Self.isConflict(error) {
             noteGraphChangedElsewhere()
-            await loadCanvas(projectID: projectID, applicationID: applicationID)
+            await reloadCanvasForLastScope()
             rearmOpenCurationDecisions()
         } else {
             curationError = Self.message(for: error)
@@ -1300,6 +1594,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         designComparison = nil
         selectedDifferenceID = nil
         designComparisonError = nil
+        differenceIssueError = nil
+        lastPromotedIssue = nil
         guard let id else {
             designReferencePhase = .idle
             designComparisons = []
@@ -1374,6 +1670,8 @@ public final class SnapshotWorkspaceModel: ObservableObject {
             )
             designComparison = comparison
             selectedDifferenceID = nil
+            differenceIssueError = nil
+            lastPromotedIssue = nil
         } catch {
             designComparisonError = Self.message(for: error)
             return
@@ -1388,18 +1686,65 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         }
         designComparison = comparison
         selectedDifferenceID = nil
+        differenceIssueError = nil
+        lastPromotedIssue = nil
     }
 
     /// Highlights one difference of the shown comparison.
     public func selectDifference(id: String?) {
         guard let id else {
             selectedDifferenceID = nil
+            differenceIssueError = nil
+            lastPromotedIssue = nil
             return
         }
         guard designComparison?.differences.contains(where: { $0.id == id }) == true else {
             return
         }
         selectedDifferenceID = id
+        differenceIssueError = nil
+        lastPromotedIssue = nil
+    }
+
+    /// Promotes the selected immutable Difference into a canonical Review
+    /// Issue. Studio names only the Difference; expected/actual values,
+    /// Runtime target, and evidence remain owned by the Host.
+    public func promoteSelectedDifferenceToIssue() async {
+        guard !isPromotingDifference else {
+            return
+        }
+        guard let comparison = designComparison, let differenceID = selectedDifferenceID else {
+            differenceIssueError = "Select a Design Difference before creating a Review Issue."
+            return
+        }
+        isPromotingDifference = true
+        differenceIssueError = nil
+        lastPromotedIssue = nil
+        defer { isPromotingDifference = false }
+        do {
+            let issue = try await client.createReviewIssueFromDifference(
+                comparisonID: comparison.comparisonID,
+                CreateReviewIssueFromDifferenceRequest(
+                    differenceID: differenceID,
+                    createdBy: .studio
+                )
+            )
+            let selectionStillCurrent = designComparison?.comparisonID == comparison.comparisonID
+                && selectedDifferenceID == differenceID
+            if selectionStillCurrent {
+                lastPromotedIssue = issue
+            }
+            if selectedCanvasStateID != nil {
+                await loadReviewIssues()
+                if designComparison?.comparisonID == comparison.comparisonID,
+                   selectedDifferenceID == differenceID,
+                   reviewIssues.contains(where: { $0.issueID == issue.issueID }) {
+                    await selectReviewIssue(id: issue.issueID)
+                }
+            }
+        } catch {
+            differenceIssueError = Self.message(for: error)
+        }
     }
 
     /// Steps the difference selection for review mode, wrapping at both
@@ -1412,189 +1757,29 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         let ids = comparison.differences.map(\.differenceID)
         guard let current = selectedDifferenceID, let index = ids.firstIndex(of: current) else {
             selectedDifferenceID = step >= 0 ? ids.first : ids.last
+            differenceIssueError = nil
+            lastPromotedIssue = nil
             return
         }
         let count = ids.count
         let next = ((index + step) % count + count) % count
         selectedDifferenceID = ids[next]
-    }
-
-    // MARK: - Exploration Operations (device automation Host capability)
-
-    /// The canonical terminal Operation states. A run that reached one of
-    /// them is no longer addressable for cancellation.
-    private static let terminalExplorationStates: Set<String> = ["succeeded", "failed", "cancelled"]
-
-    /// True while an exploration Operation this Studio started is still
-    /// addressable on the Host: Cancel must stay reachable even when the poll
-    /// loop is no longer running (a superseded start, a torn-down model), so
-    /// the run can never be orphaned.
-    public var isExplorationRunAddressable: Bool {
-        guard explorationOperationID != nil else {
-            return false
-        }
-        guard let state = explorationState else {
-            return true
-        }
-        return !Self.terminalExplorationStates.contains(state)
-    }
-
-    /// Starts one background exploration Operation and polls it to a
-    /// terminal state. The poll loop is bound to the Operation, not to the
-    /// Canvas pane: switching tabs never stops it. A Host without a
-    /// configured automation provider rejects the run with HTTP 501 code
-    /// `unsupported`; the message is shown inline and the controls stay
-    /// usable.
-    public func startExploration(
-        maximumActions: Int,
-        maximumDepth: Int? = nil,
-        settleMilliseconds: Int? = nil,
-        excludedStableIDs: [String] = []
-    ) async {
-        guard !isExploring else {
-            return
-        }
-        explorationGeneration += 1
-        let generation = explorationGeneration
-        isExploring = true
-        explorationError = nil
-        explorationReport = nil
-        explorationProgress = nil
-        explorationLastEventMessage = nil
-        let command = ExplorationRunCommand(
-            maximumActions: maximumActions,
-            maximumDepth: maximumDepth,
-            settleMilliseconds: settleMilliseconds,
-            excludedStableIDs: excludedStableIDs.isEmpty ? nil : excludedStableIDs
-        )
-        let reference: ExplorationOperationRef
-        do {
-            reference = try await client.runExploration(command)
-            guard generation == explorationGeneration else {
-                return
-            }
-        } catch {
-            guard generation == explorationGeneration else {
-                return
-            }
-            explorationError = Self.explorationMessage(for: error)
-            isExploring = false
-            // The previous Operation identity survives a rejected start: a
-            // Host that rejects the run because one is already active must
-            // leave that run cancellable, not orphaned.
-            return
-        }
-        // Only an accepted run replaces the previous Operation identity.
-        explorationOperationID = reference.operationID
-        explorationState = reference.state
-        await pollExploration(operationID: reference.operationID, generation: generation)
-    }
-
-    /// Requests cancellation of the addressable exploration. The Operation
-    /// stays running until the walk observes the request; the poll loop then
-    /// shows the terminal `cancelled` state.
-    public func cancelExploration() async {
-        guard !isCancellingExploration,
-              isExplorationRunAddressable,
-              let operationID = explorationOperationID
-        else {
-            return
-        }
-        isCancellingExploration = true
-        defer { isCancellingExploration = false }
-        do {
-            let ref = try await client.cancelExploration(id: operationID)
-            if explorationOperationID == operationID {
-                explorationState = ref.state
-            }
-        } catch {
-            if explorationOperationID == operationID {
-                explorationError = Self.explorationMessage(for: error)
-            }
-        }
-    }
-
-    /// Tears down the exploration poll loop without cancelling the Host-side
-    /// run, when the model itself is discarded or a newer request supersedes
-    /// it. The Canvas pane must never call this: a tab switch keeps the run
-    /// polling. The Operation identity survives so Cancel stays reachable.
-    public func stopExplorationPolling() {
-        explorationGeneration += 1
-        isExploring = false
-    }
-
-    /// Polls the exploration Operation once per interval until it reaches a
-    /// terminal state, the generation guard supersedes the loop, or the
-    /// enclosing Task is cancelled.
-    private func pollExploration(operationID: String, generation: Int) async {
-        while generation == explorationGeneration {
-            if Task.isCancelled {
-                return
-            }
-            do {
-                try await explorationPollSleep()
-            } catch {
-                // The only failure a sleep reports is cancellation: stop the
-                // loop instead of spinning through it.
-                return
-            }
-            guard !Task.isCancelled, generation == explorationGeneration else {
-                return
-            }
-            let record: ExplorationOperationRecord
-            do {
-                record = try await client.getExplorationOperation(id: operationID)
-            } catch {
-                guard generation == explorationGeneration else {
-                    return
-                }
-                explorationError = Self.explorationMessage(for: error)
-                isExploring = false
-                return
-            }
-            guard generation == explorationGeneration else {
-                return
-            }
-            explorationState = record.operation.state
-            let previousCompletedUnits = explorationProgress?.completedUnits
-            explorationProgress = record.latestProgress
-            explorationLastEventMessage = record.latestEventMessage
-            switch record.operation.state {
-            case "succeeded":
-                explorationReport = record.report
-                isExploring = false
-                await refreshCanvasAfterExploration()
-                return
-            case "failed", "cancelled":
-                explorationError = Self.terminalExplorationMessage(for: record.operation)
-                isExploring = false
-                return
-            default:
-                // The walk records observations as it goes, so the Canvas
-                // grows while the device is still walking: every executed
-                // action may have discovered a state, and waiting for the
-                // run to settle would hide exactly the live picture an
-                // operator watches an exploration for.
-                if record.latestProgress?.completedUnits != previousCompletedUnits {
-                    await refreshCanvasAfterExploration()
-                }
-                continue
-            }
-        }
+        differenceIssueError = nil
+        lastPromotedIssue = nil
     }
 
     /// Discovered states belong on the Canvas immediately — during the walk
     /// after every executed action, and once more when the run settles — so
     /// this reloads the same Screen Graph the Canvas last showed.
-    private func refreshCanvasAfterExploration() async {
-        guard let projectID = lastCanvasProjectID, let applicationID = lastCanvasApplicationID else {
+    func refreshCanvasAfterExploration() async {
+        guard lastCanvasProjectID != nil, lastCanvasApplicationID != nil else {
             return
         }
-        await loadCanvas(projectID: projectID, applicationID: applicationID)
+        await reloadCanvasForLastScope()
     }
 
     /// Surfaces the canonical error code and message verbatim.
-    private static func explorationMessage(for error: Error) -> String {
+    static func explorationMessage(for error: Error) -> String {
         if let hostError = error as? HostClientError,
            case let .server(_, _, code, message, _) = hostError {
             return "\(code): \(message)"
@@ -1602,7 +1787,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         return message(for: error)
     }
 
-    private static func terminalExplorationMessage(for operation: ExplorationOperationRef) -> String {
+    static func terminalExplorationMessage(for operation: ExplorationOperationRef) -> String {
         guard let error = operation.error else {
             return "The exploration operation ended as \(operation.state)."
         }
@@ -1762,7 +1947,7 @@ public final class SnapshotWorkspaceModel: ObservableObject {
         screenshotPhase = .none
     }
 
-    private static func message(for error: Error) -> String {
+    static func message(for error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }

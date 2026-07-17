@@ -1,4 +1,5 @@
 import Foundation
+import VistreaRuntimeModels
 
 // MARK: - Shared geometry projections
 
@@ -416,5 +417,72 @@ public struct DesignComparisonPage: Decodable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case items
         case nextCursor = "next_cursor"
+    }
+}
+
+/// The persisted real-build verification record returned by a recapture.
+/// Studio renders the acceptance result and captured build without weakening
+/// the canonical protocol document into a local source of truth.
+public struct ReviewVerificationSummary: Decodable, Equatable, Sendable {
+    public let verificationRecordID: String
+    public let issueID: String
+    public let issueRevision: UInt64
+    public let basis: String
+    public let result: String
+    public let verifiedSnapshotID: String
+    public let verifiedBuildID: String
+    public let verifiedAt: String
+
+    public init(
+        verificationRecordID: String,
+        issueID: String,
+        issueRevision: UInt64,
+        basis: String,
+        result: String,
+        verifiedSnapshotID: String,
+        verifiedBuildID: String,
+        verifiedAt: String
+    ) {
+        self.verificationRecordID = verificationRecordID
+        self.issueID = issueID
+        self.issueRevision = issueRevision
+        self.basis = basis
+        self.result = result
+        self.verifiedSnapshotID = verifiedSnapshotID
+        self.verifiedBuildID = verifiedBuildID
+        self.verifiedAt = verifiedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case verificationRecordID = "verification_record_id"
+        case issueID = "issue_id"
+        case issueRevision = "issue_revision"
+        case basis
+        case result
+        case verifiedSnapshotID = "verified_snapshot_id"
+        case verifiedBuildID = "verified_build_id"
+        case verifiedAt = "verified_at"
+    }
+}
+
+/// The atomic result of Studio's fresh-build acceptance action. The new
+/// Snapshot is evidence, the comparison explains the verdict, the immutable
+/// record proves it, and the Issue carries the resulting lifecycle state.
+public struct RecaptureReviewIssueResult: Decodable, Equatable, Sendable {
+    public let snapshot: RuntimeSnapshot
+    public let comparison: DesignComparisonDetail
+    public let verification: ReviewVerificationSummary
+    public let issue: ReviewIssueSummary
+
+    public init(
+        snapshot: RuntimeSnapshot,
+        comparison: DesignComparisonDetail,
+        verification: ReviewVerificationSummary,
+        issue: ReviewIssueSummary
+    ) {
+        self.snapshot = snapshot
+        self.comparison = comparison
+        self.verification = verification
+        self.issue = issue
     }
 }

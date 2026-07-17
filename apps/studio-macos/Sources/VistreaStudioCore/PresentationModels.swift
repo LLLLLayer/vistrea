@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import VistreaRuntimeModels
 
@@ -155,6 +156,10 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
     public let actions: [String]
     /// The captured visual alpha, when the Runtime reported one.
     public let alpha: Double?
+    public let foregroundColor: ColorRGBAValueSummary?
+    public let backgroundColor: ColorRGBAValueSummary?
+    public let font: NodeFontPresentation?
+    public let cornerRadius: Double?
     public let fields: [DetailField]
 
     init(node: UiNode) {
@@ -170,6 +175,10 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         accessibilityLabel = node.accessibility?.label
         actions = node.actions.map(\.rawValue)
         alpha = node.visual?.alpha
+        foregroundColor = node.visual?.foregroundColor.map(ColorRGBAValueSummary.init)
+        backgroundColor = node.visual?.backgroundColor.map(ColorRGBAValueSummary.init)
+        font = node.visual?.font.map(NodeFontPresentation.init)
+        cornerRadius = node.visual?.cornerRadius
 
         var result = [
             DetailField(label: "Node ID", value: node.nodeID.rawValue),
@@ -191,6 +200,23 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
         if let alpha = node.visual?.alpha {
             result.append(
                 DetailField(label: "Alpha", value: alpha.formatted(.number.precision(.fractionLength(0...2))))
+            )
+        }
+        if let color = foregroundColor {
+            result.append(DetailField(label: "Foreground", value: color.summaryText))
+        }
+        if let color = backgroundColor {
+            result.append(DetailField(label: "Background", value: color.summaryText))
+        }
+        if let font {
+            result.append(DetailField(label: "Font", value: font.summaryText))
+        }
+        if let cornerRadius {
+            result.append(
+                DetailField(
+                    label: "Corner radius",
+                    value: cornerRadius.formatted(.number.precision(.fractionLength(0...2)))
+                )
             )
         }
         if let visible = node.state.visible {
@@ -216,6 +242,32 @@ public struct NodePresentation: Identifiable, Equatable, Sendable {
 
     public var outlineTitle: String {
         stableID ?? contentSummary ?? nativeType
+    }
+}
+
+public extension ColorRGBAValueSummary {
+    init(_ color: VistreaRuntimeModels.Color) {
+        self.init(red: color.red, green: color.green, blue: color.blue, alpha: color.alpha)
+    }
+}
+
+public struct NodeFontPresentation: Equatable, Sendable {
+    public let family: String
+    public let size: Double
+    public let weight: Int
+    public let style: String
+
+    init(_ font: VistreaRuntimeModels.Font) {
+        family = font.family
+        size = font.size
+        weight = Int(((max(-1, min(1, font.weight)) + 1) * 499.5 + 1).rounded())
+        style = font.postscriptName?.localizedCaseInsensitiveContains("italic") == true
+            ? "italic"
+            : "normal"
+    }
+
+    public var summaryText: String {
+        "\(family) · \(size.formatted(.number.precision(.fractionLength(0...1)))) pt · \(weight) · \(style)"
     }
 }
 
@@ -627,8 +679,10 @@ public enum CanvasLayout {
         for transition in graph.transitions {
             outgoing[transition.sourceStateID, default: []].append(transition.targetStateID)
         }
-        while !queue.isEmpty {
-            let current = queue.removeFirst()
+        var queueIndex = 0
+        while queueIndex < queue.count {
+            let current = queue[queueIndex]
+            queueIndex += 1
             let nextColumn = (columnByState[current] ?? 0) + 1
             for target in (outgoing[current] ?? []).sorted() where columnByState[target] == nil {
                 columnByState[target] = nextColumn
@@ -645,6 +699,399 @@ public enum CanvasLayout {
             result.append(PositionedState(state: state, column: column, row: row))
         }
         return result
+    }
+}
+
+public struct CanvasViewportFit: Sendable {
+    public let zoom: CGFloat
+    public let offset: CGSize
+
+    public init(zoom: CGFloat, offset: CGSize) {
+        self.zoom = zoom
+        self.offset = offset
+    }
+}
+
+/// Projects logical Canvas geometry into the visible viewport without applying
+/// a render transform to SwiftUI text. Final coordinates are aligned to the
+/// display backing scale so card borders and Canvas paths settle on physical
+/// pixels after panning, fitting, or magnification.
+public enum CanvasViewportProjection {
+    public static func point(
+        _ logicalPoint: CGPoint,
+        zoom: CGFloat,
+        offset: CGSize,
+        displayScale: CGFloat
+    ) -> CGPoint {
+        CGPoint(
+            x: snap(logicalPoint.x * zoom + offset.width, displayScale: displayScale),
+            y: snap(logicalPoint.y * zoom + offset.height, displayScale: displayScale)
+        )
+    }
+
+    public static func fit(
+        bounds: CGRect,
+        viewportSize: CGSize,
+        padding: CGFloat,
+        minimumZoom: CGFloat,
+        maximumZoom: CGFloat,
+        displayScale: CGFloat
+    ) -> CanvasViewportFit {
+        guard !bounds.isNull, bounds.width > 0, bounds.height > 0,
+              viewportSize.width > padding * 2,
+              viewportSize.height > padding * 2,
+              minimumZoom > 0,
+              maximumZoom >= minimumZoom
+        else {
+            return CanvasViewportFit(zoom: 1, offset: .zero)
+        }
+
+        let availableWidth = viewportSize.width - padding * 2
+        let availableHeight = viewportSize.height - padding * 2
+        let fitted = min(availableWidth / bounds.width, availableHeight / bounds.height)
+        let zoom = min(max(fitted, minimumZoom), maximumZoom)
+        let offset = CGSize(
+            width: snap(
+                (viewportSize.width - bounds.width * zoom) / 2 - bounds.minX * zoom,
+                displayScale: displayScale
+            ),
+            height: snap(
+                (viewportSize.height - bounds.height * zoom) / 2 - bounds.minY * zoom,
+                displayScale: displayScale
+            )
+        )
+        return CanvasViewportFit(zoom: zoom, offset: offset)
+    }
+
+    /// Changes the Canvas zoom while preserving the logical point currently
+    /// under `anchor`. Keeping this calculation in the presentation layer
+    /// makes native trackpad magnification and explicit zoom controls share
+    /// the same stable viewport behavior.
+    public static func zoom(
+        from currentZoom: CGFloat,
+        to targetZoom: CGFloat,
+        offset: CGSize,
+        anchor: CGPoint,
+        displayScale: CGFloat
+    ) -> CanvasViewportFit {
+        guard currentZoom.isFinite, currentZoom > 0,
+              targetZoom.isFinite, targetZoom > 0,
+              offset.width.isFinite, offset.height.isFinite,
+              anchor.x.isFinite, anchor.y.isFinite
+        else {
+            return CanvasViewportFit(zoom: currentZoom, offset: offset)
+        }
+
+        let logicalAnchor = CGPoint(
+            x: (anchor.x - offset.width) / currentZoom,
+            y: (anchor.y - offset.height) / currentZoom
+        )
+        return CanvasViewportFit(
+            zoom: targetZoom,
+            offset: CGSize(
+                width: snap(
+                    anchor.x - logicalAnchor.x * targetZoom,
+                    displayScale: displayScale
+                ),
+                height: snap(
+                    anchor.y - logicalAnchor.y * targetZoom,
+                    displayScale: displayScale
+                )
+            )
+        )
+    }
+
+    private static func snap(_ value: CGFloat, displayScale: CGFloat) -> CGFloat {
+        let scale = displayScale.isFinite && displayScale > 0 ? displayScale : 1
+        return (value * scale).rounded() / scale
+    }
+}
+
+/// Bounds the number of SwiftUI card views and transition paths instantiated
+/// while navigating a large graph. State centers are already projected into
+/// viewport coordinates, so this remains presentation-only and cannot alter
+/// persisted Screen Graph identity or layout evidence.
+public enum CanvasViewportCulling {
+    public static func visibleStateIDs(
+        projectedCenters: [String: CGPoint],
+        viewportSize: CGSize,
+        cardSize: CGSize,
+        overscan: CGFloat = 120
+    ) -> Set<String> {
+        guard viewportSize.width > 0, viewportSize.height > 0,
+              cardSize.width >= 0, cardSize.height >= 0,
+              overscan >= 0
+        else {
+            return []
+        }
+
+        let renderBounds = CGRect(origin: .zero, size: viewportSize)
+            .insetBy(dx: -(cardSize.width / 2 + overscan),
+                     dy: -(cardSize.height / 2 + overscan))
+        return Set(projectedCenters.compactMap { stateID, center in
+            renderBounds.contains(center) ? stateID : nil
+        })
+    }
+
+    public static func transitionMayIntersectViewport(
+        source: CGPoint,
+        target: CGPoint,
+        viewportSize: CGSize,
+        overscan: CGFloat = 120
+    ) -> Bool {
+        guard viewportSize.width > 0, viewportSize.height > 0, overscan >= 0 else {
+            return false
+        }
+        let renderBounds = CGRect(origin: .zero, size: viewportSize)
+            .insetBy(dx: -overscan, dy: -overscan)
+        let segmentBounds = CGRect(
+            x: min(source.x, target.x),
+            y: min(source.y, target.y),
+            width: abs(target.x - source.x),
+            height: abs(target.y - source.y)
+        ).insetBy(dx: -1, dy: -1)
+        return renderBounds.intersects(segmentBounds)
+    }
+}
+
+/// One concrete, cycle-free route from a materialized Screen Graph entry to
+/// a selected target state. Parallel Transitions intentionally produce
+/// distinct routes because they may represent different observed actions
+/// even when their endpoint states are identical.
+public struct CanvasRoute: Equatable, Sendable, Identifiable {
+    public let entryStateID: String
+    public let targetStateID: String
+    public let stateIDs: [String]
+    public let transitionIDs: [String]
+
+    public var id: String {
+        if transitionIDs.isEmpty {
+            return "entry:\(entryStateID)"
+        }
+        return transitionIDs.joined(separator: "|")
+    }
+
+    public init(
+        entryStateID: String,
+        targetStateID: String,
+        stateIDs: [String],
+        transitionIDs: [String]
+    ) {
+        self.entryStateID = entryStateID
+        self.targetStateID = targetStateID
+        self.stateIDs = stateIDs
+        self.transitionIDs = transitionIDs
+    }
+}
+
+/// Bounded deterministic route enumeration for the Studio Canvas. This is a
+/// presentation query over the graph returned by the Host; it never invents
+/// transitions or writes layout state back into the materialized graph.
+public enum CanvasPathPlanner {
+    public static func paths(
+        to targetStateID: String,
+        in graph: CanvasGraph,
+        maximumPaths: Int = 24,
+        maximumDepth: Int = 64,
+        maximumExpansions: Int = 100_000
+    ) -> [CanvasRoute] {
+        guard maximumPaths > 0, maximumDepth >= 0, maximumExpansions >= 0 else { return [] }
+
+        let knownStateIDs = Set(graph.states.map(\.id))
+        guard knownStateIDs.contains(targetStateID) else { return [] }
+
+        var outgoing: [String: [CanvasTransitionSummary]] = [:]
+        var incoming: [String: [String]] = [:]
+        for transition in graph.transitions
+        where knownStateIDs.contains(transition.sourceStateID)
+            && knownStateIDs.contains(transition.targetStateID) {
+            outgoing[transition.sourceStateID, default: []].append(transition)
+            incoming[transition.targetStateID, default: []].append(transition.sourceStateID)
+        }
+        for sourceStateID in Array(outgoing.keys) {
+            outgoing[sourceStateID]?.sort {
+                if $0.targetStateID != $1.targetStateID {
+                    return $0.targetStateID < $1.targetStateID
+                }
+                return $0.transitionID < $1.transitionID
+            }
+        }
+
+        // Reverse breadth-first search gives every reachable state its exact
+        // shortest distance to the target. Primary routes use these distances
+        // and therefore never depend on the bounded alternative-route walk.
+        var distanceToTarget = [targetStateID: 0]
+        var reverseQueue = [targetStateID]
+        var reverseQueueIndex = 0
+        while reverseQueueIndex < reverseQueue.count {
+            let current = reverseQueue[reverseQueueIndex]
+            reverseQueueIndex += 1
+            let predecessorDistance = (distanceToTarget[current] ?? 0) + 1
+            for predecessor in incoming[current] ?? []
+            where distanceToTarget[predecessor] == nil {
+                distanceToTarget[predecessor] = predecessorDistance
+                reverseQueue.append(predecessor)
+            }
+        }
+
+        var entryStateIDs: [String] = []
+        var seenEntries = Set<String>()
+        for entryStateID in graph.entryStateIDs.sorted()
+        where knownStateIDs.contains(entryStateID) && seenEntries.insert(entryStateID).inserted {
+            entryStateIDs.append(entryStateID)
+        }
+
+        let reachableEntryStateIDs = entryStateIDs.filter {
+            guard let distance = distanceToTarget[$0] else { return false }
+            return distance <= maximumDepth
+        }
+
+        func shortestRoute(from entryStateID: String) -> CanvasRoute? {
+            guard let initialDistance = distanceToTarget[entryStateID],
+                  initialDistance <= maximumDepth
+            else {
+                return nil
+            }
+
+            var currentStateID = entryStateID
+            var stateIDs = [entryStateID]
+            var transitionIDs: [String] = []
+            while currentStateID != targetStateID {
+                guard let currentDistance = distanceToTarget[currentStateID],
+                      currentDistance > 0,
+                      let transition = (outgoing[currentStateID] ?? []).first(where: {
+                          distanceToTarget[$0.targetStateID] == currentDistance - 1
+                      })
+                else {
+                    return nil
+                }
+                transitionIDs.append(transition.transitionID)
+                currentStateID = transition.targetStateID
+                stateIDs.append(currentStateID)
+            }
+
+            return CanvasRoute(
+                entryStateID: entryStateID,
+                targetStateID: targetStateID,
+                stateIDs: stateIDs,
+                transitionIDs: transitionIDs
+            )
+        }
+
+        // Reserve one deterministic shortest route per reachable entry before
+        // enumerating alternatives. If the caller's path cap is smaller than
+        // the number of reachable entries, sorted entry order determines which
+        // primary routes fit within that explicit cap.
+        let primaryRoutes = reachableEntryStateIDs
+            .prefix(maximumPaths)
+            .compactMap(shortestRoute)
+        var alternativeRoutes: [CanvasRoute] = []
+        var routeIDs = Set(primaryRoutes.map(\.id))
+        var expansions = 0
+
+        func walk(
+            entryStateID: String,
+            currentStateID: String,
+            stateIDs: [String],
+            transitionIDs: [String],
+            visitedStateIDs: Set<String>
+        ) {
+            guard primaryRoutes.count + alternativeRoutes.count < maximumPaths else { return }
+            if currentStateID == targetStateID {
+                let route = CanvasRoute(
+                    entryStateID: entryStateID,
+                    targetStateID: targetStateID,
+                    stateIDs: stateIDs,
+                    transitionIDs: transitionIDs
+                )
+                if routeIDs.insert(route.id).inserted {
+                    alternativeRoutes.append(route)
+                }
+                return
+            }
+            guard transitionIDs.count < maximumDepth,
+                  expansions < maximumExpansions
+            else {
+                return
+            }
+
+            for transition in outgoing[currentStateID] ?? [] {
+                let nextDepth = transitionIDs.count + 1
+                guard primaryRoutes.count + alternativeRoutes.count < maximumPaths,
+                      expansions < maximumExpansions,
+                      let remainingDistance = distanceToTarget[transition.targetStateID],
+                      nextDepth + remainingDistance <= maximumDepth,
+                      !visitedStateIDs.contains(transition.targetStateID)
+                else {
+                    continue
+                }
+                expansions += 1
+                var nextVisited = visitedStateIDs
+                nextVisited.insert(transition.targetStateID)
+                walk(
+                    entryStateID: entryStateID,
+                    currentStateID: transition.targetStateID,
+                    stateIDs: stateIDs + [transition.targetStateID],
+                    transitionIDs: transitionIDs + [transition.transitionID],
+                    visitedStateIDs: nextVisited
+                )
+            }
+        }
+
+        let primaryEntryStateIDs = Set(primaryRoutes.map(\.entryStateID))
+        for entryStateID in reachableEntryStateIDs
+        where primaryEntryStateIDs.contains(entryStateID)
+            && primaryRoutes.count + alternativeRoutes.count < maximumPaths
+            && expansions < maximumExpansions
+        {
+            walk(
+                entryStateID: entryStateID,
+                currentStateID: entryStateID,
+                stateIDs: [entryStateID],
+                transitionIDs: [],
+                visitedStateIDs: [entryStateID]
+            )
+        }
+
+        let alternativesByEntry = Dictionary(grouping: alternativeRoutes, by: \.entryStateID)
+        return primaryRoutes.flatMap { primaryRoute in
+            [primaryRoute] + (alternativesByEntry[primaryRoute.entryStateID] ?? [])
+        }
+    }
+}
+
+/// Human-facing labels for Canvas cards. Canonical state titles remain intact
+/// in the model and Inspector; the Canvas avoids promoting instrumentation
+/// event names such as `android.debug.inspector.open` to the primary label.
+public enum CanvasStatePresentation {
+    public static func displayTitle(for state: CanvasStateSummary) -> String {
+        guard looksGenerated(state.title) else { return state.title }
+
+        let semanticLabels = state.labels.filter { $0 != "entry" }
+        let genericLabels: Set<String> = ["screen", "storefront", "catalog"]
+        let specificLabels = semanticLabels.filter { !genericLabels.contains($0) }
+        let preferredLabels = specificLabels.isEmpty ? semanticLabels : specificLabels
+        guard !preferredLabels.isEmpty else { return state.title }
+        return preferredLabels.map(humanize).joined(separator: " · ")
+    }
+
+    private static func looksGenerated(_ title: String) -> Bool {
+        let lowered = title.lowercased()
+        return lowered.contains(".debug.")
+            || lowered.contains(".inspector.")
+            || lowered.hasPrefix("runtime.")
+    }
+
+    private static func humanize(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return String(first).uppercased() + String(word.dropFirst())
+            }
+            .joined(separator: " ")
     }
 }
 
@@ -768,4 +1215,11 @@ public enum StudioLayoutMetrics {
     public static func inspectorArrangement(forWidth width: CGFloat) -> InspectorArrangement {
         width >= inspectorSideBySideMinWidth ? .sideBySide : .compact
     }
+}
+
+/// Product-level visibility policy for implemented but intentionally
+/// non-default Studio surfaces. The capability remains available through the
+/// Engine, Host, CLI, and tests while the primary Inspector stays focused.
+public enum StudioFeaturePolicy {
+    public static let designReviewVisibleByDefault = false
 }

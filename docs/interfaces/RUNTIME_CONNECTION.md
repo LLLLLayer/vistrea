@@ -10,6 +10,30 @@ This contract connects an authorized iOS or Android Runtime SDK to the Host Conn
 - **Host Connection Engine**: discovers SDKs, authenticates, negotiates capabilities, requests captures, receives event streams, and resolves ObjectRefs.
 - **Automation Engine**: performs real UI actions through WDA/UIAutomator; it is not part of this connection.
 
+### 2.1 Transport profiles
+
+The protocol handshake is identical across two explicit development transport
+profiles:
+
+- `loopback`: plaintext TCP bound only to the literal `127.0.0.1` or `::1`.
+  It is the Simulator/emulator and same-machine development path.
+- `tls`: TLS 1.3 bound to one explicit IP address. Hostnames and wildcard
+  addresses are rejected. The Runtime pins the exact SHA-256 digest of the DER
+  leaf certificate before sending the protocol authentication proof. It is the
+  physical-device path.
+
+TLS does not replace protocol authentication. Both profiles require the same
+fresh per-Host HMAC token, Debug/Internal eligibility checks, Host proof, and
+capability negotiation. A TLS certificate may be ephemeral and self-signed
+because the Runtime trusts only the exact out-of-band pin; system PKI and
+hostname fallback are not used. The token and certificate pin must be delivered
+through protected development configuration and must never enter argv, logs,
+Snapshots, or the Workspace.
+
+The Host Local API used by Studio and Agent integrations remains an independent
+authenticated loopback-only HTTP boundary. Enabling a physical-device Runtime
+listener never exposes that API to the device network.
+
 ## 3. Connection state machine
 
 ```text
@@ -215,6 +239,9 @@ Additional commands:
 - Keep credentials outside Snapshots and logs.
 - Apply redaction before data leaves the application process when policy requires it.
 - Record tuning commands, connection actor, and affected nodes in an audit trail.
+- Reject plaintext Runtime listeners outside literal loopback addresses.
+- Reject TLS wildcard binds, hostnames, TLS versions below 1.3, and a Runtime
+  certificate whose exact leaf SHA-256 pin does not match.
 
 ## 11. Required contract tests
 
@@ -224,6 +251,7 @@ Additional commands:
 - challenge-response ordering and host proof;
 - event ordering, acknowledgement, reconnect resume, epoch reset, backpressure, and dropped-event reporting;
 - object hash verification;
+- loopback-only plaintext, TLS wildcard rejection, and exact leaf-certificate pinning;
 - tuning allowlist and original-value precondition;
 - disconnect reversion;
 - unsupported platform extension preservation.

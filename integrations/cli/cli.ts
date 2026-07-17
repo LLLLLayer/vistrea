@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { TextDecoder } from "node:util";
 
 import { runIosDriverCommand } from "./ios-driver.js";
 import {
@@ -12,7 +13,9 @@ import {
 } from "../shared/index.js";
 
 const MAXIMUM_DEADLINE_MILLISECONDS = 300_000;
+const MAXIMUM_JSON_FILE_BYTES = 2 * 1024 * 1024;
 const CONTEXT_ID_PATTERN = /^(?:request|trace)_[A-Za-z0-9._:-]{1,240}$/;
+const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 /**
  * Named command surfaces a composition may expose, keyed by the first command
@@ -28,7 +31,8 @@ export const VISTREA_CLI_TOOLSETS = {
   workspace: ["workspace"],
   assets: ["snapshot", "events", "object", "pack"],
   exploration: ["explore", "graph", "screen", "driver"],
-  knowledge: ["wiki"],
+  knowledge: ["wiki", "collection"],
+  collaboration: ["sync"],
   verification: ["design", "issue", "tuning", "validate"],
 } as const;
 
@@ -106,17 +110,26 @@ export async function runVistreaCli(
   };
   try {
     const enabledGroups = enabledCommandGroups(runtime.environment["VISTREA_CLI_TOOLSETS"]);
-    const invocation = parseArguments(arguments_, context, enabledGroups);
+    const invocation = parseArguments(
+      await resolveJsonFileArguments(arguments_),
+      context,
+      enabledGroups,
+      runtime.environment["VISTREA_HUB_TOKEN"],
+    );
     if (invocation.help === true) {
       writeEnvelope(runtime, context, {
         commands: [
           "workspace status",
+          "workspace recovery-point create --reason <text>",
+          "workspace recovery-point list",
+          "workspace recovery-point release <sha256:...> --policy <policy_id>",
           "snapshot capture",
           "snapshot list",
           "snapshot get <snapshot_id>",
           "events list",
           "design upload-asset --file <path> --media-type <type> [--name <logical>]",
           "design add-reference --json <command>",
+          "design promote-baseline --json <command>",
           "design get-reference <design_reference_id>",
           "design map --json <command>",
           "design compare --reference <id> --snapshot <id> [--actor <id>] [--pixel true|false]",
@@ -124,20 +137,23 @@ export async function runVistreaCli(
           "design list-references [--limit n] [--cursor c]",
           "design list-comparisons [--reference <id>] [--snapshot <id>] [--limit n] [--cursor c]",
           "issue create --json <command>",
-          "issue list [--states a,b] [--reference <id>] [--limit n] [--cursor c]",
+          "issue create-from-difference --json <command>",
+          "issue list [--states a,b] [--reference <id>] [--screen-state <id>] [--limit n] [--cursor c]",
           "issue get <issue_id>",
           "issue transition <issue_id> --revision <n> --to <state> [--reason <text>] [--actor <id>]",
           "issue verify <issue_id> --revision <n> --basis <basis> --result <result> --snapshot <id> --build <id> [--rationale <text>] [--actor <id>]",
+          "issue recapture-verify --json <command>",
           "tuning create-patch --json <command>",
           "tuning get-patch <patch_id>",
+          "tuning source-suggestions <patch_id>",
           "tuning apply --patch <patch_id> [--ttl <ms>]",
           "tuning revert <tuning_application_id>",
           "tuning get-application <tuning_application_id>",
           "tuning list-active",
           "graph observe-state --snapshot <snapshot_id> [--title <text>] [--kind <state_kind>] [--entry true|false] [--source <capture_source>] [--session <session_id>]",
           "graph observe-transition --before <snapshot_id> --after <snapshot_id> --action <json> [--source <capture_source>] [--session <session_id>]",
-          "graph show --project <project_id> --application <application_id>",
-          "graph get-state <screen_state_id>",
+          "graph show --project <project_id> --application <application_id> [--build <build_id> --version <application_version>]",
+          "graph get-state <screen_state_id> [--build <build_id> --version <application_version>]",
           "graph find-path --from <screen_state_id> --to <screen_state_id> [--graph <screen_graph_id>] [--max-depth <n>] [--max-paths <n>]",
           "graph tag --project <project_id> --application <application_id> --tag <tag_name>",
           "wiki create --json <command>",
@@ -148,6 +164,12 @@ export async function runVistreaCli(
           "wiki unlink <wiki_link_id> --revision <n>",
           "wiki backlinks <wiki_node_id> [--limit n] [--cursor c]",
           "wiki related --kind <resource_kind> --id <resource_id> [--limit n] [--cursor c]",
+          "collection create --json <command>",
+          "collection update <collection_id> --json <command>",
+          "collection get <collection_id>",
+          "collection list [--text <phrase>] [--states draft,published,archived] [--limit n] [--cursor c]",
+          "collection publish <collection_id> --json <command>",
+          "collection export <collection_id> [--formats markdown,html]",
           "validate snapshot --snapshot <snapshot_id> [--categories structural,accessibility,visual] [--disable-rules a,b] [--min-touch-target <points>]",
           "validate graph --project <project_id> --application <application_id> [--disable-rules a,b] [--min-touch-target <points>]",
           "validate get-run <validation_run_id>",
@@ -156,13 +178,17 @@ export async function runVistreaCli(
           "validate suppress <finding_id> --json <command>",
           "validate build-diff --project <project_id> --application <application_id> --left <build_id> --right <build_id> [--baseline <tag>]",
           "validate get-build-diff <build_diff_id>",
+          "sync status --url <https-origin> --project <project_id> [--refs a,b]",
+          "sync fetch --url <https-origin> --project <project_id> --refs a,b [--actor <id>]",
+          "sync push --url <https-origin> --project <project_id> --refs a,b [--actor <id>] [--message <text>]",
+          "sync activity --url <https-origin> --project <project_id> [--after-sequence <n>] [--limit <n>]",
           "pack export --json <command>",
           "pack import --file <path>",
           "object get --hash <sha256:...> --output <path>",
           "screen merge --project <id> --application <id> --states a,b [--into <state_id>] --revision <n> [--actor <id>] [--justification <text>]",
           "screen split --project <id> --application <id> --state <state_id> --observations a,b [--title <text>] --revision <n> [--actor <id>] [--justification <text>]",
           "screen annotate <screen_state_id> --project <id> --application <id> [--labels a,b] [--summary <text>] --revision <n> [--actor <id>]",
-          "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--exclude id1,id2] [--actor <id>]",
+          "explore run --max-actions <n> [--max-depth <n>] [--settle <ms>] [--application <id>] [--recovery-attempts <0-5>] [--exclude id1,id2] [--actor <id>]",
           "explore get <operation_id>",
           "explore cancel <operation_id>",
           "driver ios doctor",
@@ -211,6 +237,7 @@ function parseArguments(
   arguments_: readonly string[],
   context: CliContext,
   enabledGroups?: ReadonlySet<string>,
+  hubBearerToken?: string,
 ): ParsedInvocation {
   const command: string[] = [];
   let timeoutMilliseconds: number | undefined;
@@ -284,6 +311,57 @@ function parseArguments(
   if (command[0] === "workspace" && command[1] === "status" && command.length === 2) {
     return invocation("GetWorkspaceStatus", {}, timeoutMilliseconds);
   }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "create"
+  ) {
+    const values = parseOptionPairs(command.slice(3));
+    if (values.size !== 1 || !values.has("--reason")) {
+      throw invalidArguments();
+    }
+    const reason = requireOption(values, "--reason");
+    if (reason.trim().length === 0 || reason.length > 1_024) {
+      throw invalidArguments();
+    }
+    return invocation("CreateWorkspaceRecoveryPoint", { reason }, timeoutMilliseconds);
+  }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "list" &&
+    command.length === 3
+  ) {
+    return invocation("ListWorkspaceRecoveryPoints", {}, timeoutMilliseconds);
+  }
+  if (
+    command[0] === "workspace" &&
+    command[1] === "recovery-point" &&
+    command[2] === "release" &&
+    command.length >= 6
+  ) {
+    const recoveryPointID = command[3] as string;
+    const values = parseOptionPairs(command.slice(4));
+    if (
+      !OBJECT_HASH_PATTERN.test(recoveryPointID) ||
+      values.size !== 1 ||
+      !values.has("--policy")
+    ) {
+      throw invalidArguments();
+    }
+    const retentionPolicyID = requireOption(values, "--policy");
+    if (retentionPolicyID.length === 0 || retentionPolicyID.length > 256) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "ReleaseWorkspaceRecoveryPoint",
+      {
+        recovery_point_id: recoveryPointID,
+        retention_policy_id: retentionPolicyID,
+      },
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "snapshot" && command[1] === "capture") {
     return invocation("CaptureSnapshot", parseCaptureOptions(command.slice(2)), timeoutMilliseconds);
   }
@@ -301,6 +379,9 @@ function parseArguments(
   }
   if (command[0] === "design" && command[1] === "add-reference") {
     return invocation("AddDesignReference", parseJsonOption(command.slice(2)), timeoutMilliseconds);
+  }
+  if (command[0] === "design" && command[1] === "promote-baseline") {
+    return invocation("PromoteVisualBaseline", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
   if (command[0] === "design" && command[1] === "get-reference" && command.length === 3) {
     return invocation(
@@ -353,6 +434,13 @@ function parseArguments(
   if (command[0] === "issue" && command[1] === "create") {
     return invocation("CreateReviewIssue", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
+  if (command[0] === "issue" && command[1] === "create-from-difference") {
+    return invocation(
+      "CreateReviewIssueFromDifference",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "issue" && command[1] === "list") {
     return invocation("ListReviewIssues", parseIssueListOptions(command.slice(2)), timeoutMilliseconds);
   }
@@ -373,11 +461,25 @@ function parseArguments(
       timeoutMilliseconds,
     );
   }
+  if (command[0] === "issue" && command[1] === "recapture-verify") {
+    return invocation(
+      "RecaptureAndVerifyIssue",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
   if (command[0] === "tuning" && command[1] === "create-patch") {
     return invocation("CreateTuningPatch", parseJsonOption(command.slice(2)), timeoutMilliseconds);
   }
   if (command[0] === "tuning" && command[1] === "get-patch" && command.length === 3) {
     return invocation("GetTuningPatch", { patch_id: command[2] as string }, timeoutMilliseconds);
+  }
+  if (command[0] === "tuning" && command[1] === "source-suggestions" && command.length === 3) {
+    return invocation(
+      "GenerateTuningSourceSuggestions",
+      { patch_id: command[2] as string },
+      timeoutMilliseconds,
+    );
   }
   if (command[0] === "tuning" && command[1] === "apply") {
     return invocation("ApplyTuningPatch", parseTuningApplyOptions(command.slice(2)), timeoutMilliseconds);
@@ -416,23 +518,49 @@ function parseArguments(
   if (command[0] === "graph" && command[1] === "show") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--project", "--application"].includes(key)) {
+      if (!["--project", "--application", "--build", "--version"].includes(key)) {
         throw invalidArguments();
       }
+    }
+    const buildID = values.get("--build");
+    const applicationVersion = values.get("--version");
+    if ((buildID === undefined) !== (applicationVersion === undefined)) {
+      throw invalidArguments();
     }
     return invocation(
       "GetScreenGraph",
       {
         project_id: requireOption(values, "--project"),
         application_id: requireOption(values, "--application"),
+        ...(buildID === undefined ? {} : { build_id: buildID }),
+        ...(applicationVersion === undefined
+          ? {}
+          : { application_version: applicationVersion }),
       },
       timeoutMilliseconds,
     );
   }
-  if (command[0] === "graph" && command[1] === "get-state" && command.length === 3) {
+  if (command[0] === "graph" && command[1] === "get-state" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--build", "--version"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const buildID = values.get("--build");
+    const applicationVersion = values.get("--version");
+    if ((buildID === undefined) !== (applicationVersion === undefined)) {
+      throw invalidArguments();
+    }
     return invocation(
       "GetScreenState",
-      { screen_state_id: command[2] as string },
+      {
+        screen_state_id: command[2] as string,
+        ...(buildID === undefined ? {} : { build_id: buildID }),
+        ...(applicationVersion === undefined
+          ? {}
+          : { application_version: applicationVersion }),
+      },
       timeoutMilliseconds,
     );
   }
@@ -540,6 +668,78 @@ function parseArguments(
         id: requireOption(values, "--id"),
         ...(limit === undefined ? {} : { limit: Number(limit) }),
         ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "create") {
+    return invocation(
+      "CreateKnowledgeCollection",
+      parseJsonOption(command.slice(2)),
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "update" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "UpdateKnowledgeCollection",
+      { ...input, collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "get" && command.length === 3) {
+    return invocation(
+      "GetKnowledgeCollection",
+      { collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "list") {
+    const values = parseOptionPairs(command.slice(2));
+    for (const key of values.keys()) {
+      if (!["--text", "--states", "--limit", "--cursor"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const limit = values.get("--limit");
+    if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+      throw invalidArguments();
+    }
+    const text = values.get("--text");
+    const states = values.get("--states");
+    const cursor = values.get("--cursor");
+    return invocation(
+      "ListKnowledgeCollections",
+      {
+        ...(text === undefined ? {} : { text }),
+        ...(states === undefined ? {} : { publication_states: states.split(",") }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "publish" && command.length >= 3) {
+    const input = parseJsonOption(command.slice(3));
+    return invocation(
+      "PublishKnowledgeCollection",
+      { ...input, collection_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "collection" && command[1] === "export" && command.length >= 3) {
+    const values = parseOptionPairs(command.slice(3));
+    for (const key of values.keys()) {
+      if (!["--formats"].includes(key)) {
+        throw invalidArguments();
+      }
+    }
+    const formats = values.get("--formats");
+    return invocation(
+      "ExportKnowledgeCollection",
+      {
+        collection_id: command[2] as string,
+        ...(formats === undefined ? {} : { formats: formats.split(",") }),
       },
       timeoutMilliseconds,
     );
@@ -655,6 +855,76 @@ function parseArguments(
     return invocation(
       "GetBuildDiff",
       { build_diff_id: command[2] as string },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "status") {
+    const values = parseSyncOptionPairs(command.slice(2), ["--url", "--project", "--refs"]);
+    const refs = values.get("--refs");
+    return invocation(
+      "GetSyncStatus",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ...(refs === undefined ? {} : { ref_names: splitSyncRefs(refs) }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "fetch") {
+    const values = parseSyncOptionPairs(command.slice(2), ["--url", "--project", "--refs", "--actor"]);
+    return invocation(
+      "FetchWorkspace",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ref_names: splitSyncRefs(requireOption(values, "--refs")),
+        created_by: syncActor(values.get("--actor")),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "push") {
+    const values = parseSyncOptionPairs(command.slice(2), [
+      "--url",
+      "--project",
+      "--refs",
+      "--actor",
+      "--message",
+    ]);
+    const message = values.get("--message");
+    return invocation(
+      "PushWorkspace",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ref_names: splitSyncRefs(requireOption(values, "--refs")),
+        created_by: syncActor(values.get("--actor")),
+        ...(message === undefined ? {} : { message }),
+      },
+      timeoutMilliseconds,
+    );
+  }
+  if (command[0] === "sync" && command[1] === "activity") {
+    const values = parseSyncOptionPairs(command.slice(2), [
+      "--url",
+      "--project",
+      "--after-sequence",
+      "--limit",
+    ]);
+    const afterSequence = values.get("--after-sequence");
+    const limit = values.get("--limit");
+    if (
+      (afterSequence !== undefined && !/^(?:0|[1-9][0-9]{0,15})$/.test(afterSequence)) ||
+      (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) ||
+      (limit !== undefined && Number(limit) > 500)
+    ) {
+      throw invalidArguments();
+    }
+    return invocation(
+      "GetSyncActivity",
+      {
+        remote: syncRemote(values, hubBearerToken),
+        ...(afterSequence === undefined ? {} : { after_sequence: Number(afterSequence) }),
+        ...(limit === undefined ? {} : { limit: Number(limit) }),
+      },
       timeoutMilliseconds,
     );
   }
@@ -816,17 +1086,31 @@ function parseArguments(
   if (command[0] === "explore" && command[1] === "run") {
     const values = parseOptionPairs(command.slice(2));
     for (const key of values.keys()) {
-      if (!["--max-actions", "--max-depth", "--settle", "--exclude", "--actor"].includes(key)) {
+      if (
+        ![
+          "--max-actions",
+          "--max-depth",
+          "--settle",
+          "--application",
+          "--recovery-attempts",
+          "--exclude",
+          "--actor",
+        ].includes(key)
+      ) {
         throw invalidArguments();
       }
     }
     const maxActions = requireOption(values, "--max-actions");
     const maxDepth = values.get("--max-depth");
     const settle = values.get("--settle");
+    const applicationId = values.get("--application");
+    const recoveryAttempts = values.get("--recovery-attempts");
     if (
       !/^[1-9][0-9]{0,2}$/.test(maxActions) ||
       (maxDepth !== undefined && !/^[1-9][0-9]?$/.test(maxDepth)) ||
-      (settle !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(settle))
+      (settle !== undefined && !/^(?:0|[1-9][0-9]{0,4})$/.test(settle)) ||
+      (applicationId !== undefined && (applicationId.length === 0 || applicationId.length > 256)) ||
+      (recoveryAttempts !== undefined && !/^[0-5]$/.test(recoveryAttempts))
     ) {
       throw invalidArguments();
     }
@@ -838,6 +1122,10 @@ function parseArguments(
         maximum_actions: Number(maxActions),
         ...(maxDepth === undefined ? {} : { maximum_depth: Number(maxDepth) }),
         ...(settle === undefined ? {} : { settle_milliseconds: Number(settle) }),
+        ...(applicationId === undefined ? {} : { application_id: applicationId }),
+        ...(recoveryAttempts === undefined
+          ? {}
+          : { maximum_recovery_attempts: Number(recoveryAttempts) }),
         ...(exclude === undefined ? {} : { excluded_stable_ids: exclude.split(",") }),
         ...(actor === undefined ? {} : { actor_id: actor }),
       },
@@ -883,6 +1171,49 @@ function parseArguments(
     };
   }
   throw invalidArguments();
+}
+
+function parseSyncOptionPairs(
+  arguments_: readonly string[],
+  allowed: readonly string[],
+): Map<string, string> {
+  const values = parseOptionPairs(arguments_);
+  for (const key of values.keys()) {
+    if (!allowed.includes(key)) {
+      throw invalidArguments();
+    }
+  }
+  return values;
+}
+
+function syncRemote(values: Map<string, string>, bearerToken: string | undefined): JsonObject {
+  if (bearerToken === undefined || !/^[A-Za-z0-9_-]{43}$/.test(bearerToken)) {
+    throw new HostClientError(
+      "invalid_argument",
+      "Set VISTREA_HUB_TOKEN to the current Hub bearer token; Hub tokens are never accepted in argv.",
+    );
+  }
+  return {
+    base_url: requireOption(values, "--url"),
+    project_id: requireOption(values, "--project"),
+    bearer_token: bearerToken,
+  };
+}
+
+function splitSyncRefs(value: string): string[] {
+  const refs = value.split(",");
+  if (refs.length === 0 || refs.some((ref) => ref.length === 0)) {
+    throw invalidArguments();
+  }
+  return refs;
+}
+
+function syncActor(actorId: string | undefined): JsonObject {
+  const value = actorId ?? "vistrea-cli";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(value)) {
+    throw invalidArguments();
+  }
+  return { kind: "agent", id: value, extensions: {} };
 }
 
 function parseStateObservationOptions(arguments_: readonly string[]): JsonObject {
@@ -999,6 +1330,51 @@ function parseJsonOption(arguments_: readonly string[]): JsonObject {
   return parsed as JsonObject;
 }
 
+async function resolveJsonFileArguments(
+  arguments_: readonly string[],
+): Promise<readonly string[]> {
+  const resolved: string[] = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index] as string;
+    const previous = arguments_[index - 1];
+    if (argument !== "--json-file" || previous?.startsWith("--") === true) {
+      resolved.push(argument);
+      continue;
+    }
+    const file = arguments_[index + 1];
+    if (file === undefined || file.startsWith("--")) {
+      throw invalidArguments();
+    }
+    let bytes: Buffer;
+    try {
+      bytes = await fs.readFile(file);
+    } catch {
+      throw new HostClientError(
+        "invalid_argument",
+        "The JSON input file could not be read.",
+      );
+    }
+    if (bytes.byteLength > MAXIMUM_JSON_FILE_BYTES) {
+      throw new HostClientError(
+        "invalid_argument",
+        `The JSON input file exceeds the ${String(MAXIMUM_JSON_FILE_BYTES)}-byte limit.`,
+      );
+    }
+    let source: string;
+    try {
+      source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new HostClientError(
+        "invalid_argument",
+        "The JSON input file must contain valid UTF-8.",
+      );
+    }
+    resolved.push("--json", source);
+    index += 1;
+  }
+  return resolved;
+}
+
 function uploadAssetInvocation(
   arguments_: readonly string[],
   timeoutMilliseconds: number | undefined,
@@ -1067,7 +1443,7 @@ function parseValidationConfiguration(values: Map<string, string>): JsonObject {
 function parseIssueListOptions(arguments_: readonly string[]): JsonObject {
   const values = parseOptionPairs(arguments_);
   for (const key of values.keys()) {
-    if (!["--states", "--reference", "--limit", "--cursor"].includes(key)) {
+    if (!["--states", "--reference", "--screen-state", "--limit", "--cursor"].includes(key)) {
       throw invalidArguments();
     }
   }
@@ -1077,10 +1453,12 @@ function parseIssueListOptions(arguments_: readonly string[]): JsonObject {
   }
   const states = values.get("--states");
   const reference = values.get("--reference");
+  const screenState = values.get("--screen-state");
   const cursor = values.get("--cursor");
   return {
     ...(states === undefined ? {} : { states: states.split(",") }),
     ...(reference === undefined ? {} : { design_reference_id: reference }),
+    ...(screenState === undefined ? {} : { screen_state_id: screenState }),
     ...(limitSource === undefined ? {} : { limit: Number(limitSource) }),
     ...(cursor === undefined ? {} : { cursor }),
   };

@@ -272,12 +272,29 @@ export interface KnowledgeCollectionShape extends JsonObject {
   readonly revision: number;
   readonly name: string;
   readonly summary?: string;
+  readonly node_ids: readonly string[];
+  readonly link_ids: readonly string[];
+  readonly entry_node_ids: readonly string[];
   readonly publication: JsonObject;
 }
 
 export type KnowledgeCollection = CanonicalProtocolValue<
   typeof PROTOCOL_SCHEMA_IDS.knowledgeCollection,
   KnowledgeCollectionShape
+>;
+
+export interface KnowledgeGraphShape extends JsonObject {
+  readonly protocol_version: ProtocolVersion;
+  readonly revision: number;
+  readonly nodes: readonly WikiNode[];
+  readonly links: readonly WikiLink[];
+  readonly collections: readonly KnowledgeCollection[];
+  readonly extensions: JsonObject;
+}
+
+export type KnowledgeGraph = CanonicalProtocolValue<
+  typeof PROTOCOL_SCHEMA_IDS.knowledgeGraph,
+  KnowledgeGraphShape
 >;
 
 interface RevisionedDesignValue extends JsonObject {
@@ -683,6 +700,8 @@ export interface DesignRegionMappingQuery {
 
 export interface ReviewIssueQuery {
   readonly design_reference_id?: string;
+  /** Restricts issues to runtime targets observed in this Screen State. */
+  readonly screen_state_id?: string;
   readonly states?: readonly string[];
   readonly severities?: readonly string[];
 }
@@ -809,7 +828,14 @@ export interface ImportPackResult {
   readonly conflicting_refs: readonly PackRefConflict[];
 }
 
-export interface ExportReadableCommand extends JsonObject {}
+export type ReadableKnowledgeFormat = "markdown" | "html";
+
+export interface ExportReadableCommand extends JsonObject {
+  /** Published collection whose immutable Commit root is rendered. */
+  readonly collection_id: string;
+  /** Unique output formats; defaults to both Markdown and HTML. */
+  readonly formats?: readonly ReadableKnowledgeFormat[];
+}
 export interface RemoteRef extends JsonObject {}
 export interface SyncStatus extends JsonObject {}
 export interface FetchCommand extends JsonObject {}
@@ -842,11 +868,36 @@ export interface MigrationResult {
   readonly from_version: number;
   readonly to_version: number;
   readonly applied_versions: readonly number[];
+  /** Present when an existing Workspace was backed up before a forward migration. */
+  readonly backup?: ObjectRef;
 }
 
 export interface BackupWorkspaceCommand {
   readonly reason: string;
   readonly retention: RetentionPolicy;
+  /** Defaults to manual; migration code records pre_migration explicitly. */
+  readonly source?: WorkspaceRecoveryPointSource;
+}
+
+export type WorkspaceRecoveryPointSource = "manual" | "pre_migration";
+
+/** One retained, verified metadata backup presented as a product recovery point. */
+export interface WorkspaceRecoveryPoint {
+  /** Stable local identity; currently the content-addressed backup hash. */
+  readonly recovery_point_id: string;
+  readonly backup: ObjectRef;
+  readonly source: WorkspaceRecoveryPointSource;
+  readonly reason: string;
+  readonly created_at: string;
+  readonly schema_version: number;
+  readonly generation: number;
+  readonly retention_policies: readonly RetentionPolicy[];
+  readonly active_retention_policy_ids: readonly string[];
+}
+
+export interface ReleaseWorkspaceRecoveryPointCommand {
+  readonly recovery_point_id: string;
+  readonly retention_policy_id: string;
 }
 
 export interface CompactWorkspaceCommand {
@@ -859,6 +910,51 @@ export interface CompactWorkspaceResult {
 
 export interface RestoreWorkspaceCommand {
   readonly backup: ObjectRef;
+}
+
+export interface WorkspaceRestoreResult {
+  readonly backup: ObjectRef;
+  readonly restored_schema_version: number;
+  readonly restored_generation: number;
+  /** Identifies the preserved pre-restore files under `.recovery/`. */
+  readonly recovery_id: string;
+}
+
+export interface CollectWorkspaceGarbageCommand {
+  /** Defaults to true. Physical deletion requires an explicit false value. */
+  readonly dry_run?: boolean;
+  /** Defaults to 24 hours and protects newly written, not-yet-referenced objects. */
+  readonly minimum_age_seconds?: number;
+  /** Required for destructive collection and copied from a current dry-run result. */
+  readonly expected_plan_digest?: string;
+}
+
+export interface CollectWorkspaceGarbageResult {
+  readonly dry_run: boolean;
+  readonly minimum_age_seconds: number;
+  /** Digest of the exact generation, catalog cleanup, and physical deletion plan. */
+  readonly plan_digest: string;
+  readonly scanned_objects: number;
+  readonly reachable_objects: number;
+  readonly retained_objects: number;
+  readonly young_objects: number;
+  readonly candidate_objects: number;
+  readonly candidate_bytes: number;
+  readonly stale_catalog_entries: number;
+  readonly removed_catalog_entries: number;
+  readonly deleted_objects: number;
+  readonly deleted_bytes: number;
+  readonly candidate_hashes: readonly string[];
+}
+
+export interface RecoverWorkspaceLockResult {
+  readonly recovered_process_id: number;
+  readonly recovery_id: string;
+}
+
+export interface RecoverWorkspaceRestoreResult {
+  readonly recovery_id: string;
+  readonly restored_original_files: readonly string[];
 }
 
 export interface Clock {

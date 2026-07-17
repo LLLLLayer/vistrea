@@ -305,7 +305,8 @@ extension SnapshotWorkspaceModelTests {
             category: "frame",
             severity: "minor",
             state: "open",
-            updatedAt: "2026-07-12T02:02:00Z"
+            updatedAt: "2026-07-12T02:02:00Z",
+            targetSnapshotID: snapshot.snapshotID.rawValue
         )
         let newer = ReviewIssueSummary(
             issueID: "issue_019f0000-0000-7000-8000-000000000002",
@@ -314,20 +315,32 @@ extension SnapshotWorkspaceModelTests {
             category: "alpha",
             severity: "major",
             state: "resolved",
-            updatedAt: "2026-07-12T02:06:00Z"
+            updatedAt: "2026-07-12T02:06:00Z",
+            targetSnapshotID: snapshot.snapshotID.rawValue
         )
         let model = SnapshotWorkspaceModel(
-            client: FixtureHostClient(snapshots: [snapshot], reviewIssues: [older, newer])
+            client: FixtureHostClient(
+                snapshots: [snapshot],
+                reviewIssues: [older, newer],
+                canvasGraph: FixtureWorkspace.canvasGraph()
+            )
         )
 
         await model.refresh()
+        await model.selectCanvasState(id: FixtureWorkspace.canvasGraph().states[0].id)
 
         XCTAssertEqual(model.issuesPhase, .content)
         XCTAssertEqual(model.reviewIssues.map(\.issueID), [newer.issueID, older.issueID])
         XCTAssertEqual(model.reviewIssues.first?.state, "resolved")
 
-        let emptyModel = SnapshotWorkspaceModel(client: FixtureHostClient(snapshots: [snapshot]))
+        let emptyModel = SnapshotWorkspaceModel(
+            client: FixtureHostClient(
+                snapshots: [snapshot],
+                canvasGraph: FixtureWorkspace.canvasGraph()
+            )
+        )
         await emptyModel.refresh()
+        await emptyModel.selectCanvasState(id: FixtureWorkspace.canvasGraph().states[0].id)
         XCTAssertEqual(emptyModel.issuesPhase, .empty)
     }
 }

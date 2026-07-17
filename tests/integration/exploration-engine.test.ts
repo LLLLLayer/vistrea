@@ -27,6 +27,10 @@ const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
 
 type FakeScreen = "home" | "catalog" | "detail";
 
+class FakeRuntimeUnavailable extends Error {
+  readonly code = "unavailable";
+}
+
 const FAKE_SCREEN_NODES: Readonly<Record<FakeScreen, readonly { id: string; tap: boolean }[]>> = {
   home: [
     { id: "demo.home.root", tap: false },
@@ -45,6 +49,8 @@ const FAKE_SCREEN_NODES: Readonly<Record<FakeScreen, readonly { id: string; tap:
 /** A deterministic three-screen application the provider genuinely drives. */
 class FakeApp {
   readonly stack: FakeScreen[] = ["home"];
+  running = true;
+  crashOnNextCatalogItem = false;
 
   get current(): FakeScreen {
     return this.stack[this.stack.length - 1] as FakeScreen;
@@ -54,6 +60,11 @@ class FakeApp {
     if (this.current === "home" && stableId === "demo.home.open_catalog") {
       this.stack.push("catalog");
     } else if (this.current === "catalog" && stableId === "demo.catalog.item_primary") {
+      if (this.crashOnNextCatalogItem) {
+        this.crashOnNextCatalogItem = false;
+        this.running = false;
+        return;
+      }
       this.stack.push("detail");
     }
   }
@@ -63,6 +74,11 @@ class FakeApp {
       this.stack.pop();
     }
   }
+
+  launch(): void {
+    this.stack.splice(0, this.stack.length, "home");
+    this.running = true;
+  }
 }
 
 class FakeAppProvider implements AutomationProviderPort {
@@ -70,7 +86,7 @@ class FakeAppProvider implements AutomationProviderPort {
     provider_id: "fake-app",
     platform: "android",
     device_kind: "virtual",
-    action_kinds: ["tap", "back"],
+    action_kinds: ["tap", "back", "launch"],
     supports_system_alerts: false,
   } as const;
 
@@ -87,6 +103,11 @@ class FakeAppProvider implements AutomationProviderPort {
       this.app.back();
       return { outcome: "uncertain" };
     }
+    if (command.kind === "launch") {
+      assert.equal(command.payload?.["package_id"], "dev.vistrea.demo");
+      this.app.launch();
+      return { outcome: "succeeded" };
+    }
     return { outcome: "failed" };
   }
 }
@@ -101,6 +122,9 @@ class FakeAppCapture implements ExplorationCapturePort {
   ) {}
 
   async captureSnapshot(): Promise<RuntimeSnapshot> {
+    if (!this.app.running) {
+      throw new FakeRuntimeUnavailable("The simulated Runtime connection was lost.");
+    }
     this.#sequence += 1;
     const suffix = this.#sequence.toString(16).padStart(4, "0");
     const screen = this.app.current;
@@ -161,6 +185,7 @@ async function explorationContext(): Promise<{
   workspace: MemoryDataStore;
   exploration: ExplorationEngine;
   graphEngine: ScreenGraphEngine;
+  app: FakeApp;
   sessionId: string;
   projectId: string;
   applicationId: string;
@@ -207,6 +232,7 @@ async function explorationContext(): Promise<{
     workspace,
     exploration,
     graphEngine,
+    app,
     sessionId: session.automation_session_id,
     projectId: runtimeContext["project_id"] as string,
     applicationId: runtimeContext["application_id"] as string,
@@ -321,6 +347,46 @@ test("deterministic exploration discovers, deduplicates, and versions the Screen
   assert.equal(fencedReport.discovered_state_ids.length, 1);
   assert.equal(fencedReport.stopped_reason, "frontier_exhausted");
   assert.deepEqual(fencedReport.steps, []);
+});
+
+test("exploration relaunches a crashed app, restores its path, and resumes honestly", async () => {
+  const context = await explorationContext();
+  context.app.crashOnNextCatalogItem = true;
+
+  const report = await context.exploration.explore({
+    automation_session_id: context.sessionId,
+    maximum_actions: 20,
+    maximum_recovery_attempts: 2,
+    settle_milliseconds: 0,
+  });
+
+  assert.equal(report.stopped_reason, "frontier_exhausted");
+  assert.equal(report.discovered_state_ids.length, 3);
+  assert.equal(report.recovery_attempt_count, 1);
+  assert.equal(report.recovery_count, 1);
+  assert.equal(report.restoration_action_count, 1);
+  assert.equal(report.action_count, 7);
+  assert.equal(report.recoveries[0]?.replayed_action_count, 1);
+  assert.equal(
+    report.recoveries[0]?.restored_state_id,
+    report.steps.find((step) => step.target_stable_id === "demo.home.open_catalog")
+      ?.target_state_id,
+  );
+  assert.deepEqual(
+    report.steps.filter((step) => step.kind === "tap").map((step) => step.target_stable_id),
+    ["demo.home.open_catalog", "demo.catalog.item_primary"],
+  );
+
+  const graph = context.graphEngine.getGraph({
+    project_id: context.projectId,
+    application_id: context.applicationId,
+  });
+  assert.equal(graph.states.length, 3);
+  assert.equal(graph.transitions.length, 4);
+  const restoredEntry = (graph.transitions as readonly JsonObject[]).find(
+    (transition) => transition["occurrence_count"] === 2,
+  );
+  assert.ok(restoredEntry !== undefined);
 });
 
 test("a bounded budget stops exploration early and later runs extend the same versioned graph", async () => {

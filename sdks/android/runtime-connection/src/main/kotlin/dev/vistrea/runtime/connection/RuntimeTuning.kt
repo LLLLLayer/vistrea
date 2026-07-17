@@ -25,11 +25,29 @@ private val CANONICAL_TUNING_TIMESTAMP =
  * identifiers to live views and stay observation-honest about failures.
  */
 interface RuntimeTuningApplying {
+    val supportedTuningProperties: Set<String>
+        get() = setOf("alpha")
+
     /** The current alpha for the stable identifier, or null when unresolvable. */
     suspend fun currentAlpha(stableId: String): Double?
 
     /** Returns true only when a live view resolved and the value applied. */
     suspend fun setAlpha(stableId: String, value: Double): Boolean
+
+    suspend fun currentTuningValue(stableId: String, property: String): JsonElement? {
+        if (property != "alpha") return null
+        val alpha = currentAlpha(stableId) ?: return null
+        return numberValue(alpha, "ratio")
+    }
+
+    suspend fun setTuningValue(
+        stableId: String,
+        property: String,
+        value: JsonElement,
+    ): Boolean {
+        if (property != "alpha") return false
+        return setAlpha(stableId, propertyNumber(value) ?: return false)
+    }
 }
 
 internal data class RuntimeTuningRejection(
@@ -41,8 +59,18 @@ internal data class RuntimeTuningRejection(
 
 internal data class RuntimeTuningRestoreEntry(
     val stableId: String,
-    val originalAlpha: Double,
-)
+    val property: String,
+    val originalValue: JsonElement,
+) {
+    constructor(stableId: String, originalAlpha: Double) : this(
+        stableId = stableId,
+        property = "alpha",
+        originalValue = numberValue(originalAlpha, "ratio"),
+    )
+
+    val originalAlpha: Double?
+        get() = propertyNumber(originalValue)
+}
 
 /** One processed apply command: the canonical application plus local restore state. */
 internal data class RuntimeTuningOutcome(
@@ -54,13 +82,20 @@ internal data class RuntimeTuningOutcome(
 /**
  * Builds canonical TuningApplication values for the loopback transport.
  *
- * Only the `alpha` property is currently applied; every other allowlisted
- * property is rejected explicitly instead of being silently ignored, and a
- * partial failure restores already-applied changes before reporting.
+ * Every mutation is preceded by a live read. Unsupported platform/property
+ * combinations reject explicitly, and partial failures restore every
+ * captured original before reporting.
  */
 internal object RuntimeTuningProcessor {
-    const val SUPPORTED_PROPERTY = "alpha"
-    const val ALPHA_TOLERANCE = 0.001
+    val PROJECT_ALLOWLIST: Set<String> = setOf(
+        "content_insets",
+        "spacing",
+        "font",
+        "foreground_color",
+        "background_color",
+        "alpha",
+        "corner_radius",
+    )
 
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod", "LongMethod", "ReturnCount")
     suspend fun apply(
@@ -111,12 +146,12 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
-            if (property != SUPPORTED_PROPERTY) {
+            if (property !in PROJECT_ALLOWLIST || property !in controller.supportedTuningProperties) {
                 rejected += RuntimeTuningRejection(
                     changeId = changeId,
                     runtimeTarget = runtimeTarget,
                     reasonCode = "property_not_allowed",
-                    message = "This Runtime applies only the alpha property in the current slice.",
+                    message = "The Runtime adapter cannot safely read, apply, and restore this property.",
                 )
                 continue
             }
@@ -141,19 +176,17 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
-            val expectedOriginal = numberValue(originalValue)
-            val previewAlpha = numberValue(previewValue)
-            if (expectedOriginal == null || previewAlpha == null || previewAlpha !in 0.0..1.0) {
+            if (!validValue(originalValue, property) || !validValue(previewValue, property)) {
                 rejected += RuntimeTuningRejection(
                     changeId = changeId,
                     runtimeTarget = runtimeTarget,
                     reasonCode = "unsupported_value",
-                    message = "Alpha values must be ratio numbers between zero and one.",
+                    message = "The PropertyValue does not match the selected tuning property.",
                 )
                 continue
             }
-            val currentAlpha = controller.currentAlpha(stableId)
-            if (currentAlpha == null) {
+            val currentValue = controller.currentTuningValue(stableId, property)
+            if (currentValue == null) {
                 rejected += RuntimeTuningRejection(
                     changeId = changeId,
                     runtimeTarget = runtimeTarget,
@@ -162,7 +195,7 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
-            if (abs(currentAlpha - expectedOriginal) > ALPHA_TOLERANCE) {
+            if (!valuesMatch(currentValue, originalValue, property)) {
                 rejected += RuntimeTuningRejection(
                     changeId = changeId,
                     runtimeTarget = runtimeTarget,
@@ -171,7 +204,7 @@ internal object RuntimeTuningProcessor {
                 )
                 continue
             }
-            if (!controller.setAlpha(stableId, previewAlpha)) {
+            if (!controller.setTuningValue(stableId, property, previewValue)) {
                 rejected += RuntimeTuningRejection(
                     changeId = changeId,
                     runtimeTarget = runtimeTarget,
@@ -182,7 +215,8 @@ internal object RuntimeTuningProcessor {
             }
             restoreEntries += RuntimeTuningRestoreEntry(
                 stableId = stableId,
-                originalAlpha = currentAlpha,
+                property = property,
+                originalValue = currentValue,
             )
             applied += buildJsonObject {
                 put("tuning_change_id", JsonPrimitive(changeId))
@@ -292,7 +326,7 @@ internal object RuntimeTuningProcessor {
             for (index in entries.indices.reversed()) {
                 val entry = entries[index]
                 val restored = try {
-                    controller.setAlpha(entry.stableId, entry.originalAlpha)
+                    controller.setTuningValue(entry.stableId, entry.property, entry.originalValue)
                 } catch (_: Exception) {
                     false
                 }
@@ -320,12 +354,77 @@ internal object RuntimeTuningProcessor {
     private fun stringValue(element: JsonElement?): String? =
         (element as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content
 
-    private fun numberValue(element: JsonElement?): Double? {
-        val propertyValue = element as? JsonObject ?: return null
-        if (stringValue(propertyValue["kind"]) != "number") {
-            return null
+    private fun validValue(value: JsonElement, property: String): Boolean {
+        val propertyValue = value as? JsonObject ?: return false
+        return when (property) {
+            "alpha" -> stringValue(propertyValue["kind"]) == "number" &&
+                stringValue(propertyValue["unit"]) == "ratio" &&
+                propertyNumber(value)?.let { it in 0.0..1.0 } == true
+            "spacing", "corner_radius" -> stringValue(propertyValue["kind"]) == "number" &&
+                stringValue(propertyValue["unit"]) == "logical_point" &&
+                propertyNumber(value)?.let { it >= 0 } == true
+            "foreground_color", "background_color" ->
+                stringValue(propertyValue["kind"]) == "color_rgba" && colorComponents(value) != null
+            "content_insets" -> {
+                val insets = propertyValue["value"] as? JsonObject
+                stringValue(propertyValue["kind"]) == "insets" &&
+                    listOf("top", "leading", "bottom", "trailing")
+                        .all { rawNumber(insets?.get(it)) != null }
+            }
+            "font" -> {
+                val font = propertyValue["value"] as? JsonObject
+                val size = rawNumber(font?.get("size"))
+                val weight = rawNumber(font?.get("weight"))
+                val family = stringValue(font?.get("family"))
+                val style = stringValue(font?.get("style"))
+                stringValue(propertyValue["kind"]) == "font" &&
+                    !family.isNullOrBlank() && size != null && size > 0 &&
+                    weight != null && weight in 1.0..1000.0 &&
+                    style in setOf("normal", "italic")
+            }
+            else -> false
         }
-        return (propertyValue["value"] as? JsonPrimitive)
-            ?.takeUnless(JsonPrimitive::isString)?.doubleOrNull
     }
+
+    private fun valuesMatch(current: JsonElement, expected: JsonElement, property: String): Boolean {
+        if (current == expected) return true
+        return when (property) {
+            "alpha", "spacing", "corner_radius" -> {
+                val left = propertyNumber(current)
+                val right = propertyNumber(expected)
+                left != null && right != null && abs(left - right) <= 0.001
+            }
+            "foreground_color", "background_color" -> {
+                val left = colorComponents(current)
+                val right = colorComponents(expected)
+                left != null && right != null && left.zip(right).all { (a, b) -> abs(a - b) <= 0.002 }
+            }
+            else -> false
+        }
+    }
+
+    private fun colorComponents(value: JsonElement): List<Double>? {
+        val property = value as? JsonObject ?: return null
+        val color = property["value"] as? JsonObject ?: return null
+        val components = listOf("red", "green", "blue", "alpha").map {
+            rawNumber(color[it]) ?: return null
+        }
+        return components.takeIf { values -> values.all { it in 0.0..1.0 } }
+    }
+}
+
+private fun propertyNumber(element: JsonElement?): Double? {
+    val propertyValue = element as? JsonObject ?: return null
+    if ((propertyValue["kind"] as? JsonPrimitive)?.content != "number") return null
+    return rawNumber(propertyValue["value"])
+}
+
+private fun rawNumber(element: JsonElement?): Double? =
+    (element as? JsonPrimitive)?.takeUnless(JsonPrimitive::isString)?.doubleOrNull
+
+private fun numberValue(value: Double, unit: String): JsonObject = buildJsonObject {
+    put("kind", JsonPrimitive("number"))
+    put("value", JsonPrimitive(value))
+    put("unit", JsonPrimitive(unit))
+    put("extensions", JsonObject(emptyMap()))
 }

@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Network
+import Security
 import VistreaRuntimeModels
 
 private enum HandshakePhase: Sendable {
@@ -38,11 +39,12 @@ private struct ActiveTuningState: Sendable {
     let applyOrder: UInt64
 }
 
-/// Authenticated Snapshot-only Runtime client for the Node loopback Host.
+/// Authenticated Runtime client for the Node Host.
 ///
-/// The client is intentionally limited to explicit loopback TCP endpoints and
-/// Debug/Internal build configurations. It transports canonical protocol
-/// Snapshots and ObjectReferences produced by an injected capture provider.
+/// Plaintext is intentionally limited to explicit loopback TCP endpoints.
+/// Physical-device endpoints require TLS 1.3 with an exact pinned leaf
+/// certificate. Every mode remains limited to Debug/Internal builds and uses
+/// the protocol's independent HMAC client proof and Host proof.
 public actor LoopbackRuntimeClient {
     private nonisolated static let networkQueue = DispatchQueue(
         label: "dev.vistrea.runtime-connection",
@@ -111,7 +113,7 @@ public actor LoopbackRuntimeClient {
         let connection = NWConnection(
             host: NWEndpoint.Host(endpoint.host),
             port: port,
-            using: .tcp
+            using: Self.networkParameters(for: endpoint)
         )
         self.connection = connection
         installHandshakeTimeout()
@@ -143,6 +145,41 @@ public actor LoopbackRuntimeClient {
         } catch {
             shutdown(state: .failed, error: .unavailable)
             throw RuntimeConnectionError.unavailable
+        }
+    }
+
+    private nonisolated static func networkParameters(for endpoint: RuntimeEndpoint) -> NWParameters {
+        switch endpoint {
+        case .loopback:
+            return .tcp
+        case let .tls(tlsEndpoint):
+            let tlsOptions = NWProtocolTLS.Options()
+            sec_protocol_options_set_min_tls_protocol_version(
+                tlsOptions.securityProtocolOptions,
+                .TLSv13
+            )
+            sec_protocol_options_set_max_tls_protocol_version(
+                tlsOptions.securityProtocolOptions,
+                .TLSv13
+            )
+            let expectedDigest = tlsEndpoint.pinnedCertificateSHA256
+            sec_protocol_options_set_verify_block(
+                tlsOptions.securityProtocolOptions,
+                { _, trust, complete in
+                    let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
+                    guard let chain = SecTrustCopyCertificateChain(secTrust) as? [SecCertificate],
+                          let certificate = chain.first
+                    else {
+                        complete(false)
+                        return
+                    }
+                    let certificateData = SecCertificateCopyData(certificate) as Data
+                    let actualDigest = Data(SHA256.hash(data: certificateData))
+                    complete(actualDigest == expectedDigest)
+                },
+                Self.networkQueue
+            )
+            return NWParameters(tls: tlsOptions, tcp: NWProtocolTCP.Options())
         }
     }
 
@@ -208,7 +245,7 @@ public actor LoopbackRuntimeClient {
                 case .ready:
                     continuation.yield(.ready)
                     continuation.finish()
-                case .failed, .cancelled:
+                case .waiting, .failed, .cancelled:
                     continuation.yield(.failed)
                     continuation.finish()
                 default:
@@ -231,7 +268,7 @@ public actor LoopbackRuntimeClient {
     private func installSteadyStateNetworkHandler(_ connection: NWConnection) {
         connection.stateUpdateHandler = { [weak self] networkState in
             switch networkState {
-            case .failed, .cancelled:
+            case .waiting, .failed, .cancelled:
                 Task { await self?.networkTerminated() }
             default:
                 break
@@ -795,7 +832,11 @@ public actor LoopbackRuntimeClient {
             return
         }
         for entry in entries.reversed() {
-            await tuningController.setAlpha(stableID: entry.stableID, value: entry.originalAlpha)
+            _ = await tuningController.setTuningValue(
+                stableID: entry.stableID,
+                property: entry.property,
+                value: entry.originalValue
+            )
         }
     }
 
@@ -1062,9 +1103,10 @@ public actor LoopbackRuntimeClient {
             // captured originals are written last and win.
             Task {
                 for entry in restorePlan {
-                    await tuningController.setAlpha(
+                    _ = await tuningController.setTuningValue(
                         stableID: entry.stableID,
-                        value: entry.originalAlpha
+                        property: entry.property,
+                        value: entry.originalValue
                     )
                 }
             }

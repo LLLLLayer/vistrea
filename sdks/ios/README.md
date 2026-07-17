@@ -28,7 +28,9 @@ The canonical model target does not import UIKit or Core Graphics.
 
 `VistreaRuntimeConnection` implements the first Runtime-to-Host transport slice. It:
 
-- connects only to explicit IPv4 or IPv6 TCP loopback endpoints;
+- connects either to explicit IPv4/IPv6 plaintext loopback endpoints or to an
+  explicit-IP TLS 1.3 endpoint with an exact 32-byte leaf-certificate SHA-256
+  pin;
 - requires a per-run token with HMAC-SHA256 client proof and verifies the Host proof;
 - negotiates exactly protocol `1.0` and capability `runtime.snapshot`, plus `runtime.events` when a `RuntimeEventRecorder` is attached and the Host echoes the declared event epoch;
 - uses bounded strict UTF-8 JSON-lines, rejects duplicate keys after escape decoding, and applies the Host-advertised line, Object, and chunk limits;
@@ -48,13 +50,20 @@ them; the authenticated connection remains available for a corrected request.
 
 Build eligibility is compile-time protected. Debug builds accept Debug/Internal declarations. An explicit `VISTREA_INTERNAL_RUNTIME` Swift compilation condition accepts only Internal declarations. Other builds, including Release, reject configuration before opening a socket even if runtime input claims to be Debug.
 
-This first TCP loopback slice connects directly from the iOS Simulator. A physical device requires an external trusted USB or network forwarding layer that presents the Host on device loopback; discovery and forwarding are not implemented by this target.
+The plaintext profile connects directly from the iOS Simulator and refuses
+non-loopback addresses. The physical-device profile performs TLS 1.3 first,
+accepts only the exact configured DER leaf-certificate SHA-256, and then runs
+the same HMAC protocol authentication. A CoreDevice or operator-managed network
+path must still make the Host's explicit IP reachable; the SDK does not discover
+or create that path. The opt-in physical vertical runner composes this profile,
+and its complete Snapshot, Studio/CLI, reopen, credential, secret-scan, and
+cleanup acceptance passed on an iPhone 14 Pro running iOS 26.5.
 
 The adapter is compiled only where UIKit is available. It is included only by internal Debug Demo App builds in the current vertical slice.
 
-The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews only their alpha on the main actor.
+The first in-app Inspector is implemented by the iOS Demo App as a Debug-only consumer of this adapter. `RuntimeEventRecorder` provides bounded per-epoch event retention with monotonic sequences; the Demo App records transient banner presentation and dismissal through it in Debug builds. `UIKitRuntimeTuningController` resolves stable identifiers to live views and previews allowlisted alpha, foreground/background color, font, spacing, content-inset, and corner-radius changes on the main actor. Unsupported view/property combinations reject explicitly and every accepted preview is reversible.
 
-`VistreaRuntimeSwiftUI` is the SwiftUI semantic annotation bridge: `.vistreaSemantics(stableID:role:label:)` declares the cross-platform `stable_id`, a canonical role, and an optional label as standard accessibility facts, and the UIKit capture adapter maps declared accessibility traits back to the canonical role vocabulary for hosted content whose view classes are private. Two role limits are deliberate: `.listItem` and `.container` carry no accessibility traits, so these structural roles do not round-trip through the accessibility bridge and are captured as `container`; `.textField` maps to the search-field trait, which VoiceOver announces as a search field, so annotate production text fields deliberately. Automatic UIKit event observation and additional tuning properties remain separate follow-up capabilities.
+`VistreaRuntimeSwiftUI` is the SwiftUI semantic annotation bridge: `.vistreaSemantics(stableID:role:label:)` declares the cross-platform `stable_id`, a canonical role, and an optional label as standard accessibility facts, and the UIKit capture adapter maps declared accessibility traits back to the canonical role vocabulary for hosted content whose view classes are private. Two role limits are deliberate: `.listItem` and `.container` carry no accessibility traits, so these structural roles do not round-trip through the accessibility bridge and are captured as `container`; `.textField` maps to the search-field trait, which VoiceOver announces as a search field, so annotate production text fields deliberately. Automatic UIKit event observation and physical-device acceptance of the broader UIKit tuning matrix remain separate follow-up capabilities.
 
 ### SwiftUI hosted content, and what the capture does when it cannot observe it
 

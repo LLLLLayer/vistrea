@@ -29,7 +29,8 @@ final class OperationWorkflowModelTests: XCTestCase {
             category: "alpha",
             severity: "major",
             state: "open",
-            updatedAt: "2026-07-12T00:00:00Z"
+            updatedAt: "2026-07-12T00:00:00Z",
+            targetSnapshotID: "snapshot_019f0000-0000-7000-8000-000000000002"
         )
     }
 
@@ -44,6 +45,24 @@ final class OperationWorkflowModelTests: XCTestCase {
         var capturedAt = try XCTUnwrap(object["captured_at"] as? [String: Any])
         capturedAt["wall_time"] = "2026-07-13T00:00:00Z"
         object["captured_at"] = capturedAt
+        return try RuntimeSnapshotCodec.decode(
+            JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        )
+    }
+
+    private static func snapshotForSecondBuild() throws -> RuntimeSnapshot {
+        let source = try StudioTestFixtures.data(
+            "protocol/fixtures/v1/runtime-snapshot/valid/ios-uikit.json"
+        )
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: source) as? [String: Any])
+        object["snapshot_id"] = "snapshot_019f0000-0000-7000-8000-000000000098"
+        var capturedAt = try XCTUnwrap(object["captured_at"] as? [String: Any])
+        capturedAt["wall_time"] = "2026-07-14T00:00:00Z"
+        object["captured_at"] = capturedAt
+        var runtimeContext = try XCTUnwrap(object["runtime_context"] as? [String: Any])
+        runtimeContext["application_version"] = "2.0.0"
+        runtimeContext["build_id"] = "build_019f0000-0000-7000-8000-000000000098"
+        object["runtime_context"] = runtimeContext
         return try RuntimeSnapshotCodec.decode(
             JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         )
@@ -68,6 +87,39 @@ final class OperationWorkflowModelTests: XCTestCase {
         XCTAssertEqual(model.tuningPhase, .content)
         XCTAssertEqual(model.activeTuning.map(\.id), [outcome.id])
         XCTAssertFalse(model.isApplyingTuning)
+    }
+
+    func testLatestTuningPatchProducesAnExplicitSourceHandoff() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let model = SnapshotWorkspaceModel(client: FixtureHostClient(snapshots: [snapshot]))
+        await model.refresh()
+
+        await model.previewAlpha(0.4)
+        let patch = try XCTUnwrap(model.lastTuningPatch)
+        XCTAssertEqual(patch.targetSnapshotID, snapshot.snapshotID.rawValue)
+        XCTAssertEqual(model.tuningSourceSuggestionsPhase, .idle)
+
+        await model.loadTuningSourceSuggestions()
+
+        XCTAssertEqual(model.tuningSourceSuggestionsPhase, .content)
+        let suggestion = try XCTUnwrap(model.tuningSourceSuggestions.first)
+        XCTAssertEqual(suggestion.property, "alpha")
+        XCTAssertEqual(suggestion.stableID, "demo.home.root")
+        XCTAssertEqual(suggestion.status, "needs_source_mapping")
+        XCTAssertEqual(suggestion.originalValue, .object([
+            "kind": .string("number"),
+            "value": .number(1),
+            "unit": .string("ratio"),
+            "extensions": .object([:]),
+        ]))
+        XCTAssertEqual(suggestion.suggestedValue, .object([
+            "kind": .string("number"),
+            "value": .number(0.4),
+            "unit": .string("ratio"),
+            "extensions": .object([:]),
+        ]))
+        XCTAssertEqual(suggestion.codingAgentInstructions.count, 2)
+        XCTAssertTrue(suggestion.codingAgentInstructions[0].contains("demo.home.root"))
     }
 
     func testPreviewAlphaSurfacesRejectionReasonCodesVerbatim() async throws {
@@ -139,9 +191,16 @@ final class OperationWorkflowModelTests: XCTestCase {
         let snapshot = try StudioTestFixtures.snapshot()
         let issue = Self.openIssue()
         let model = SnapshotWorkspaceModel(
-            client: FixtureHostClient(snapshots: [snapshot], reviewIssues: [issue])
+            client: FixtureHostClient(
+                snapshots: [snapshot],
+                reviewIssues: [issue],
+                canvasGraph: Self.fixtureGraph()
+            )
         )
         await model.refresh()
+        await model.selectCanvasState(id: Self.fixtureGraph().states[0].id)
+
+        XCTAssertEqual(model.reviewIssues.map(\.id), [issue.id])
 
         await model.selectReviewIssue(id: issue.issueID)
         XCTAssertEqual(model.issueDetailPhase, .content)
@@ -167,9 +226,14 @@ final class OperationWorkflowModelTests: XCTestCase {
     func testIssueTransitionConflictReloadsIssueAndLeavesNote() async throws {
         let snapshot = try StudioTestFixtures.snapshot()
         let issue = Self.openIssue()
-        let client = FixtureHostClient(snapshots: [snapshot], reviewIssues: [issue])
+        let client = FixtureHostClient(
+            snapshots: [snapshot],
+            reviewIssues: [issue],
+            canvasGraph: Self.fixtureGraph()
+        )
         let model = SnapshotWorkspaceModel(client: client)
         await model.refresh()
+        await model.selectCanvasState(id: Self.fixtureGraph().states[0].id)
         await model.selectReviewIssue(id: issue.issueID)
         XCTAssertEqual(model.selectedIssue?.revision, 1)
 
@@ -275,6 +339,126 @@ final class OperationWorkflowModelTests: XCTestCase {
         XCTAssertFalse(created)
         XCTAssertNotNil(model.wikiWriteError)
         XCTAssertFalse(model.isSavingWikiNode)
+    }
+
+    func testKnowledgeCollectionCreateEditAndConflictReload() async throws {
+        let snapshot = try StudioTestFixtures.snapshot()
+        let client = FixtureHostClient(snapshots: [snapshot])
+        let model = SnapshotWorkspaceModel(client: client)
+        await model.refresh()
+        _ = await model.createWikiNode(
+            kind: "screen",
+            title: "Home",
+            summary: nil,
+            markdown: "# Home"
+        )
+        _ = await model.createWikiNode(
+            kind: "path",
+            title: "Checkout path",
+            summary: nil,
+            markdown: "# Checkout"
+        )
+        let nodes = model.wikiNodes
+        XCTAssertEqual(nodes.count, 2)
+
+        let created = await model.createKnowledgeCollection(
+            name: "Checkout knowledge",
+            summary: "The local checkout flow.",
+            nodeIDs: nodes.map(\.id),
+            entryNodeIDs: [nodes[0].id]
+        )
+
+        XCTAssertTrue(created)
+        XCTAssertNil(model.knowledgeCollectionError)
+        XCTAssertEqual(model.knowledgeCollectionsPhase, .content)
+        let collection = try XCTUnwrap(model.selectedKnowledgeCollection)
+        XCTAssertEqual(collection.revision, 1)
+        XCTAssertEqual(collection.publication.state, "draft")
+        XCTAssertEqual(Set(collection.nodeIDs), Set(nodes.map(\.id)))
+
+        model.beginKnowledgeCollectionEdit(collection)
+        let updated = await model.updateSelectedKnowledgeCollection(
+            name: "Checkout runtime knowledge",
+            summary: "The verified checkout flow.",
+            nodeIDs: nodes.map(\.id),
+            entryNodeIDs: nodes.map(\.id)
+        )
+        XCTAssertTrue(updated)
+        XCTAssertEqual(model.selectedKnowledgeCollection?.revision, 2)
+        XCTAssertEqual(model.selectedKnowledgeCollection?.name, "Checkout runtime knowledge")
+        XCTAssertEqual(Set(model.selectedKnowledgeCollection?.entryNodeIDs ?? []), Set(nodes.map(\.id)))
+
+        _ = try await client.reviseKnowledgeCollection(
+            id: collection.id,
+            KnowledgeCollectionRevisionDraft(
+                expectedRevision: 2,
+                name: "Changed elsewhere"
+            )
+        )
+        let staleSave = await model.updateSelectedKnowledgeCollection(
+            name: "Stale local title",
+            summary: "The verified checkout flow.",
+            nodeIDs: nodes.map(\.id),
+            entryNodeIDs: nodes.map(\.id)
+        )
+
+        XCTAssertFalse(staleSave)
+        XCTAssertNotNil(model.knowledgeCollectionConflictNote)
+        XCTAssertNil(model.knowledgeCollectionError)
+        XCTAssertEqual(model.selectedKnowledgeCollection?.revision, 3)
+        XCTAssertEqual(model.selectedKnowledgeCollection?.name, "Changed elsewhere")
+    }
+
+    func testLocalQualityWorkflowValidatesSuppressesAndComparesBuilds() async throws {
+        let original = try StudioTestFixtures.snapshot()
+        let secondBuild = try Self.snapshotForSecondBuild()
+        let model = SnapshotWorkspaceModel(
+            client: FixtureHostClient(
+                snapshots: [original, secondBuild],
+                canvasGraph: Self.fixtureGraph()
+            )
+        )
+        await model.refresh()
+        XCTAssertEqual(model.qualityBuildScopes.count, 2)
+
+        await model.validateSelectedSnapshot()
+        XCTAssertEqual(model.validationPhase, .content)
+        XCTAssertEqual(model.lastValidationRun?.state, "succeeded")
+        XCTAssertEqual(model.lastValidationRun?.findingCounts.open, 1)
+        let finding = try XCTUnwrap(model.validationFindings.first)
+        XCTAssertEqual(finding.status, "open")
+
+        let suppressed = await model.suppressValidationFinding(
+            id: finding.id,
+            reasonCode: "known_issue",
+            justification: "Tracked in the local product backlog."
+        )
+        XCTAssertTrue(suppressed)
+        XCTAssertEqual(model.validationFindings.first?.status, "suppressed")
+        XCTAssertEqual(model.lastValidationRun?.findingCounts.open, 0)
+        XCTAssertEqual(model.lastValidationRun?.findingCounts.suppressed, 1)
+
+        await model.validateSelectedScreenGraph()
+        XCTAssertEqual(model.validationPhase, .empty)
+        XCTAssertEqual(model.lastValidationRun?.target.kind, "screen_graph")
+
+        await model.compareBuilds(
+            leftBuildID: original.runtimeContext.buildID.rawValue,
+            rightBuildID: secondBuild.runtimeContext.buildID.rawValue
+        )
+        XCTAssertEqual(model.buildDiffPhase, .content)
+        XCTAssertNil(model.buildDiffError)
+        XCTAssertEqual(model.lastBuildDiff?.summary.changed, 1)
+        XCTAssertEqual(model.lastBuildDiff?.entries.first?.kind, "changed")
+
+        let alternateScope = try XCTUnwrap(
+            model.availableScopes.first(where: { $0 != model.selectedScope })
+        )
+        await model.selectScope(alternateScope)
+        XCTAssertEqual(model.validationPhase, .idle)
+        XCTAssertNil(model.lastValidationRun)
+        XCTAssertEqual(model.buildDiffPhase, .idle)
+        XCTAssertNil(model.lastBuildDiff)
     }
 
     // MARK: - Canvas Screen State details and knowledge links

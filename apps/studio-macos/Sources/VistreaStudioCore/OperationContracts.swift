@@ -1,4 +1,5 @@
 import Foundation
+import VistreaRuntimeModels
 
 // MARK: - Shared write actor
 
@@ -56,18 +57,20 @@ public struct TuningNodeTargetDraft: Encodable, Equatable, Sendable {
     }
 }
 
-/// A canonical number PropertyValue, the shape the tuning allowlist uses for
-/// `alpha`.
+/// A canonical number PropertyValue used by ratio and logical-point tuning.
 public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
     public let value: Double
+    public let unit: String
 
-    public init(value: Double) {
+    public init(value: Double, unit: String = "ratio") {
         self.value = value
+        self.unit = unit
     }
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case value
+        case unit
         case extensions
     }
 
@@ -75,7 +78,62 @@ public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode("number", forKey: .kind)
         try container.encode(value, forKey: .value)
+        try container.encode(unit, forKey: .unit)
         try container.encode([String: String](), forKey: .extensions)
+    }
+}
+
+/// The reversible PropertyValue vocabulary Studio can submit to the protected
+/// Runtime tuning boundary.
+public enum TuningPropertyValueDraft: Encodable, Equatable, Sendable {
+    case number(value: Double, unit: String)
+    case color(red: Double, green: Double, blue: Double, alpha: Double)
+    case font(family: String, size: Double, weight: Int, style: String)
+    case insets(top: Double, leading: Double, bottom: Double, trailing: Double)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case value
+        case unit
+        case colorSpace = "color_space"
+        case extensions
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .number(value, unit):
+            try container.encode("number", forKey: .kind)
+            try container.encode(value, forKey: .value)
+            try container.encode(unit, forKey: .unit)
+        case let .color(red, green, blue, alpha):
+            try container.encode("color_rgba", forKey: .kind)
+            try container.encode(
+                ["red": red, "green": green, "blue": blue, "alpha": alpha],
+                forKey: .value
+            )
+            try container.encode("srgb", forKey: .colorSpace)
+        case let .font(family, size, weight, style):
+            try container.encode("font", forKey: .kind)
+            try container.encode(
+                FontPayload(family: family, size: size, weight: weight, style: style),
+                forKey: .value
+            )
+        case let .insets(top, leading, bottom, trailing):
+            try container.encode("insets", forKey: .kind)
+            try container.encode(
+                ["top": top, "leading": leading, "bottom": bottom, "trailing": trailing],
+                forKey: .value
+            )
+        }
+        try container.encode([String: String](), forKey: .extensions)
+    }
+
+    private struct FontPayload: Encodable {
+        let family: String
+        let size: Double
+        let weight: Int
+        let style: String
     }
 }
 
@@ -83,8 +141,20 @@ public struct TuningNumberValueDraft: Encodable, Equatable, Sendable {
 public struct TuningChangeDraft: Encodable, Equatable, Sendable {
     public let target: TuningNodeTargetDraft
     public let property: String
-    public let originalValue: TuningNumberValueDraft
-    public let previewValue: TuningNumberValueDraft
+    public let originalValue: TuningPropertyValueDraft
+    public let previewValue: TuningPropertyValueDraft
+
+    public init(
+        target: TuningNodeTargetDraft,
+        property: String,
+        originalValue: TuningPropertyValueDraft,
+        previewValue: TuningPropertyValueDraft
+    ) {
+        self.target = target
+        self.property = property
+        self.originalValue = originalValue
+        self.previewValue = previewValue
+    }
 
     public init(
         target: TuningNodeTargetDraft,
@@ -92,10 +162,12 @@ public struct TuningChangeDraft: Encodable, Equatable, Sendable {
         originalValue: TuningNumberValueDraft,
         previewValue: TuningNumberValueDraft
     ) {
-        self.target = target
-        self.property = property
-        self.originalValue = originalValue
-        self.previewValue = previewValue
+        self.init(
+            target: target,
+            property: property,
+            originalValue: .number(value: originalValue.value, unit: originalValue.unit),
+            previewValue: .number(value: previewValue.value, unit: previewValue.unit)
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -261,6 +333,93 @@ public struct TuningApplicationPage: Decodable, Equatable, Sendable {
     }
 }
 
+/// One source-oriented Coding Agent handoff generated from a persisted
+/// Tuning Patch. The Host never fabricates file paths: a missing source
+/// mapping is represented explicitly by `needs_source_mapping`.
+public struct TuningSourceSuggestionSummary: Decodable, Equatable, Sendable, Identifiable {
+    public let tuningChangeID: String
+    public let property: String
+    public let stableID: String?
+    public let sourceContext: [String: JSONValue]?
+    public let status: String
+    public let originalValue: JSONValue
+    public let suggestedValue: JSONValue
+    public let codingAgentInstructions: [String]
+
+    public var id: String { tuningChangeID }
+    public var sourceContextPresentation: String? {
+        sourceContext.map { Self.compactJSON(.object($0)) }
+    }
+    public var originalValuePresentation: String { Self.compactJSON(originalValue) }
+    public var suggestedValuePresentation: String { Self.compactJSON(suggestedValue) }
+
+    public init(
+        tuningChangeID: String,
+        property: String,
+        stableID: String?,
+        sourceContext: [String: JSONValue]?,
+        status: String,
+        originalValue: JSONValue,
+        suggestedValue: JSONValue,
+        codingAgentInstructions: [String]
+    ) {
+        self.tuningChangeID = tuningChangeID
+        self.property = property
+        self.stableID = stableID
+        self.sourceContext = sourceContext
+        self.status = status
+        self.originalValue = originalValue
+        self.suggestedValue = suggestedValue
+        self.codingAgentInstructions = codingAgentInstructions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tuningChangeID = "tuning_change_id"
+        case property
+        case stableID = "stable_id"
+        case sourceContext = "source_context"
+        case status
+        case originalValue = "original_value"
+        case suggestedValue = "suggested_value"
+        case codingAgentInstructions = "coding_agent_instructions"
+    }
+
+    private static func compactJSON(_ value: JSONValue) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value),
+              let text = String(data: data, encoding: .utf8)
+        else { return "Unavailable" }
+        return text
+    }
+}
+
+public struct TuningSourceSuggestionResult: Decodable, Equatable, Sendable {
+    public let patchID: String
+    public let patchRevision: UInt64
+    public let targetSnapshotID: String
+    public let suggestions: [TuningSourceSuggestionSummary]
+
+    public init(
+        patchID: String,
+        patchRevision: UInt64,
+        targetSnapshotID: String,
+        suggestions: [TuningSourceSuggestionSummary]
+    ) {
+        self.patchID = patchID
+        self.patchRevision = patchRevision
+        self.targetSnapshotID = targetSnapshotID
+        self.suggestions = suggestions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case patchID = "patch_id"
+        case patchRevision = "patch_revision"
+        case targetSnapshotID = "target_snapshot_id"
+        case suggestions
+    }
+}
+
 // MARK: - Review Issue lifecycle
 
 /// The canonical Review Issue lifecycle mirrored from the Engine's
@@ -306,6 +465,53 @@ public struct ReviewIssueTransitionRequest: Encodable, Equatable, Sendable {
         case toState = "to_state"
         case reason
         case changedBy = "changed_by"
+    }
+}
+
+/// The `POST /v1/design-comparisons/:id/issues` command body. The Host owns
+/// the immutable Difference evidence; Studio only names the Difference and
+/// the interactive actor so it cannot accidentally recopy or alter evidence.
+public struct CreateReviewIssueFromDifferenceRequest: Encodable, Equatable, Sendable {
+    public let differenceID: String
+    public let title: String?
+    public let description: String?
+    public let createdBy: StudioActorRef
+
+    public init(
+        differenceID: String,
+        title: String? = nil,
+        description: String? = nil,
+        createdBy: StudioActorRef = .studio
+    ) {
+        self.differenceID = differenceID
+        self.title = title
+        self.description = description
+        self.createdBy = createdBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case differenceID = "difference_id"
+        case title
+        case description
+        case createdBy = "created_by"
+    }
+}
+
+/// The `POST /v1/review-issues/:id/recapture-verifications` command body.
+/// The Host captures the configured Runtime, requires a different real build,
+/// reruns the design comparison, and appends immutable verification evidence.
+public struct RecaptureReviewIssueRequest: Encodable, Equatable, Sendable {
+    public let expectedRevision: UInt64
+    public let verifiedBy: StudioActorRef
+
+    public init(expectedRevision: UInt64, verifiedBy: StudioActorRef = .studio) {
+        self.expectedRevision = expectedRevision
+        self.verifiedBy = verifiedBy
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case expectedRevision = "expected_revision"
+        case verifiedBy = "verified_by"
     }
 }
 

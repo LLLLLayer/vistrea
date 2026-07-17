@@ -13,10 +13,12 @@ const DENSITY_BASELINE_DPI = 160;
 const LONG_PRESS_MILLISECONDS = 600;
 const DEFAULT_SWIPE_MILLISECONDS = 300;
 const DEFAULT_SWIPE_DISTANCE_LOGICAL = 200;
+const MAXIMUM_CLEAR_KEYSTROKES = 256;
 // `input text` cannot represent arbitrary shell input safely; stay inside a
 // conservative charset instead of guessing device shell quoting rules.
 const SAFE_TEXT_PATTERN = /^[A-Za-z0-9 ._,:@-]{1,256}$/;
 const COMPONENT_PATTERN = /^[A-Za-z0-9._]+\/[A-Za-z0-9._$]+$/;
+const PACKAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.]{0,255}$/;
 
 export interface AdbAutomationProviderOptions {
   readonly adbPath: string;
@@ -48,7 +50,17 @@ export class AdbAutomationProvider implements AutomationProviderPort {
       provider_id: "android-adb-input",
       platform: "android",
       device_kind: options.deviceKind ?? "emulator",
-      action_kinds: ["tap", "long_press", "type_text", "swipe", "scroll", "back", "launch"],
+      action_kinds: [
+        "tap",
+        "long_press",
+        "type_text",
+        "clear_text",
+        "swipe",
+        "scroll",
+        "back",
+        "launch",
+        "dismiss",
+      ],
       supports_system_alerts: false,
     };
   }
@@ -109,6 +121,24 @@ export class AdbAutomationProvider implements AutomationProviderPort {
         await this.#shell(["input", "text", text.replaceAll(" ", "%s")], options);
         return { outcome: "uncertain", detail: "Text injected through InputManager." };
       }
+      case "clear_text": {
+        const point = await this.#pixelPoint(command, options);
+        await this.#shell(["input", "tap", point.x, point.y], options);
+        // Move to the end, then send a bounded deletion burst. Android's
+        // `input keyevent` accepts multiple key codes in one invocation; the
+        // bound keeps the provider deterministic and matches type_text's
+        // maximum accepted input length.
+        await this.#shell(
+          [
+            "input",
+            "keyevent",
+            "KEYCODE_MOVE_END",
+            ...Array.from({ length: MAXIMUM_CLEAR_KEYSTROKES }, () => "KEYCODE_DEL"),
+          ],
+          options,
+        );
+        return { outcome: "uncertain", detail: "Focused text cleared through InputManager." };
+      }
       case "swipe":
       case "scroll": {
         const point = await this.#pixelPoint(command, options);
@@ -142,13 +172,35 @@ export class AdbAutomationProvider implements AutomationProviderPort {
       }
       case "launch": {
         const component = command.payload?.["component"];
-        if (typeof component !== "string" || !COMPONENT_PATTERN.test(component)) {
-          return { outcome: "failed", detail: "launch requires payload.component." };
+        if (typeof component === "string" && COMPONENT_PATTERN.test(component)) {
+          const output = await this.#shell(["am", "start", "-W", "-n", component], options);
+          return /Status:\s+ok/.test(output)
+            ? { outcome: "succeeded", detail: "The activity manager confirmed the launch." }
+            : { outcome: "failed", detail: "The activity manager did not confirm the launch." };
         }
-        const output = await this.#shell(["am", "start", "-W", "-n", component], options);
-        return /Status:\s+ok/.test(output)
-          ? { outcome: "succeeded", detail: "The activity manager confirmed the launch." }
-          : { outcome: "failed", detail: "The activity manager did not confirm the launch." };
+        const packageId = command.payload?.["package_id"];
+        if (typeof packageId !== "string" || !PACKAGE_ID_PATTERN.test(packageId)) {
+          return {
+            outcome: "failed",
+            detail: "launch requires payload.component or payload.package_id.",
+          };
+        }
+        const output = await this.#shell(
+          ["monkey", "-p", packageId, "-c", "android.intent.category.LAUNCHER", "1"],
+          options,
+        );
+        return /Events injected:\s*1/.test(output)
+          ? { outcome: "succeeded", detail: "The package launcher confirmed one launch event." }
+          : { outcome: "failed", detail: "The package launcher did not confirm the launch." };
+      }
+      case "dismiss": {
+        if (command.target?.absolute_point !== undefined) {
+          const point = await this.#pixelPoint(command, options);
+          await this.#shell(["input", "tap", point.x, point.y], options);
+          return { outcome: "uncertain", detail: "Dismiss target tapped through InputManager." };
+        }
+        await this.#shell(["input", "keyevent", "KEYCODE_BACK"], options);
+        return { outcome: "uncertain", detail: "Dismissal requested with the Android back key." };
       }
       default:
         return { outcome: "failed", detail: "The provider does not implement this action kind." };

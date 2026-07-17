@@ -47,6 +47,8 @@ export interface RunExplorationCommand {
   readonly maximum_actions: number;
   readonly maximum_depth?: number;
   readonly settle_milliseconds?: number;
+  readonly application_id?: string;
+  readonly maximum_recovery_attempts?: number;
   readonly excluded_stable_ids?: readonly string[];
   readonly actor_id?: string;
 }
@@ -99,6 +101,12 @@ export class ExplorationOperationEngine {
       ...(command.settle_milliseconds === undefined
         ? {}
         : { settle_milliseconds: command.settle_milliseconds }),
+      ...(command.application_id === undefined
+        ? {}
+        : { application_id: command.application_id }),
+      ...(command.maximum_recovery_attempts === undefined
+        ? {}
+        : { maximum_recovery_attempts: command.maximum_recovery_attempts }),
       ...(command.excluded_stable_ids === undefined
         ? {}
         : { excluded_stable_ids: command.excluded_stable_ids }),
@@ -191,6 +199,12 @@ export class ExplorationOperationEngine {
           ...(command.settle_milliseconds === undefined
             ? {}
             : { settle_milliseconds: command.settle_milliseconds }),
+          ...(command.application_id === undefined
+            ? {}
+            : { application_id: command.application_id }),
+          ...(command.maximum_recovery_attempts === undefined
+            ? {}
+            : { maximum_recovery_attempts: command.maximum_recovery_attempts }),
           ...(command.excluded_stable_ids === undefined
             ? {}
             : { excluded_stable_ids: command.excluded_stable_ids }),

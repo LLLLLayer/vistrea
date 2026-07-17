@@ -50,6 +50,9 @@ import type {
   ResolveSyncConflictCommand,
   ResourceRef,
   RestoreWorkspaceCommand,
+  ReleaseWorkspaceRecoveryPointCommand,
+  WorkspaceRestoreResult,
+  WorkspaceRecoveryPoint,
   ReviewIssue,
   ReviewIssueQuery,
   ReviewVerificationRecord,
@@ -137,6 +140,7 @@ export interface WikiRepository extends UnitOfWorkBound {
   get(nodeId: string, at?: VersionSelector): WikiNode;
   listNodes(query?: WikiNodeQuery, page?: PageRequest): Page<WikiNode>;
   link(link: WikiLink, precondition?: MutationPrecondition): WikiLink;
+  getLink(linkId: string, at?: VersionSelector): WikiLink;
   unlink(linkId: string, precondition: RevisionPrecondition): void;
   backlinks(nodeId: string, page?: PageRequest): Page<WikiLink>;
   related(ref: ResourceRef, page?: PageRequest): Page<WikiNode>;
@@ -299,10 +303,19 @@ export interface WorkspaceRepository extends WorkspaceDataSource {
   create(command: CreateWorkspaceData): WorkspaceDescriptor;
   open(workspaceId: string): WorkspaceHandle;
   close(workspaceId: string): void;
-  applyMigrations(targetVersion?: number): MigrationResult;
+  applyMigrations(targetVersion?: number): Promise<MigrationResult>;
   backup(command: BackupWorkspaceCommand): Promise<ObjectRef>;
   compact(command: CompactWorkspaceCommand): CompactWorkspaceResult;
-  restore(command: RestoreWorkspaceCommand): Promise<WorkspaceDescriptor>;
+  restore(command: RestoreWorkspaceCommand): Promise<WorkspaceRestoreResult>;
+}
+
+/** Online-safe recovery-point operations exposed to Engine composition roots. */
+export interface WorkspaceMaintenancePort {
+  createRecoveryPoint(command: BackupWorkspaceCommand): Promise<WorkspaceRecoveryPoint>;
+  listRecoveryPoints(): Promise<readonly WorkspaceRecoveryPoint[]>;
+  releaseRecoveryPoint(
+    command: ReleaseWorkspaceRecoveryPointCommand,
+  ): Promise<WorkspaceRecoveryPoint>;
 }
 
 export type ByteStream = AsyncIterable<Uint8Array>;
@@ -314,6 +327,7 @@ export interface ObjectStore {
   open(hash: string, range?: ByteRange): Promise<ByteStream>;
   has(hashes: readonly string[]): Promise<ReadonlySet<string>>;
   pin(hash: string, policy: RetentionPolicy): Promise<void>;
+  unpin(hash: string, policyId: string): Promise<void>;
   inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef>;
   deletePhysical(hash: string): Promise<void>;
 }

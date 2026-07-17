@@ -11,6 +11,7 @@ It combines in-app runtime SDKs, real device automation, a macOS workspace, a ve
 - Vistrea Studio for macOS
 - Runtime UI exploration through WDA and UIAutomator
 - Screen State Canvas and versioned UI Deep Wiki
+- Configured, read-only project Markdown browsing
 - Design baseline comparison and review issues
 - Reversible Debug-only UI tuning
 - 2D View Tree and Lookin-style 3D Inspector
@@ -56,7 +57,7 @@ The interface specifications define shared IDs, errors, operation behavior, SDK 
 
 ## Native Demo Apps
 
-The native iOS UIKit and Android View Demo Apps implement the same 12 required cross-platform Scenario IDs. Both provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage, plus verified Runtime events and reversible tuning; real-input automation is verified on Android. Design comparison and validation scenario coverage remain staged, with `examples/scenarios/manifest.json` as the authoritative per-platform status.
+The native iOS UIKit and Android View Demo Apps implement the same 17 required cross-platform Scenario IDs. Both provide a verified `demo.navigation.basic` Runtime Snapshot loop through the SDK connection, Host, Studio presentation, SQLite metadata, and content-addressed screenshot storage, plus verified Runtime events, reversible tuning, real-input automation, dangerous-action confirmation, and the deeper Storefront exploration acceptance. The iOS lane additionally proves real `clear_text` and targeted `dismiss` with post-action structural captures. Compose contributes its full semantics tree, while SwiftUI element capture remains accessibility-runtime dependent. Design comparison and validation scenario coverage remain staged, with `examples/scenarios/manifest.json` as the authoritative per-platform status.
 
 - `examples/ios/VistreaDemoApp/`
 - `examples/android/VistreaDemoApp/`
@@ -70,25 +71,59 @@ The native iOS UIKit and Android View Demo Apps implement the same 12 required c
 - [Executable Data model coverage](docs/protocol/DATA_MODEL_COVERAGE.md)
 - [Interface specifications](docs/interfaces/README.md)
 - [Studio interaction design](docs/product/STUDIO_INTERACTIONS.md)
+- [Project Markdown documents](docs/product/PROJECT_DOCUMENTS.md)
+- [Studio macOS local packaging](docs/release/STUDIO_MACOS_RELEASE.md)
 - [Development and multi-agent workflow](docs/DEVELOPMENT.md)
 - [Development progress](docs/DEVELOPMENT_PROGRESS.md)
 - [Documentation index](docs/README.md)
 
 ## Recommended implementation sequence
 
-1. Run the implemented iOS WebDriverAgent automation lane on a real Simulator and re-run the Android lane's exploration segment to verify those capabilities.
-2. Extend the SwiftUI and Compose annotation bridges into full semantic-tree capture.
-3. Cover the design comparison and validation scenario contracts in both Demo Apps.
-4. Add Canvas curation and Deep Wiki editing to Studio.
-5. Grow Vistrea Hub beyond the loopback pack relay: namespaces, permissions, discovery, and collaboration.
+1. Finish credential-free packaged acceptance for Studio's Knowledge Collection, Tuning Patch source handoff, Validation, Build Diff, and Workspace maintenance workflows.
+2. Add a disposable persisted Workspace fixture before extending hosted UI automation through recovery confirmations and destructive maintenance flows.
+3. Tighten remaining Local API request validation and harden local accessibility behavior against real persisted Workspaces.
+4. Resume physical-device coverage and broader Hub collaboration only when those environments return to scope.
 
 Parallel work should follow [the multi-agent workflow](docs/DEVELOPMENT.md) and use fixture-backed interfaces rather than private module models.
 
 ## Current status
 
-Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 84 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, and portable full/thin `.vistrea-pack` export/import over the same Commit and ObjectRef identity.
+Phase 0 is verified: the shared `DataUnitOfWork` surface has machine-readable JSON Schemas, 89 canonical fixtures, language-owned Data ports, an in-memory reference adapter, SQLite metadata, a file-backed content-addressed Object Store, portable full/thin `.vistrea-pack` exchange, and immutable Knowledge Collection publication with readable Markdown/HTML exports over the same Commit and ObjectRef identity.
 
-The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming and protected reversible tuning are also verified on both platforms. Device automation, deterministic exploration, the Screen Graph, design review, the Deep Wiki, core validation and build diff, and an optional loopback Hub pack relay are implemented behind the same production Host, with the Android real-input automation acceptance verified and the iOS WebDriverAgent lane awaiting its first device run. Agents consume this surface through 55 Host operations exposed by the strict CLI (with named toolset focus), the Skills, an installable Claude Code plugin, and a headless CI gate. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+The Phase 1 native Snapshot milestone is verified on both iOS UIKit and Android View, and Runtime event streaming plus protected reversible tuning of alpha, color, font, spacing/insets, and corner radius are implemented on both platforms. Device automation, deterministic exploration, dangerous-action confirmation, the Screen Graph, design acceptance, the Deep Wiki, core validation and build diff, and an optional Hub pack relay are implemented behind the same production Host. Design acceptance includes content-addressed approved-build baselines, real per-pixel region metrics, Difference-to-Issue promotion, Coding Agent source suggestions, and automatic real-build recapture/re-verification. The basic and raised Storefront real-input acceptances are verified on both platforms; iOS also has real structural verification for `clear_text` and targeted `dismiss`. Agents consume this surface through 72 Host operations exposed by the strict CLI, five Skills, an installable Claude Code plugin, and a headless CI gate. A machine-readable operation manifest and contract test keep Host, CLI, and interface documentation aligned. `docs/DEVELOPMENT_PROGRESS.md` records the exact per-workstream status and verification evidence.
+
+The iOS physical-device vertical is verified on an iPhone 14 Pro running iOS
+26.5: its exact-IP TLS 1.3 Runtime listener and leaf-certificate-pinned client
+completed Snapshot capture, production Studio/CLI equality, Workspace reopen,
+credential rotation, secret scanning, and deterministic app/resource cleanup.
+The Android physical lane reuses the one-shot-token and `adb reverse` path and
+remains implemented but hardware-unverified. Both lanes stay opt-in and fail
+closed unless a specific physical device is supplied.
+
+The optional Hub Beta now adds five roles, named-principal rotating tokens,
+direct project grants, organization-scoped team inheritance, a private
+append-only audit log, administrator permission/audit views, and a safe
+cursor-paginated activity feed to the existing multi-project pack relay.
+Administrators can grant, re-role, revoke, and rotate project or team
+principals online. Direct and inherited roles preserve their source and combine
+by effective maximum; team mutations are visible in every child project's
+audit/activity stream. Private atomic role and directory state survive restart
+while all plaintext tokens rotate. The Engine, authenticated loopback Host,
+strict CLI, and Studio now share one safe synchronization surface: inspect
+identity and ref relations, discover team projects, fast-forward selected refs
+in either direction, preserve divergence as explicit conflicts, and poll token-free
+project activity. Search, subscriptions, organization-wide roles, multi-team
+sharing, versioned collaboration endpoints, and guided conflict resolution
+remain follow-up work.
+
+Vistrea Studio has a verified credential-free local Universal `.app`, ZIP, and DMG packaging path with the pinned Sparkle dependency kept disabled by the absence of update metadata. The canonical packager has no formal-distribution credential path. The application embeds architecture-matched Node.js and production Host runtimes and manages local Workspaces through a Welcome/recent/open/create flow, so a packaged app no longer depends on shell-provided Host credentials. It restores the last available Workspace and keeps missing locations recoverable without silently initializing arbitrary folders. Its Workspace Manager lists and creates retained recovery points, releases retention policies, restores metadata, applies exact dry-run garbage-collection plans, and recovers interrupted restores or stale locks through a stop-run-reopen lifecycle. Public macOS distribution, update publication, and installed old-to-new update acceptance are deferred; no tag-triggered release workflow is active.
+
+The local Studio product surface now also manages exact Knowledge Collection membership and entry nodes, prepares source-oriented Coding Agent handoff from persisted Tuning Patches, runs Snapshot or Screen Graph validation with justified Finding suppression, and compares two observed builds from the same application. These workflows use the existing Host contracts and remain usable without Hub; Build Diff honestly requires two persisted builds.
+
+Pull requests run seven independent, immutable-revision CI jobs for Node/Host,
+Studio, Studio UI regression, the iOS SDK, the iOS Demo App, the Android SDK,
+and the Android Demo App. Device-backed end-to-end acceptance remains an
+explicit opt-in lane.
 
 Run the current executable checks with:
 

@@ -5,8 +5,12 @@ export {
   WIKI_NODE_STATUSES,
   WIKI_NODE_TRANSITIONS,
   type CreateWikiNodeCommand,
+  type CreateKnowledgeCollectionCommand,
   type KnowledgeEngineDependencies,
   type LinkWikiNodeCommand,
+  type PublishKnowledgeCollectionCommand,
+  type PublishKnowledgeCollectionResult,
   type UnlinkWikiNodeCommand,
+  type UpdateKnowledgeCollectionCommand,
   type UpdateWikiNodeCommand,
 } from "./knowledge-engine.js";

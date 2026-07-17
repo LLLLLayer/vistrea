@@ -59,6 +59,10 @@ final class FixtureAndTreeTests: XCTestCase {
         XCTAssertEqual(model.canvasPhase, .content, "The fixture Canvas is not a 404.")
         XCTAssertEqual(model.canvasStates.count, 3)
         XCTAssertEqual(model.wikiPhase, .content)
+        XCTAssertEqual(model.issuesPhase, .empty, "Issues require a selected Screen State.")
+
+        let entryID = try XCTUnwrap(model.canvasGraph?.entryStateIDs.first)
+        await model.selectCanvasState(id: entryID)
         XCTAssertEqual(model.issuesPhase, .content)
 
         // Merge is reachable: two active states can be selected and merged.
@@ -72,7 +76,6 @@ final class FixtureAndTreeTests: XCTestCase {
         XCTAssertEqual(model.canvasGraph?.revision, 2)
 
         // Split is reachable: the entry state carries two observations.
-        let entryID = try XCTUnwrap(model.canvasGraph?.entryStateIDs.first)
         await model.selectCanvasState(id: entryID)
         XCTAssertEqual(model.selectedCanvasStateObservationIDs.count, 2)
         model.beginSplitDecision()

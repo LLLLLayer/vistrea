@@ -11,3 +11,7 @@ Record schema format, transport, storage, implementation language, state dedupli
 - `0006-vistrea-pack-container.md`: accepted `.vistrea-pack` version 1 container framing and import verification order
 - `0007-screen-state-identity-and-device-automation.md`: accepted the `structural-v1` Screen State identity, single coherent materialized graph with frozen version tags, and the adb/WebDriverAgent provider pair
 - `0008-cli-only-agent-adapter.md`: retired the stdio MCP server; the strict JSON CLI with `VISTREA_CLI_TOOLSETS` focus is the single agent adapter
+- `0009-direct-macos-distribution.md`: deferred direct Studio distribution; only credential-free local packaging remains active
+- `0010-physical-runtime-tls.md`: accepted exact-IP TLS 1.3 with leaf-certificate pinning for physical-device Runtime connections while the Host Local API stays loopback-only
+- `0011-hub-rbac-and-operational-audit.md`: accepted project-scoped Hub RBAC, per-principal grants, separate append-only operational audit, and a least-privilege activity projection
+- `0012-hub-team-inheritance.md`: accepted organization-scoped team grants, effective-role inheritance into child projects, private directory persistence, and per-project audit fan-out

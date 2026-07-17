@@ -67,7 +67,7 @@ The first machine-readable protocol version starts at `1.0` after the schema-for
 ## Validation
 
 - canonical fixtures consumed by Swift, Kotlin, Host, Data, and Hub tests;
-- CLI/MCP adapter parity tests;
+- Host operation manifest, CLI, and public-catalog parity tests;
 - SDK-to-Host handshake tests;
 - Data API in-memory and SQLite contract tests;
 - one complete Demo App vertical loop.

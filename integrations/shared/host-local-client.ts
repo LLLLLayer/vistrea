@@ -6,6 +6,20 @@ import {
   type JsonObject,
   type JsonValue,
 } from "./strict-json.js";
+import {
+  IMPLEMENTED_HOST_OPERATIONS,
+  type ImplementedHostOperation,
+} from "./host-operation-manifest.js";
+import {
+  HOST_ERROR_CODES,
+  HostClientError,
+  type HostClientErrorCode,
+} from "./host-local-client-errors.js";
+
+export { IMPLEMENTED_HOST_OPERATIONS } from "./host-operation-manifest.js";
+export type { ImplementedHostOperation } from "./host-operation-manifest.js";
+export { HostClientError, isHostClientError } from "./host-local-client-errors.js";
+export type { HostClientErrorCode } from "./host-local-client-errors.js";
 
 const DEFAULT_TIMEOUT_MILLISECONDS = 30_000;
 const MAXIMUM_TIMEOUT_MILLISECONDS = 300_000;
@@ -32,6 +46,8 @@ const MAPPING_ID_PATTERN =
   /^mapping_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const COMPARISON_ID_PATTERN =
   /^comparison_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DIFFERENCE_ID_PATTERN =
+  /^difference_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ISSUE_ID_PATTERN =
   /^issue_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const VERIFICATION_ID_PATTERN =
@@ -59,6 +75,8 @@ const WIKI_NODE_ID_PATTERN =
   /^wiki_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const WIKI_LINK_ID_PATTERN =
   /^wikilink_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const KNOWLEDGE_COLLECTION_ID_PATTERN =
+  /^collection_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const RESOURCE_KIND_PATTERN = /^[a-z][a-z0-9._-]*$/;
 const VALIDATION_RUN_ID_PATTERN =
   /^validationrun_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -71,6 +89,8 @@ const BUILD_ID_PATTERN =
 const COMMIT_ID_PATTERN = /^commit:sha256:[0-9a-f]{64}$/;
 const REF_NAME_PATTERN =
   /^(?:users|teams|builds|baselines|releases)\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/;
+const HUB_REMOTE_URL_PATTERN =
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
 const PACK_MEDIA_TYPE = "application/vnd.vistrea-pack";
 const OBJECT_HASH_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
@@ -82,131 +102,6 @@ export const HOST_LOCAL_API_ENVIRONMENT = {
   timeoutMilliseconds: "VISTREA_HOST_TIMEOUT_MS",
   maximumResponseBytes: "VISTREA_HOST_MAX_RESPONSE_BYTES",
 } as const;
-
-export const IMPLEMENTED_HOST_OPERATIONS = [
-  "GetWorkspaceStatus",
-  "CaptureSnapshot",
-  "ListSnapshots",
-  "GetSnapshot",
-  "GetEventTimeline",
-  "AddDesignAsset",
-  "AddDesignReference",
-  "GetDesignReference",
-  "ListDesignReferences",
-  "MapDesignRegion",
-  "RunDesignComparison",
-  "GetDesignComparison",
-  "ListDesignComparisons",
-  "CreateReviewIssue",
-  "ListReviewIssues",
-  "GetReviewIssue",
-  "TransitionReviewIssue",
-  "VerifyReviewIssue",
-  "CreateTuningPatch",
-  "GetTuningPatch",
-  "ApplyTuningPatch",
-  "RevertTuningApplication",
-  "GetTuningApplication",
-  "ListActiveTuning",
-  "RecordStateObservation",
-  "RecordTransitionObservation",
-  "GetScreenGraph",
-  "GetScreenState",
-  "MergeScreenStates",
-  "SplitScreenState",
-  "AnnotateScreenState",
-  "TagGraphVersion",
-  "FindScreenPath",
-  "CreateWikiNode",
-  "UpdateWikiNode",
-  "GetWikiNode",
-  "ListWikiNodes",
-  "LinkWikiNode",
-  "UnlinkWikiNode",
-  "GetWikiBacklinks",
-  "GetRelatedWikiNodes",
-  "ValidateSnapshot",
-  "ValidateScreenGraph",
-  "GetValidationRun",
-  "ListValidationFindings",
-  "GetValidationFinding",
-  "SuppressValidationFinding",
-  "CompareBuilds",
-  "GetBuildDiff",
-  "ExportPack",
-  "ImportPack",
-  "GetObject",
-  "RunExploration",
-  "GetExplorationOperation",
-  "CancelExploration",
-] as const;
-
-export type ImplementedHostOperation = (typeof IMPLEMENTED_HOST_OPERATIONS)[number];
-
-export type HostClientErrorCode =
-  | "invalid_argument"
-  | "not_found"
-  | "already_exists"
-  | "conflict"
-  | "unauthenticated"
-  | "forbidden"
-  | "unsupported"
-  | "policy_blocked"
-  | "unavailable"
-  | "timeout"
-  | "cancelled"
-  | "integrity_error"
-  | "resource_exhausted"
-  | "internal";
-
-const HOST_ERROR_CODES = new Set<HostClientErrorCode>([
-  "invalid_argument",
-  "not_found",
-  "already_exists",
-  "conflict",
-  "unauthenticated",
-  "forbidden",
-  "unsupported",
-  "policy_blocked",
-  "unavailable",
-  "timeout",
-  "cancelled",
-  "integrity_error",
-  "resource_exhausted",
-  "internal",
-]);
-
-export class HostClientError extends Error {
-  readonly code: HostClientErrorCode;
-  readonly retryable: boolean;
-  readonly httpStatus?: number;
-  readonly requestId?: string;
-
-  constructor(
-    code: HostClientErrorCode,
-    message: string,
-    options: {
-      readonly retryable?: boolean;
-      readonly httpStatus?: number;
-      readonly requestId?: string;
-    } = {},
-  ) {
-    super(message);
-    this.name = "HostClientError";
-    this.code = code;
-    this.retryable = options.retryable ?? false;
-    if (options.httpStatus !== undefined) {
-      this.httpStatus = options.httpStatus;
-    }
-    if (options.requestId !== undefined) {
-      this.requestId = options.requestId;
-    }
-  }
-}
-
-export function isHostClientError(value: unknown): value is HostClientError {
-  return value instanceof HostClientError;
-}
 
 export interface HostLocalApiClientOptions {
   readonly baseUrl: string;
@@ -288,6 +183,60 @@ export class HostLocalApiClient {
         assertExactObject(input, [], "Workspace status input");
         const value = await this.#request("GET", "/v1/status", undefined, 200, options);
         return validateWorkspaceStatus(value);
+      }
+      case "CreateWorkspaceRecoveryPoint": {
+        const command = assertExactObject(input, ["reason"], "Create recovery point input");
+        const reason = command["reason"];
+        if (
+          typeof reason !== "string" ||
+          reason.trim().length === 0 ||
+          reason.length > 1_024
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/workspace/recovery-points",
+          command,
+          201,
+          options,
+        );
+        return validateWorkspaceRecoveryPoint(value);
+      }
+      case "ListWorkspaceRecoveryPoints": {
+        assertExactObject(input, [], "List recovery points input");
+        const value = await this.#request(
+          "GET",
+          "/v1/workspace/recovery-points",
+          undefined,
+          200,
+          options,
+        );
+        return validateWorkspaceRecoveryPointPage(value);
+      }
+      case "ReleaseWorkspaceRecoveryPoint": {
+        const command = assertExactObject(
+          input,
+          ["recovery_point_id", "retention_policy_id"],
+          "Release recovery point input",
+        );
+        if (
+          typeof command["recovery_point_id"] !== "string" ||
+          !OBJECT_HASH_PATTERN.test(command["recovery_point_id"]) ||
+          typeof command["retention_policy_id"] !== "string" ||
+          command["retention_policy_id"].length === 0 ||
+          command["retention_policy_id"].length > 256
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          "/v1/workspace/recovery-points/release",
+          command,
+          200,
+          options,
+        );
+        return validateWorkspaceRecoveryPoint(value);
       }
       case "CaptureSnapshot": {
         const command = normalizeCaptureInput(input);
@@ -377,10 +326,38 @@ export class HostLocalApiClient {
       case "AddDesignReference": {
         const command = assertExactObject(
           input,
-          ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "created_by"],
+          ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "source", "created_by"],
           "Design reference input",
+          true,
         );
+        if (
+          command["name"] === undefined ||
+          command["kind"] === undefined ||
+          command["canvas_size"] === undefined ||
+          command["pixel_size"] === undefined ||
+          command["asset_hash"] === undefined ||
+          command["created_by"] === undefined
+        ) {
+          throw invalidInput();
+        }
         const value = await this.#request("POST", "/v1/design-references", command, 201, options);
+        return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
+      }
+      case "PromoteVisualBaseline": {
+        const command = assertExactObject(
+          input,
+          ["snapshot_id", "name", "created_by"],
+          "Visual baseline input",
+        );
+        if (
+          typeof command["snapshot_id"] !== "string" ||
+          !SNAPSHOT_ID_PATTERN.test(command["snapshot_id"]) ||
+          typeof command["name"] !== "string" ||
+          command["name"].length === 0
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request("POST", "/v1/design-baselines", command, 201, options);
         return validateIdentifiedResource(value, "design_reference_id", DESIGN_REFERENCE_ID_PATTERN);
       }
       case "GetDesignReference": {
@@ -509,10 +486,37 @@ export class HostLocalApiClient {
         const value = await this.#request("POST", "/v1/review-issues", command, 201, options);
         return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
       }
+      case "CreateReviewIssueFromDifference": {
+        const command = assertExactObject(
+          input,
+          ["comparison_id", "difference_id", "title", "description", "created_by"],
+          "Design difference issue input",
+          true,
+        );
+        const comparisonId = command["comparison_id"];
+        const differenceId = command["difference_id"];
+        if (
+          typeof comparisonId !== "string" ||
+          !COMPARISON_ID_PATTERN.test(comparisonId) ||
+          typeof differenceId !== "string" ||
+          !DIFFERENCE_ID_PATTERN.test(differenceId)
+        ) {
+          throw invalidInput();
+        }
+        const { comparison_id: _omitted, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/design-comparisons/${encodeURIComponent(comparisonId)}/issues`,
+          body,
+          201,
+          options,
+        );
+        return validateIdentifiedResource(value, "issue_id", ISSUE_ID_PATTERN);
+      }
       case "ListReviewIssues": {
         const query = assertExactObject(
           input,
-          ["states", "design_reference_id", "limit", "cursor"],
+          ["states", "design_reference_id", "screen_state_id", "limit", "cursor"],
           "Review issue query",
           true,
         );
@@ -535,6 +539,13 @@ export class HostLocalApiClient {
             throw invalidInput();
           }
           parameters.set("design_reference_id", referenceId);
+        }
+        const screenStateId = query["screen_state_id"];
+        if (screenStateId !== undefined) {
+          if (typeof screenStateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(screenStateId)) {
+            throw invalidInput();
+          }
+          parameters.set("screen_state_id", screenStateId);
         }
         if (query["limit"] !== undefined) {
           if (!Number.isInteger(query["limit"]) || (query["limit"] as number) < 1 || (query["limit"] as number) > 500) {
@@ -622,6 +633,30 @@ export class HostLocalApiClient {
         validateIdentifiedResource(issue, "issue_id", ISSUE_ID_PATTERN);
         return requireObject(value);
       }
+      case "RecaptureAndVerifyIssue": {
+        const command = assertExactObject(
+          input,
+          ["issue_id", "expected_revision", "verified_by"],
+          "Review issue recapture verification input",
+        );
+        const issueId = command["issue_id"];
+        if (typeof issueId !== "string" || !ISSUE_ID_PATTERN.test(issueId)) {
+          throw invalidInput();
+        }
+        const { issue_id: _omitted, ...body } = command;
+        const value = requireObject(await this.#request(
+          "POST",
+          `/v1/review-issues/${encodeURIComponent(issueId)}/recapture-verifications`,
+          body,
+          201,
+          options,
+        ));
+        validateRuntimeSnapshot(value["snapshot"] as JsonValue);
+        validateIdentifiedResource(value["comparison"] as JsonValue, "comparison_id", COMPARISON_ID_PATTERN);
+        validateIdentifiedResource(value["verification"] as JsonValue, "verification_record_id", VERIFICATION_ID_PATTERN);
+        validateIdentifiedResource(value["issue"] as JsonValue, "issue_id", ISSUE_ID_PATTERN);
+        return value;
+      }
       case "CreateTuningPatch": {
         const command = assertExactObject(
           input,
@@ -646,6 +681,25 @@ export class HostLocalApiClient {
           options,
         );
         return validateIdentifiedResource(value, "patch_id", TUNING_PATCH_ID_PATTERN);
+      }
+      case "GenerateTuningSourceSuggestions": {
+        const query = assertExactObject(input, ["patch_id"], "Tuning source suggestion input");
+        const patchId = query["patch_id"];
+        if (typeof patchId !== "string" || !TUNING_PATCH_ID_PATTERN.test(patchId)) {
+          throw invalidInput();
+        }
+        const value = requireObject(await this.#request(
+          "GET",
+          `/v1/tuning-patches/${encodeURIComponent(patchId)}/source-suggestions`,
+          undefined,
+          200,
+          options,
+        ));
+        assertKeys(value, ["patch_id", "patch_revision", "target_snapshot_id", "suggestions"]);
+        if (value["patch_id"] !== patchId || !Array.isArray(value["suggestions"])) {
+          throw invalidHostResult();
+        }
+        return value;
       }
       case "ApplyTuningPatch": {
         const command = assertExactObject(
@@ -786,22 +840,36 @@ export class HostLocalApiClient {
       case "GetScreenGraph": {
         const query = assertExactObject(
           input,
-          ["project_id", "application_id"],
+          ["project_id", "application_id", "build_id", "application_version"],
           "Screen graph lookup",
+          true,
         );
         const projectId = query["project_id"];
         const applicationId = query["application_id"];
+        const buildId = query["build_id"];
+        const applicationVersion = query["application_version"];
         if (
           typeof projectId !== "string" ||
           !PROJECT_ID_PATTERN.test(projectId) ||
           typeof applicationId !== "string" ||
-          !APPLICATION_ID_PATTERN.test(applicationId)
+          !APPLICATION_ID_PATTERN.test(applicationId) ||
+          ((buildId === undefined) !== (applicationVersion === undefined)) ||
+          (buildId !== undefined &&
+            (typeof buildId !== "string" || !BUILD_ID_PATTERN.test(buildId))) ||
+          (applicationVersion !== undefined &&
+            (typeof applicationVersion !== "string" ||
+              applicationVersion.length < 1 ||
+              applicationVersion.length > 128))
         ) {
           throw invalidInput();
         }
         const parameters = new URLSearchParams();
         parameters.set("project_id", projectId);
         parameters.set("application_id", applicationId);
+        if (typeof buildId === "string" && typeof applicationVersion === "string") {
+          parameters.set("build_id", buildId);
+          parameters.set("application_version", applicationVersion);
+        }
         const value = await this.#request(
           "GET",
           `/v1/screen-graph?${parameters.toString()}`,
@@ -812,14 +880,37 @@ export class HostLocalApiClient {
         return validateIdentifiedResource(value, "screen_graph_id", SCREEN_GRAPH_ID_PATTERN);
       }
       case "GetScreenState": {
-        const query = assertExactObject(input, ["screen_state_id"], "Screen state lookup");
+        const query = assertExactObject(
+          input,
+          ["screen_state_id", "build_id", "application_version"],
+          "Screen state lookup",
+          true,
+        );
         const stateId = query["screen_state_id"];
-        if (typeof stateId !== "string" || !SCREEN_STATE_ID_PATTERN.test(stateId)) {
+        const buildId = query["build_id"];
+        const applicationVersion = query["application_version"];
+        if (
+          typeof stateId !== "string" ||
+          !SCREEN_STATE_ID_PATTERN.test(stateId) ||
+          ((buildId === undefined) !== (applicationVersion === undefined)) ||
+          (buildId !== undefined &&
+            (typeof buildId !== "string" || !BUILD_ID_PATTERN.test(buildId))) ||
+          (applicationVersion !== undefined &&
+            (typeof applicationVersion !== "string" ||
+              applicationVersion.length < 1 ||
+              applicationVersion.length > 128))
+        ) {
           throw invalidInput();
         }
+        const parameters = new URLSearchParams();
+        if (typeof buildId === "string" && typeof applicationVersion === "string") {
+          parameters.set("build_id", buildId);
+          parameters.set("application_version", applicationVersion);
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
         const value = await this.#request(
           "GET",
-          `/v1/screen-states/${encodeURIComponent(stateId)}`,
+          `/v1/screen-states/${encodeURIComponent(stateId)}${suffix}`,
           undefined,
           200,
           options,
@@ -1257,6 +1348,204 @@ export class HostLocalApiClient {
         );
         return validateWikiNodePage(value);
       }
+      case "CreateKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          ["name", "summary", "node_ids", "link_ids", "entry_node_ids", "created_by"],
+          "Knowledge Collection input",
+          true,
+        );
+        const value = await this.#request(
+          "POST",
+          "/v1/knowledge-collections",
+          command,
+          201,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "UpdateKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          [
+            "collection_id",
+            "expected_revision",
+            "name",
+            "summary",
+            "node_ids",
+            "link_ids",
+            "entry_node_ids",
+            "updated_by",
+          ],
+          "Knowledge Collection revision input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          !Number.isSafeInteger(command["expected_revision"])
+        ) {
+          throw invalidInput();
+        }
+        const { collection_id: _collectionId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/revisions`,
+          body,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "GetKnowledgeCollection": {
+        const query = assertExactObject(
+          input,
+          ["collection_id"],
+          "Knowledge Collection lookup",
+        );
+        const collectionId = query["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId)
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "GET",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResource(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "ListKnowledgeCollections": {
+        const query = assertExactObject(
+          input,
+          ["text", "publication_states", "limit", "cursor"],
+          "Knowledge Collection list input",
+          true,
+        );
+        const parameters = pageParameters(query);
+        const text = query["text"];
+        if (text !== undefined) {
+          if (typeof text !== "string" || text.length === 0 || text.length > 4_096) {
+            throw invalidInput();
+          }
+          parameters.set("text", text);
+        }
+        const states = query["publication_states"];
+        if (states !== undefined) {
+          if (
+            !Array.isArray(states) ||
+            states.length === 0 ||
+            states.some(
+              (state) =>
+                typeof state !== "string" ||
+                !["draft", "published", "archived"].includes(state),
+            )
+          ) {
+            throw invalidInput();
+          }
+          parameters.set("publication_states", states.join(","));
+        }
+        const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+        const value = await this.#request(
+          "GET",
+          `/v1/knowledge-collections${suffix}`,
+          undefined,
+          200,
+          options,
+        );
+        return validateIdentifiedResourcePage(
+          value,
+          "collection_id",
+          KNOWLEDGE_COLLECTION_ID_PATTERN,
+        );
+      }
+      case "PublishKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          [
+            "collection_id",
+            "expected_revision",
+            "base_commit_id",
+            "target_ref_name",
+            "ref_precondition",
+            "published_by",
+            "message",
+          ],
+          "Knowledge Collection publication input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          !Number.isSafeInteger(command["expected_revision"]) ||
+          typeof command["base_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(command["base_commit_id"] as string) ||
+          typeof command["target_ref_name"] !== "string" ||
+          !REF_NAME_PATTERN.test(command["target_ref_name"] as string)
+        ) {
+          throw invalidInput();
+        }
+        validateRefPreconditionInput(command["ref_precondition"]);
+        const { collection_id: _collectionId, ...body } = command;
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/publication`,
+          body,
+          201,
+          options,
+        );
+        return validateKnowledgePublicationResult(value, collectionId);
+      }
+      case "ExportKnowledgeCollection": {
+        const command = assertExactObject(
+          input,
+          ["collection_id", "formats"],
+          "Knowledge Collection export input",
+          true,
+        );
+        const collectionId = command["collection_id"];
+        const formats = command["formats"];
+        if (
+          typeof collectionId !== "string" ||
+          !KNOWLEDGE_COLLECTION_ID_PATTERN.test(collectionId) ||
+          (formats !== undefined &&
+            (!Array.isArray(formats) ||
+              formats.length === 0 ||
+              new Set(formats).size !== formats.length ||
+              formats.some(
+                (format) =>
+                  typeof format !== "string" || !["markdown", "html"].includes(format),
+              )))
+        ) {
+          throw invalidInput();
+        }
+        const value = await this.#request(
+          "POST",
+          `/v1/knowledge-collections/${encodeURIComponent(collectionId)}/exports`,
+          formats === undefined ? {} : { formats },
+          201,
+          options,
+        );
+        return validateKnowledgeExportResult(value, collectionId);
+      }
       case "ValidateSnapshot": {
         const command = assertExactObject(
           input,
@@ -1544,6 +1833,26 @@ export class HostLocalApiClient {
         }
         return result;
       }
+      case "GetSyncStatus": {
+        const command = normalizeSyncInput(input, "status");
+        const value = await this.#request("POST", "/v1/sync/status", command, 200, options);
+        return validateSyncStatus(value);
+      }
+      case "FetchWorkspace": {
+        const command = normalizeSyncInput(input, "fetch");
+        const value = await this.#request("POST", "/v1/sync/fetch", command, 200, options);
+        return validateSyncTransferOutcome(value);
+      }
+      case "PushWorkspace": {
+        const command = normalizeSyncInput(input, "push");
+        const value = await this.#request("POST", "/v1/sync/push", command, 200, options);
+        return validateSyncTransferOutcome(value);
+      }
+      case "GetSyncActivity": {
+        const command = normalizeSyncInput(input, "activity");
+        const value = await this.#request("POST", "/v1/sync/activity", command, 200, options);
+        return validateSyncActivityPage(value);
+      }
       case "GetObject": {
         const query = assertExactObject(input, ["hash"], "Object lookup");
         const hash = query["hash"];
@@ -1559,6 +1868,8 @@ export class HostLocalApiClient {
             "maximum_actions",
             "maximum_depth",
             "settle_milliseconds",
+            "application_id",
+            "maximum_recovery_attempts",
             "excluded_stable_ids",
             "actor_id",
           ],
@@ -1568,6 +1879,8 @@ export class HostLocalApiClient {
         const maximumActions = command["maximum_actions"];
         const maximumDepth = command["maximum_depth"];
         const settle = command["settle_milliseconds"];
+        const applicationId = command["application_id"];
+        const maximumRecoveryAttempts = command["maximum_recovery_attempts"];
         const excluded = command["excluded_stable_ids"];
         const actorId = command["actor_id"];
         if (
@@ -1582,6 +1895,14 @@ export class HostLocalApiClient {
             (!Number.isSafeInteger(settle) ||
               (settle as number) < 0 ||
               (settle as number) > 60_000)) ||
+          (applicationId !== undefined &&
+            (typeof applicationId !== "string" ||
+              applicationId.length === 0 ||
+              applicationId.length > 256)) ||
+          (maximumRecoveryAttempts !== undefined &&
+            (!Number.isSafeInteger(maximumRecoveryAttempts) ||
+              (maximumRecoveryAttempts as number) < 0 ||
+              (maximumRecoveryAttempts as number) > 5)) ||
           (excluded !== undefined &&
             (!Array.isArray(excluded) ||
               excluded.length > 128 ||
@@ -1652,7 +1973,7 @@ export class HostLocalApiClient {
         return validateEventTimeline(value);
       }
       default:
-        throw new HostClientError("unsupported", "The Host operation is not implemented.");
+        return unreachableOperation(operation);
     }
   }
 
@@ -1865,6 +2186,13 @@ export class HostLocalApiClient {
       options.signal?.removeEventListener("abort", cancel);
     }
   }
+}
+
+function unreachableOperation(operation: never): never {
+  throw new HostClientError(
+    "unsupported",
+    `The Host operation is not implemented: ${String(operation)}.`,
+  );
 }
 
 /** The byte-body sibling of readBoundedJsonResponse for object downloads. */
@@ -2249,6 +2577,98 @@ function validateWorkspaceStatus(value: JsonValue): JsonObject {
   return status;
 }
 
+function validateWorkspaceRecoveryPointPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["recovery_points"]);
+  const points = page["recovery_points"];
+  if (!Array.isArray(points) || points.length > 10_000) {
+    throw invalidHostResult();
+  }
+  for (const point of points) {
+    validateWorkspaceRecoveryPoint(point as JsonValue);
+  }
+  return page;
+}
+
+function validateWorkspaceRecoveryPoint(value: JsonValue): JsonObject {
+  const point = requireObject(value);
+  assertKeys(point, [
+    "recovery_point_id",
+    "backup",
+    "source",
+    "reason",
+    "created_at",
+    "schema_version",
+    "generation",
+    "retention_policies",
+    "active_retention_policy_ids",
+  ]);
+  const recoveryPointID = point["recovery_point_id"];
+  const backup = validateObjectRef(point["backup"] as JsonValue);
+  const policies = point["retention_policies"];
+  const activePolicyIDs = point["active_retention_policy_ids"];
+  if (
+    typeof recoveryPointID !== "string" ||
+    !OBJECT_HASH_PATTERN.test(recoveryPointID) ||
+    backup["hash"] !== recoveryPointID ||
+    backup["media_type"] !==
+      "application/vnd.vistrea.workspace-metadata-backup+sqlite3" ||
+    backup["compression"] !== "none" ||
+    (point["source"] !== "manual" && point["source"] !== "pre_migration") ||
+    typeof point["reason"] !== "string" ||
+    point["reason"].length === 0 ||
+    point["reason"].length > 1_024 ||
+    typeof point["created_at"] !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(
+      point["created_at"],
+    ) ||
+    !Number.isFinite(Date.parse(point["created_at"])) ||
+    !Number.isSafeInteger(point["schema_version"]) ||
+    (point["schema_version"] as number) < 1 ||
+    !Number.isSafeInteger(point["generation"]) ||
+    (point["generation"] as number) < 0 ||
+    !Array.isArray(policies) ||
+    !Array.isArray(activePolicyIDs)
+  ) {
+    throw invalidHostResult();
+  }
+  const knownPolicies = new Set<string>();
+  for (const value of policies) {
+    const policy = requireObject(value as JsonValue);
+    assertKeys(policy, ["policy_id", "retain_until", "reason"], true);
+    if (
+      typeof policy["policy_id"] !== "string" ||
+      policy["policy_id"].length === 0 ||
+      policy["policy_id"].length > 256 ||
+      typeof policy["reason"] !== "string" ||
+      policy["reason"].length === 0 ||
+      policy["reason"].length > 1_024 ||
+      (policy["retain_until"] !== undefined &&
+        (typeof policy["retain_until"] !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(
+            policy["retain_until"],
+          ) ||
+          !Number.isFinite(Date.parse(policy["retain_until"])))) ||
+      knownPolicies.has(policy["policy_id"])
+    ) {
+      throw invalidHostResult();
+    }
+    knownPolicies.add(policy["policy_id"]);
+  }
+  const active = new Set<string>();
+  for (const policyID of activePolicyIDs) {
+    if (
+      typeof policyID !== "string" ||
+      !knownPolicies.has(policyID) ||
+      active.has(policyID)
+    ) {
+      throw invalidHostResult();
+    }
+    active.add(policyID);
+  }
+  return point;
+}
+
 function normalizeEventTimelineInput(value: unknown): JsonObject {
   const input = assertExactObject(
     value,
@@ -2346,6 +2766,498 @@ function validateRuntimeSnapshot(value: JsonValue): JsonObject {
     throw invalidHostResult();
   }
   return snapshot;
+}
+
+function validateRefPreconditionInput(value: JsonValue | undefined): void {
+  const precondition = requireObject(value);
+  const mode = precondition["mode"];
+  if (mode === "must_match") {
+    assertKeys(precondition, ["mode", "expected_commit_id"]);
+    if (
+      typeof precondition["expected_commit_id"] !== "string" ||
+      !COMMIT_ID_PATTERN.test(precondition["expected_commit_id"])
+    ) {
+      throw invalidInput();
+    }
+    return;
+  }
+  if (mode === "must_not_exist") {
+    assertKeys(precondition, ["mode"]);
+    return;
+  }
+  if (mode === "force") {
+    assertKeys(precondition, ["mode", "authorization"]);
+    requireObject(precondition["authorization"]);
+    return;
+  }
+  throw invalidInput();
+}
+
+type SyncInputKind = "status" | "fetch" | "push" | "activity";
+
+function normalizeSyncInput(input: unknown, kind: SyncInputKind): JsonObject {
+  const keysByKind: Readonly<Record<SyncInputKind, readonly string[]>> = {
+    status: ["remote", "ref_names"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by", "message"],
+    activity: ["remote", "after_sequence", "limit"],
+  };
+  const requiredByKind: Readonly<Record<SyncInputKind, readonly string[]>> = {
+    status: ["remote"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by"],
+    activity: ["remote"],
+  };
+  const command = assertExactObject(input, keysByKind[kind], "Sync input", true);
+  if (requiredByKind[kind].some((key) => !Object.hasOwn(command, key))) {
+    throw invalidInput();
+  }
+  const remote = assertExactObject(
+    command["remote"],
+    ["base_url", "project_id", "bearer_token"],
+    "Hub remote",
+  );
+  if (
+    typeof remote["base_url"] !== "string" ||
+    !HUB_REMOTE_URL_PATTERN.test(remote["base_url"]) ||
+    typeof remote["project_id"] !== "string" ||
+    !PROJECT_ID_PATTERN.test(remote["project_id"]) ||
+    typeof remote["bearer_token"] !== "string" ||
+    !TOKEN_PATTERN.test(remote["bearer_token"])
+  ) {
+    throw invalidInput();
+  }
+  const refNames = command["ref_names"];
+  if (
+    refNames !== undefined &&
+    (!Array.isArray(refNames) ||
+      refNames.length === 0 ||
+      refNames.length > 64 ||
+      new Set(refNames).size !== refNames.length ||
+      refNames.some((name) => typeof name !== "string" || !REF_NAME_PATTERN.test(name)))
+  ) {
+    throw invalidInput();
+  }
+  if (command["created_by"] !== undefined) {
+    validateSyncActorInput(command["created_by"]);
+  }
+  if (
+    command["message"] !== undefined &&
+    (typeof command["message"] !== "string" ||
+      command["message"].length === 0 ||
+      command["message"].length > 1024)
+  ) {
+    throw invalidInput();
+  }
+  if (
+    command["after_sequence"] !== undefined &&
+    (!Number.isSafeInteger(command["after_sequence"]) ||
+      (command["after_sequence"] as number) < 0)
+  ) {
+    throw invalidInput();
+  }
+  if (
+    command["limit"] !== undefined &&
+    (!Number.isSafeInteger(command["limit"]) ||
+      (command["limit"] as number) < 1 ||
+      (command["limit"] as number) > 500)
+  ) {
+    throw invalidInput();
+  }
+  return command;
+}
+
+function validateSyncActorInput(value: JsonValue | undefined): void {
+  const actor = assertExactObject(
+    value,
+    ["kind", "id", "display_name", "extensions"],
+    "Sync actor",
+    true,
+  );
+  if (
+    !Object.hasOwn(actor, "kind") ||
+    !Object.hasOwn(actor, "id") ||
+    !Object.hasOwn(actor, "extensions") ||
+    (actor["kind"] !== "human" && actor["kind"] !== "agent" && actor["kind"] !== "service") ||
+    typeof actor["id"] !== "string" ||
+    actor["id"].length === 0 ||
+    actor["id"].length > 320 ||
+    (actor["display_name"] !== undefined &&
+      (typeof actor["display_name"] !== "string" ||
+        actor["display_name"].length === 0 ||
+        actor["display_name"].length > 256)) ||
+    !isObject(actor["extensions"])
+  ) {
+    throw invalidInput();
+  }
+}
+
+const SYNC_ROLES = new Set(["viewer", "contributor", "reviewer", "maintainer", "admin"]);
+const SYNC_RELATIONS = new Set([
+  "synced",
+  "local_only",
+  "remote_only",
+  "local_ahead",
+  "remote_ahead",
+  "diverged",
+  "unknown",
+]);
+const SYNC_ACTIVITY_KINDS = new Set([
+  "RefUpdated",
+  "HubPackImported",
+  "HubPackExported",
+  "PermissionChanged",
+]);
+
+function validateSyncStatus(value: JsonValue): JsonObject {
+  const status = requireObject(value);
+  assertKeys(status, ["remote", "identity", "accessible_projects", "refs"]);
+  const remote = requireObject(status["remote"]);
+  assertKeys(remote, ["base_url", "project_id"]);
+  if (
+    typeof remote["base_url"] !== "string" ||
+    !HUB_REMOTE_URL_PATTERN.test(remote["base_url"]) ||
+    typeof remote["project_id"] !== "string" ||
+    !PROJECT_ID_PATTERN.test(remote["project_id"])
+  ) {
+    throw invalidHostResult();
+  }
+  validateSyncIdentity(status["identity"] as JsonValue);
+  if (!Array.isArray(status["accessible_projects"]) || status["accessible_projects"].length > 128) {
+    throw invalidHostResult();
+  }
+  for (const value of status["accessible_projects"]) {
+    const project = requireObject(value);
+    assertKeys(
+      project,
+      ["project_id", "organization_id", "team_id", "role", "capabilities"],
+      true,
+    );
+    if (
+      typeof project["project_id"] !== "string" ||
+      !PROJECT_ID_PATTERN.test(project["project_id"]) ||
+      !SYNC_ROLES.has(project["role"] as string) ||
+      !isSyncCapabilities(project["capabilities"])
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  // An omitted selection compares the first local and remote ref pages (50
+  // each), whose disjoint union can contain 100 names. Explicit selections
+  // remain limited to 64 at the request boundary.
+  if (!Array.isArray(status["refs"]) || status["refs"].length > 100) {
+    throw invalidHostResult();
+  }
+  for (const value of status["refs"]) {
+    const ref = requireObject(value);
+    assertKeys(ref, ["name", "local_commit_id", "remote_commit_id", "relation"], true);
+    if (
+      typeof ref["name"] !== "string" ||
+      !REF_NAME_PATTERN.test(ref["name"]) ||
+      (ref["local_commit_id"] !== undefined &&
+        (typeof ref["local_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(ref["local_commit_id"]))) ||
+      (ref["remote_commit_id"] !== undefined &&
+        (typeof ref["remote_commit_id"] !== "string" ||
+          !COMMIT_ID_PATTERN.test(ref["remote_commit_id"]))) ||
+      typeof ref["relation"] !== "string" ||
+      !SYNC_RELATIONS.has(ref["relation"])
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return status;
+}
+
+function validateSyncIdentity(value: JsonValue): JsonObject {
+  const identity = requireObject(value);
+  assertKeys(
+    identity,
+    [
+      "principal_id",
+      "role",
+      "capabilities",
+      "credential_scope",
+      "permission_sources",
+      "organization_id",
+      "team_id",
+    ],
+    true,
+  );
+  if (
+    typeof identity["principal_id"] !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(identity["principal_id"]) ||
+    !SYNC_ROLES.has(identity["role"] as string) ||
+    !isSyncCapabilities(identity["capabilities"]) ||
+    (identity["credential_scope"] !== "project" && identity["credential_scope"] !== "team") ||
+    !Array.isArray(identity["permission_sources"]) ||
+    identity["permission_sources"].length > 2
+  ) {
+    throw invalidHostResult();
+  }
+  for (const value of identity["permission_sources"]) {
+    const source = requireObject(value);
+    assertKeys(source, ["scope", "role", "organization_id", "team_id"], true);
+    if (
+      (source["scope"] !== "project" && source["scope"] !== "team") ||
+      !SYNC_ROLES.has(source["role"] as string)
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  return identity;
+}
+
+function validateSyncTransferOutcome(value: JsonValue): JsonObject {
+  const outcome = requireObject(value);
+  assertKeys(outcome, ["result", "status"]);
+  const result = requireObject(outcome["result"]);
+  assertKeys(result, ["import", "advanced_refs", "remaining_conflicts"]);
+  validateImportPackResult(result["import"] as JsonValue);
+  if (!Array.isArray(result["advanced_refs"]) || !Array.isArray(result["remaining_conflicts"])) {
+    throw invalidHostResult();
+  }
+  for (const value of result["advanced_refs"]) {
+    validateSyncRef(value as JsonValue);
+  }
+  for (const value of result["remaining_conflicts"]) {
+    validatePackConflict(value as JsonValue);
+  }
+  validateSyncStatus(outcome["status"] as JsonValue);
+  return outcome;
+}
+
+function validateImportPackResult(value: JsonValue): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, [
+    "mode",
+    "imported_commit_ids",
+    "existing_commit_ids",
+    "imported_object_hashes",
+    "existing_object_hashes",
+    "created_refs",
+    "unchanged_ref_names",
+    "conflicting_refs",
+  ]);
+  if (
+    (result["mode"] !== "full" && result["mode"] !== "thin") ||
+    !Array.isArray(result["created_refs"]) ||
+    !Array.isArray(result["conflicting_refs"])
+  ) {
+    throw invalidHostResult();
+  }
+  for (const [key, pattern] of [
+    ["imported_commit_ids", COMMIT_ID_PATTERN],
+    ["existing_commit_ids", COMMIT_ID_PATTERN],
+    ["imported_object_hashes", OBJECT_HASH_PATTERN],
+    ["existing_object_hashes", OBJECT_HASH_PATTERN],
+    ["unchanged_ref_names", REF_NAME_PATTERN],
+  ] as const) {
+    const values = result[key];
+    if (
+      !Array.isArray(values) ||
+      values.length > 50_000 ||
+      new Set(values).size !== values.length ||
+      values.some((item) => typeof item !== "string" || !pattern.test(item))
+    ) {
+      throw invalidHostResult();
+    }
+  }
+  if (result["created_refs"].length > 50_000 || result["conflicting_refs"].length > 50_000) {
+    throw invalidHostResult();
+  }
+  for (const item of result["created_refs"]) {
+    validateSyncRef(item as JsonValue);
+  }
+  for (const item of result["conflicting_refs"]) {
+    validatePackConflict(item as JsonValue);
+  }
+  return result;
+}
+
+function validateSyncRef(value: JsonValue): JsonObject {
+  const ref = requireObject(value);
+  assertKeys(ref, ["name", "commit_id", "revision"]);
+  if (
+    typeof ref["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(ref["name"]) ||
+    typeof ref["commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(ref["commit_id"]) ||
+    !Number.isSafeInteger(ref["revision"]) ||
+    (ref["revision"] as number) < 1
+  ) {
+    throw invalidHostResult();
+  }
+  return ref;
+}
+
+function validatePackConflict(value: JsonValue): JsonObject {
+  const conflict = requireObject(value);
+  assertKeys(conflict, ["name", "pack_commit_id", "local_commit_id"]);
+  if (
+    typeof conflict["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(conflict["name"]) ||
+    typeof conflict["pack_commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(conflict["pack_commit_id"]) ||
+    typeof conflict["local_commit_id"] !== "string" ||
+    !COMMIT_ID_PATTERN.test(conflict["local_commit_id"])
+  ) {
+    throw invalidHostResult();
+  }
+  return conflict;
+}
+
+function validateSyncActivityPage(value: JsonValue): JsonObject {
+  const page = requireObject(value);
+  assertKeys(page, ["items", "next_cursor"]);
+  if (
+    !Array.isArray(page["items"]) ||
+    page["items"].length > 500 ||
+    typeof page["next_cursor"] !== "string" ||
+    !/^(?:0|[1-9][0-9]{0,15})$/.test(page["next_cursor"]) ||
+    !Number.isSafeInteger(Number(page["next_cursor"]))
+  ) {
+    throw invalidHostResult();
+  }
+  const eventIDs = new Set<string>();
+  const sequences = new Set<number>();
+  for (const value of page["items"]) {
+    const event = requireObject(value);
+    assertKeys(event, ["event_id", "sequence", "occurred_at", "kind", "actor", "resource", "details"]);
+    const actor = requireObject(event["actor"]);
+    assertKeys(actor, ["principal_id", "role"]);
+    if (
+      typeof event["event_id"] !== "string" ||
+      !/^hub_audit_[0-9a-f-]{36}$/.test(event["event_id"]) ||
+      !Number.isSafeInteger(event["sequence"]) ||
+      (event["sequence"] as number) < 1 ||
+      typeof event["occurred_at"] !== "string" ||
+      !SYNC_ACTIVITY_KINDS.has(event["kind"] as string) ||
+      typeof actor["principal_id"] !== "string" ||
+      !SYNC_ROLES.has(actor["role"] as string) ||
+      typeof event["resource"] !== "string" ||
+      event["resource"].length === 0 ||
+      event["resource"].length > 256
+    ) {
+      throw invalidHostResult();
+    }
+    if (eventIDs.has(event["event_id"]) || sequences.has(event["sequence"] as number)) {
+      throw invalidHostResult();
+    }
+    eventIDs.add(event["event_id"]);
+    sequences.add(event["sequence"] as number);
+    validateSyncActivityDetails(event["kind"] as string, event["details"] as JsonValue);
+  }
+  return page;
+}
+
+function validateSyncActivityDetails(kind: string, value: JsonValue): void {
+  const details = requireObject(value);
+  if (kind === "HubPackImported" || kind === "HubPackExported") {
+    assertKeys(details, []);
+    return;
+  }
+  if (kind === "RefUpdated") {
+    assertKeys(details, ["ref_name"]);
+    if (typeof details["ref_name"] !== "string" || !REF_NAME_PATTERN.test(details["ref_name"])) {
+      throw invalidHostResult();
+    }
+    return;
+  }
+  assertKeys(
+    details,
+    ["organization_id", "team_id", "target_principal_id", "target_role"],
+    true,
+  );
+  const organizationId = details["organization_id"];
+  const teamId = details["team_id"];
+  if (
+    typeof details["target_principal_id"] !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/.test(details["target_principal_id"]) ||
+    (details["target_role"] !== undefined && !SYNC_ROLES.has(details["target_role"] as string)) ||
+    (organizationId === undefined) !== (teamId === undefined) ||
+    (organizationId !== undefined &&
+      (typeof organizationId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(organizationId))) ||
+    (teamId !== undefined &&
+      (typeof teamId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(teamId)))
+  ) {
+    throw invalidHostResult();
+  }
+}
+
+function isSyncCapabilities(value: JsonValue | undefined): value is JsonValue[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 32 &&
+    new Set(value).size === value.length &&
+    value.every(
+      (item) => typeof item === "string" && /^[a-z][a-z0-9._-]{0,63}$/.test(item),
+    )
+  );
+}
+
+function validateKnowledgePublicationResult(
+  value: JsonValue,
+  expectedCollectionId: string,
+): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["collection", "commit", "ref", "bundle_root"]);
+  const collection = validateIdentifiedResource(
+    result["collection"] as JsonValue,
+    "collection_id",
+    KNOWLEDGE_COLLECTION_ID_PATTERN,
+  );
+  const commit = requireObject(result["commit"]);
+  const ref = requireObject(result["ref"]);
+  const commitId = commit["commit_id"];
+  if (
+    collection["collection_id"] !== expectedCollectionId ||
+    typeof commitId !== "string" ||
+    !COMMIT_ID_PATTERN.test(commitId) ||
+    !isObject(commit["manifest"]) ||
+    typeof ref["name"] !== "string" ||
+    !REF_NAME_PATTERN.test(ref["name"]) ||
+    ref["commit_id"] !== commitId ||
+    !Number.isSafeInteger(ref["revision"])
+  ) {
+    throw invalidHostResult();
+  }
+  const publication = requireObject(collection["publication"]);
+  if (publication["state"] !== "published" || publication["commit_id"] !== commitId) {
+    throw invalidHostResult();
+  }
+  validateObjectRef(result["bundle_root"] as JsonValue);
+  return result;
+}
+
+function validateKnowledgeExportResult(
+  value: JsonValue,
+  expectedCollectionId: string,
+): JsonObject {
+  const result = requireObject(value);
+  assertKeys(result, ["collection_id", "objects"]);
+  const objects = result["objects"];
+  if (
+    result["collection_id"] !== expectedCollectionId ||
+    !Array.isArray(objects) ||
+    objects.length === 0 ||
+    objects.length > 2
+  ) {
+    throw invalidHostResult();
+  }
+  const mediaTypes = new Set<string>();
+  for (const object of objects) {
+    const ref = validateObjectRef(object as JsonValue);
+    const mediaType = ref["media_type"];
+    if (
+      (mediaType !== "text/markdown" && mediaType !== "text/html") ||
+      mediaTypes.has(mediaType)
+    ) {
+      throw invalidHostResult();
+    }
+    mediaTypes.add(mediaType);
+  }
+  return result;
 }
 
 function validateSnapshotPage(value: JsonValue): JsonObject {

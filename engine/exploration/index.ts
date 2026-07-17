@@ -21,6 +21,7 @@ export {
   type ExecutedExplorationStep,
   type ExplorationCapturePort,
   type ExplorationEngineDependencies,
+  type ExplorationRecoveryEvent,
   type ExplorationReport,
   type ExploreCommand,
   type TagGraphVersionCommand,

@@ -52,11 +52,24 @@ final class DebugRuntimeConnectionController {
                 windowProvider: windowProvider,
                 scenarioIDProvider: scenarioIDProvider
             )
-            let configuration = try LoopbackRuntimeClientConfiguration(
-                endpoint: LoopbackRuntimeEndpoint(host: host, port: port),
-                authorizationToken: Data(token.utf8),
-                buildConfiguration: .debug
-            )
+            let configuration: LoopbackRuntimeClientConfiguration
+            if let certificateSHA256 = environment["VISTREA_RUNTIME_TLS_CERT_SHA256"] {
+                configuration = try LoopbackRuntimeClientConfiguration(
+                    endpoint: TlsRuntimeEndpoint(
+                        host: host,
+                        port: port,
+                        pinnedCertificateSHA256Hex: certificateSHA256
+                    ),
+                    authorizationToken: Data(token.utf8),
+                    buildConfiguration: .debug
+                )
+            } else {
+                configuration = try LoopbackRuntimeClientConfiguration(
+                    endpoint: LoopbackRuntimeEndpoint(host: host, port: port),
+                    authorizationToken: Data(token.utf8),
+                    buildConfiguration: .debug
+                )
+            }
             let eventRecorder = try RuntimeEventRecorder()
             Self.sharedEventRecorder = eventRecorder
             client = LoopbackRuntimeClient(

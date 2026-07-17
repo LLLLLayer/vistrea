@@ -19,6 +19,8 @@ import { createRepositoryProtocolValidator } from "../../data/memory/index.js";
 
 const repositoryRoot = process.cwd();
 const optInEnvironment = "VISTREA_RUN_ANDROID_REAL_VERTICAL";
+const physicalOptInEnvironment = "VISTREA_RUN_ANDROID_PHYSICAL_VERTICAL";
+const physicalSerialEnvironment = "VISTREA_ANDROID_DEVICE_SERIAL";
 const scenarioId = "demo.navigation.basic";
 const scenarioProfile = "baseline";
 const requiredStableId = "demo.home.open_catalog";
@@ -70,12 +72,16 @@ interface SnapshotEvidence {
 interface AcceptanceResources {
   emulator: ChildProcess | undefined;
   emulatorSerial: string | undefined;
+  physicalDevice: boolean;
+  appInstalledByTest: boolean;
   reversePort: number | undefined;
   host: LocalHostHandle | undefined;
 }
 
-const selectedAvd = discoverApi36Avd();
-const skipReason = realVerticalSkipReason(selectedAvd);
+const physicalDevice = process.env[physicalOptInEnvironment] === "1";
+const physicalSerial = physicalDevice ? process.env[physicalSerialEnvironment] : undefined;
+const selectedAvd = physicalDevice ? undefined : discoverApi36Avd();
+const skipReason = realVerticalSkipReason(selectedAvd, physicalDevice, physicalSerial);
 
 test(
   "the real Android Demo persists one Snapshot for Studio, CLI, and Host reopen",
@@ -84,13 +90,14 @@ test(
     ...(skipReason === undefined ? {} : { skip: skipReason }),
   },
   async (t) => {
-    assert.ok(selectedAvd !== undefined);
     const testRoot = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-android-vertical-"));
     const workspaceRoot = path.join(testRoot, "workspace");
     const studioScratch = path.join(testRoot, "studio-build");
     const resources: AcceptanceResources = {
       emulator: undefined,
       emulatorSerial: undefined,
+      physicalDevice,
+      appInstalledByTest: false,
       reversePort: undefined,
       host: undefined,
     };
@@ -101,33 +108,38 @@ test(
     });
 
     const validator = await createRepositoryProtocolValidator({ repositoryRoot });
-    const emulatorPort = await findAvailableEmulatorPort();
-    resources.emulatorSerial = `emulator-${emulatorPort}`;
-    resources.emulator = spawn(
-      emulatorPath,
-      [
-        "-avd",
-        selectedAvd.name,
-        "-port",
-        String(emulatorPort),
-        "-read-only",
-        "-no-snapshot",
-        "-no-window",
-        "-no-audio",
-        "-no-boot-anim",
-        "-no-metrics",
-        "-netdelay",
-        "none",
-        "-netspeed",
-        "full",
-      ],
-      {
-        cwd: repositoryRoot,
-        env: cleanEnvironment({ ANDROID_HOME: androidHome }),
-        stdio: "ignore",
-      },
-    );
-    await waitForSpawn(resources.emulator, "The dedicated Android emulator could not start.");
+    if (resources.physicalDevice) {
+      resources.emulatorSerial = requireResource(physicalSerial, "Android physical-device serial");
+    } else {
+      assert.ok(selectedAvd !== undefined);
+      const emulatorPort = await findAvailableEmulatorPort();
+      resources.emulatorSerial = `emulator-${emulatorPort}`;
+      resources.emulator = spawn(
+        emulatorPath,
+        [
+          "-avd",
+          selectedAvd.name,
+          "-port",
+          String(emulatorPort),
+          "-read-only",
+          "-no-snapshot",
+          "-no-window",
+          "-no-audio",
+          "-no-boot-anim",
+          "-no-metrics",
+          "-netdelay",
+          "none",
+          "-netspeed",
+          "full",
+        ],
+        {
+          cwd: repositoryRoot,
+          env: cleanEnvironment({ ANDROID_HOME: androidHome }),
+          stdio: "ignore",
+        },
+      );
+      await waitForSpawn(resources.emulator, "The dedicated Android emulator could not start.");
+    }
 
     const buildPromise = runCommand(gradleWrapper, ["--quiet", ":app:assembleDebug"], {
       cwd: demoRoot,
@@ -139,7 +151,7 @@ test(
     await Promise.all([buildPromise, bootPromise]);
     assert.equal((await fs.stat(debugApk)).isFile(), true);
 
-    const serial = requireResource(resources.emulatorSerial, "Android emulator serial");
+    const serial = requireResource(resources.emulatorSerial, "Android device serial");
     await runAdb(serial, ["shell", "wm", "dismiss-keyguard"], {
       allowFailure: true,
       label: "Android keyguard dismissal",
@@ -156,6 +168,7 @@ test(
       timeoutMilliseconds: 120_000,
       label: "Android Demo installation",
     });
+    resources.appInstalledByTest = true;
     await runAdb(serial, ["logcat", "-c"], { label: "Android log reset" });
 
     resources.host = await startLocalHost({
@@ -253,6 +266,12 @@ test(
       knownSecrets,
     );
     validatePngObject(screenshotBytes, evidence);
+    const observedState = await recordEntryScreenState(
+      resources.host,
+      evidence.snapshotId,
+      knownSecrets,
+    );
+    assert.equal(typeof observedState["observation_id"], "string");
 
     await runCommand(
       "swift",
@@ -312,6 +331,12 @@ test(
     assert.equal(studioEvidence["screenshot_hash"], evidence.screenshotHash);
     assert.equal(studioEvidence["screenshot_byte_count"], evidence.screenshotByteSize);
     assert.equal(studioEvidence["runtime_connected"], true);
+    assert.equal(studioEvidence["core_workflow_completed"], true);
+    assert.equal(
+      requireSafeInteger(studioEvidence["canvas_state_count"], "Studio Canvas state count") >= 1,
+      true,
+    );
+    assert.equal(typeof studioEvidence["selected_screen_state_id"], "string");
 
     const cliResult = await runCommand(
       process.execPath,
@@ -394,13 +419,15 @@ test(
     t.diagnostic(
       JSON.stringify({
         scenario_id: scenarioId,
-        emulator_target: selectedAvd.target,
+        device_kind: resources.physicalDevice ? "physical" : "emulator",
+        device_target: resources.physicalDevice ? serial : selectedAvd?.target,
         snapshot_id: evidence.snapshotId,
         node_count: evidence.nodeCount,
         required_stable_id: requiredStableId,
         screenshot_hash: evidence.screenshotHash,
         screenshot_byte_size: evidence.screenshotByteSize,
         canonical_snapshot: "passed",
+        canvas_entry_state: "passed",
         one_shot_token: "consumed",
         studio_production_probe: "passed",
         cli_identical_snapshot: "passed",
@@ -413,23 +440,47 @@ test(
   },
 );
 
-function realVerticalSkipReason(avd: AndroidAvd | undefined): string | undefined {
-  if (process.env[optInEnvironment] !== "1") {
-    return `Set ${optInEnvironment}=1 or use the dedicated package script to run this acceptance.`;
+function realVerticalSkipReason(
+  avd: AndroidAvd | undefined,
+  isPhysicalDevice: boolean,
+  serial: string | undefined,
+): string | undefined {
+  if (process.env[optInEnvironment] !== "1" && !isPhysicalDevice) {
+    return `Set ${optInEnvironment}=1 or use a dedicated package script to run this acceptance.`;
   }
   if (process.platform !== "darwin") {
     return "The complete Android vertical acceptance currently requires macOS for the Studio probe.";
   }
   if (
     !existsSync(adbPath) ||
-    !existsSync(emulatorPath) ||
     !existsSync(gradleWrapper) ||
     !existsSync(tokenInstaller) ||
     spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0
   ) {
-    return "The Android SDK, emulator, Gradle wrapper, token helper, or Java toolchain is unavailable.";
+    return "The Android SDK, Gradle wrapper, token helper, or Java toolchain is unavailable.";
   }
-  if (avd === undefined) {
+  if (isPhysicalDevice) {
+    if (serial === undefined || !/^[A-Za-z0-9._:-]+$/u.test(serial)) {
+      return `Set ${physicalSerialEnvironment} to one explicit physical-device serial.`;
+    }
+    const state = spawnSync(adbPath, ["-s", serial, "get-state"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const emulatorFlag = spawnSync(
+      adbPath,
+      ["-s", serial, "shell", "getprop", "ro.kernel.qemu"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    if (state.status !== 0 || state.stdout.trim() !== "device") {
+      return `Android device ${serial} is not connected and authorized.`;
+    }
+    if (emulatorFlag.status !== 0 || emulatorFlag.stdout.trim() === "1") {
+      return `${physicalSerialEnvironment} must select physical hardware, not an emulator.`;
+    }
+  } else if (!existsSync(emulatorPath)) {
+    return "The Android emulator tool is unavailable.";
+  } else if (avd === undefined) {
     return "No installed Android API 36 or newer AVD is available for the dedicated acceptance emulator.";
   }
   const swift = spawnSync("xcrun", ["--find", "swift"], {
@@ -502,14 +553,16 @@ async function canBind(port: number): Promise<boolean> {
 }
 
 async function waitForAndroidBoot(resources: AcceptanceResources): Promise<void> {
-  const serial = requireResource(resources.emulatorSerial, "Android emulator serial");
+  const serial = requireResource(resources.emulatorSerial, "Android device serial");
   await runAdb(serial, ["wait-for-device"], {
     timeoutMilliseconds: 180_000,
-    label: "dedicated Android emulator discovery",
+    label: resources.physicalDevice
+      ? "physical Android device discovery"
+      : "dedicated Android emulator discovery",
   });
   const deadline = Date.now() + 240_000;
   while (Date.now() < deadline) {
-    if (resources.emulator?.exitCode !== null) {
+    if (!resources.physicalDevice && resources.emulator?.exitCode !== null) {
       throw new Error("The dedicated Android emulator stopped before boot completed.");
     }
     const completed = await runAdb(serial, ["shell", "getprop", "sys.boot_completed"], {
@@ -543,6 +596,22 @@ async function captureSnapshotThroughApi(
     body: "{}",
   });
   return await readJsonResponse(response, 201, "Snapshot capture", secrets);
+}
+
+async function recordEntryScreenState(
+  host: LocalHostHandle,
+  snapshotId: string,
+  secrets: readonly string[],
+): Promise<Record<string, unknown>> {
+  const response = await fetch(`${host.api.baseUrl}/v1/screen-graph/state-observations`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${host.api.bearerToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ snapshot_id: snapshotId, title: "Home", entry: true }),
+  });
+  return await readJsonResponse(response, 201, "Screen State observation", secrets);
 }
 
 async function getSnapshotThroughApi(
@@ -700,15 +769,26 @@ async function stopDedicatedEmulator(
       secrets,
       label: "Android Demo stop",
     });
-    await runAdb(serial, ["emu", "kill"], {
-      allowFailure: true,
-      secrets,
-      label: "dedicated Android emulator shutdown",
-    });
+    if (resources.physicalDevice) {
+      if (resources.appInstalledByTest) {
+        await runAdb(serial, ["uninstall", debugPackage], {
+          allowFailure: true,
+          secrets,
+          label: "physical Android Demo cleanup",
+        });
+      }
+    } else {
+      await runAdb(serial, ["emu", "kill"], {
+        allowFailure: true,
+        secrets,
+        label: "dedicated Android emulator shutdown",
+      });
+    }
   }
   await stopChild(resources.emulator);
   resources.emulator = undefined;
   resources.emulatorSerial = undefined;
+  resources.appInstalledByTest = false;
   resources.reversePort = undefined;
 }
 

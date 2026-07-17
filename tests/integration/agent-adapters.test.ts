@@ -116,8 +116,7 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   );
   const maskedDesign = await runCli(["design", "list-references"], focusedEnvironment);
   assert.equal(maskedDesign.exitCode, 6);
-  // Fail-closed extends to command words the toolset map has never heard of:
-  // a future command group must not bypass the focus the day it is added.
+  // Knowledge Collection commands are masked with the rest of the knowledge surface.
   const maskedUnknown = await runCli(["collection", "publish"], focusedEnvironment);
   assert.equal(maskedUnknown.exitCode, 6);
   assert.equal(parseCliEnvelope(maskedUnknown.stdout).error?.["code"], "unsupported");
@@ -130,7 +129,9 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   ] as readonly string[];
   assert.equal(
     focusedCommands.some((line) =>
-      ["design", "issue", "tuning", "validate", "wiki"].includes(line.split(" ")[0] as string),
+      ["design", "issue", "tuning", "validate", "wiki", "collection"].includes(
+        line.split(" ")[0] as string,
+      ),
     ),
     false,
   );
@@ -261,6 +262,24 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     tree_id: capturedTree["tree_id"],
     node_id: capturedNode["node_id"],
   };
+  const baselinePromote = await runCli(
+    [
+      "design",
+      "promote-baseline",
+      "--json",
+      JSON.stringify({
+        snapshot_id: capturedSnapshot["snapshot_id"],
+        name: "Approved adapter build",
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(baselinePromote.exitCode, 0, baselinePromote.stdout);
+  assert.equal(
+    (parseCliEnvelope(baselinePromote.stdout).data as JsonObject)["kind"],
+    "approved_build",
+  );
   const mapCreate = await runCli(
     [
       "design",
@@ -290,22 +309,17 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   );
   assert.equal(comparisonRun.exitCode, 0, comparisonRun.stdout);
   const comparisonEnvelope = parseCliEnvelope(comparisonRun.stdout).data as JsonObject;
-  assert.equal((comparisonEnvelope["differences"] as readonly JsonObject[]).length, 1);
+  const comparisonDifferences = comparisonEnvelope["differences"] as readonly JsonObject[];
+  assert.equal(comparisonDifferences.length, 1);
 
   const issueCreate = await runCli(
     [
       "issue",
-      "create",
+      "create-from-difference",
       "--json",
       JSON.stringify({
-        design_reference_id: referenceId,
         comparison_id: comparisonEnvelope["comparison_id"],
-        runtime_target: runtimeTarget,
-        title: "Adapter-detected frame drift",
-        category: "frame",
-        severity: "minor",
-        expected: { kind: "number", value: 12, unit: "logical_point", extensions: {} },
-        actual: { kind: "number", value: 0, unit: "logical_point", extensions: {} },
+        difference_id: comparisonDifferences[0]?.["difference_id"],
         created_by: JSON.parse(actorJson),
       }),
     ],
@@ -387,6 +401,16 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   );
   assert.equal(patchRead.exitCode, 0, patchRead.stdout);
   assert.deepEqual(parseCliEnvelope(patchRead.stdout).data, patchEnvelope);
+  const sourceSuggestions = await runCli(
+    ["tuning", "source-suggestions", patchEnvelope["patch_id"] as string],
+    environment,
+  );
+  assert.equal(sourceSuggestions.exitCode, 0, sourceSuggestions.stdout);
+  assert.equal(
+    ((parseCliEnvelope(sourceSuggestions.stdout).data as JsonObject)["suggestions"] as readonly unknown[])
+      .length,
+    1,
+  );
   const applyWithoutRuntime = await runCli(
     ["tuning", "apply", "--patch", patchEnvelope["patch_id"] as string],
     environment,
@@ -434,21 +458,57 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
       runtimeContext["project_id"] as string,
       "--application",
       runtimeContext["application_id"] as string,
+      "--build",
+      runtimeContext["build_id"] as string,
+      "--version",
+      runtimeContext["application_version"] as string,
     ],
     environment,
   );
   assert.equal(cliGraph.exitCode, 0, cliGraph.stdout);
   const graphDocument = parseCliEnvelope(cliGraph.stdout).data as JsonObject;
   assert.equal((graphDocument["states"] as readonly JsonObject[]).length, 1);
+  assert.deepEqual((graphDocument["extensions"] as JsonObject)["vistrea.build_scope"], {
+    build_id: runtimeContext["build_id"],
+    application_version: runtimeContext["application_version"],
+    screen_state_ids: [observedScreenState["screen_state_id"]],
+    transition_ids: [],
+  });
 
   const cliGraphState = await runCli(
-    ["graph", "get-state", observedScreenState["screen_state_id"] as string],
+    [
+      "graph",
+      "get-state",
+      observedScreenState["screen_state_id"] as string,
+      "--build",
+      runtimeContext["build_id"] as string,
+      "--version",
+      runtimeContext["application_version"] as string,
+    ],
     environment,
   );
   assert.equal(cliGraphState.exitCode, 0, cliGraphState.stdout);
   assert.equal(
     (parseCliEnvelope(cliGraphState.stdout).data as JsonObject)["revision"],
     2,
+  );
+
+  const stateIssueList = await runCli(
+    [
+      "issue",
+      "list",
+      "--states",
+      "resolved",
+      "--screen-state",
+      observedScreenState["screen_state_id"] as string,
+    ],
+    environment,
+  );
+  assert.equal(stateIssueList.exitCode, 0, stateIssueList.stdout);
+  assert.deepEqual(
+    ((parseCliEnvelope(stateIssueList.stdout).data as JsonObject)["items"] as readonly JsonObject[])
+      .map((item) => item["issue_id"]),
+    [issueId],
   );
 
   // Knowledge annotations round-trip through the CLI: an agent labels and
@@ -548,20 +608,22 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
   assert.equal(noteCreate.exitCode, 0, noteCreate.stdout);
   const note = parseCliEnvelope(noteCreate.stdout).data as JsonObject;
 
-  // Long-form documents (well past the 64 KiB adapter envelope) persist.
+  // Long-form documents (well past Linux's per-argument limit) use file-backed
+  // JSON input and persist without weakening the strict one-envelope output.
   const longMarkdown = `# Long document\n\n${"vistrea knowledge line\n".repeat(6000)}`;
+  const longCommandPath = path.join(workspaceRoot, "long-wiki-command.json");
+  await fs.writeFile(
+    longCommandPath,
+    JSON.stringify({
+      kind: "concept",
+      title: "Long-form knowledge",
+      markdown: longMarkdown,
+      created_by: JSON.parse(actorJson),
+    }),
+    "utf8",
+  );
   const longCreate = await runCli(
-    [
-      "wiki",
-      "create",
-      "--json",
-      JSON.stringify({
-        kind: "concept",
-        title: "Long-form knowledge",
-        markdown: longMarkdown,
-        created_by: JSON.parse(actorJson),
-      }),
-    ],
+    ["wiki", "create", "--json-file", longCommandPath],
     environment,
   );
   assert.equal(longCreate.exitCode, 0, longCreate.stdout);
@@ -575,6 +637,15 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     "content"
   ] as JsonObject;
   assert.equal((longContent["text"] as string).length, longMarkdown.length);
+  const missingJsonFile = await runCli(
+    ["wiki", "create", "--json-file", path.join(workspaceRoot, "missing.json")],
+    environment,
+  );
+  assert.equal(missingJsonFile.exitCode, 2);
+  assert.equal(
+    parseCliEnvelope(missingJsonFile.stdout).error?.["message"],
+    "The JSON input file could not be read.",
+  );
   const wikiLink = await runCli(
     [
       "wiki",
@@ -609,6 +680,109 @@ test("the CLI preserves Host operation results, errors, and toolset focus", asyn
     ((parseCliEnvelope(relatedNodes.stdout).data as JsonObject)["items"] as readonly JsonObject[])
       .map((item) => item["wiki_node_id"]),
     [wikiNode["wiki_node_id"]],
+  );
+
+  // Knowledge Collections form an immutable Commit/Ref publication and
+  // expose both readable export formats through the same strict adapter.
+  const collectionCreate = await runCli(
+    [
+      "collection",
+      "create",
+      "--json",
+      JSON.stringify({
+        name: "Demo runtime knowledge",
+        node_ids: [wikiNode["wiki_node_id"]],
+        entry_node_ids: [wikiNode["wiki_node_id"]],
+        created_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(collectionCreate.exitCode, 0, collectionCreate.stdout);
+  const collection = parseCliEnvelope(collectionCreate.stdout).data as JsonObject;
+  const collectionId = collection["collection_id"] as string;
+  const collectionUpdate = await runCli(
+    [
+      "collection",
+      "update",
+      collectionId,
+      "--json",
+      JSON.stringify({
+        expected_revision: collection["revision"],
+        summary: "Published through the Coding Agent adapter.",
+        updated_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(collectionUpdate.exitCode, 0, collectionUpdate.stdout);
+  const revisedCollection = parseCliEnvelope(collectionUpdate.stdout).data as JsonObject;
+  const collectionGet = await runCli(["collection", "get", collectionId], environment);
+  assert.equal(collectionGet.exitCode, 0, collectionGet.stdout);
+  assert.deepEqual(parseCliEnvelope(collectionGet.stdout).data, revisedCollection);
+  const collectionList = await runCli(
+    ["collection", "list", "--text", "Demo runtime", "--states", "draft"],
+    environment,
+  );
+  assert.equal(collectionList.exitCode, 0, collectionList.stdout);
+  assert.deepEqual(
+    ((parseCliEnvelope(collectionList.stdout).data as JsonObject)["items"] as readonly JsonObject[])
+      .map((item) => item["collection_id"]),
+    [collectionId],
+  );
+
+  const publicationRef = "teams/design/agent-adapter";
+  const publicationSeed = workspace.beginUnitOfWork("write");
+  const publicationBase = publicationSeed.versions.createCommit({
+    protocol_version: { major: 1, minor: 0 },
+    parents: [],
+    created_at: "2026-07-14T08:00:00.000Z",
+    author: JSON.parse(actorJson),
+    message: "Create the agent-adapter publication line.",
+    roots: {},
+    object_hashes: [],
+    extensions: {},
+  } as never);
+  publicationSeed.versions.updateRef(publicationRef, publicationBase.commit_id, {
+    mode: "must_not_exist",
+  } as never);
+  publicationSeed.commit();
+  const collectionPublish = await runCli(
+    [
+      "collection",
+      "publish",
+      collectionId,
+      "--json",
+      JSON.stringify({
+        expected_revision: revisedCollection["revision"],
+        base_commit_id: publicationBase.commit_id,
+        target_ref_name: publicationRef,
+        ref_precondition: {
+          mode: "must_match",
+          expected_commit_id: publicationBase.commit_id,
+        },
+        published_by: JSON.parse(actorJson),
+      }),
+    ],
+    environment,
+  );
+  assert.equal(collectionPublish.exitCode, 0, collectionPublish.stdout);
+  const publishedCollection = parseCliEnvelope(collectionPublish.stdout).data as JsonObject;
+  const committed = publishedCollection["commit"] as JsonObject;
+  assert.equal(
+    (publishedCollection["collection"] as JsonObject)["publication"] !== undefined,
+    true,
+  );
+  assert.equal((publishedCollection["ref"] as JsonObject)["commit_id"], committed["commit_id"]);
+  const collectionExport = await runCli(
+    ["collection", "export", collectionId, "--formats", "markdown,html"],
+    environment,
+  );
+  assert.equal(collectionExport.exitCode, 0, collectionExport.stdout);
+  assert.deepEqual(
+    ((parseCliEnvelope(collectionExport.stdout).data as JsonObject)["objects"] as readonly JsonObject[])
+      .map((object) => object["media_type"]),
+    ["text/markdown", "text/html"],
   );
 
   // Validation: the captured fixture Snapshot passes the core rule set.

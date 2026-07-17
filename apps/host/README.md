@@ -30,14 +30,16 @@ The remaining implemented route families return canonical domain resources
 
 | Family | Routes |
 |---|---|
-| Design assets and references | `POST /v1/design-assets`, `POST /v1/design-references`, `GET /v1/design-references/<id>`, `POST /v1/design-mappings`, `POST /v1/design-comparisons`, `GET /v1/design-comparisons/<id>` |
-| Review issues | `POST /v1/review-issues`, `GET /v1/review-issues`, `GET /v1/review-issues/<id>`, `POST /v1/review-issues/<id>/transitions`, `POST /v1/review-issues/<id>/verifications` |
-| Protected tuning | `POST /v1/tuning-patches`, `GET /v1/tuning-patches/<id>`, `POST /v1/tuning-applications`, `GET /v1/tuning-applications/active`, `GET /v1/tuning-applications/<id>`, `POST /v1/tuning-applications/<id>/revert` |
+| Design assets and references | `POST /v1/design-assets`, `POST /v1/design-references`, `POST /v1/design-baselines`, `GET /v1/design-references/<id>`, `POST /v1/design-mappings`, `POST /v1/design-comparisons`, `GET /v1/design-comparisons/<id>` |
+| Review issues | `POST /v1/review-issues`, `POST /v1/design-comparisons/<id>/issues`, `GET /v1/review-issues` (`screen_state_id` optionally scopes runtime targets), `GET /v1/review-issues/<id>`, `POST /v1/review-issues/<id>/transitions`, `POST /v1/review-issues/<id>/verifications`, `POST /v1/review-issues/<id>/recapture-verifications` |
+| Protected tuning | `POST /v1/tuning-patches`, `GET /v1/tuning-patches/<id>`, `GET /v1/tuning-patches/<id>/source-suggestions`, `POST /v1/tuning-applications`, `GET /v1/tuning-applications/active`, `GET /v1/tuning-applications/<id>`, `POST /v1/tuning-applications/<id>/revert` |
 | Identity curation | `POST /v1/screen-graph/state-merges`, `POST /v1/screen-graph/state-splits` — manual merge/split with expected graph revision, recorded as StateIdentityDecisions |
 | Exploration Operations | `POST /v1/exploration/operations`, `GET /v1/exploration/operations/<id>`, `POST /v1/exploration/operations/<id>/cancel` — require a Host started with a configured automation provider, otherwise they fail closed as `unsupported` |
-| Screen graph | `POST /v1/screen-graph/state-observations`, `POST /v1/screen-graph/transition-observations`, `GET /v1/screen-graph`, `GET /v1/screen-graph/paths`, `GET /v1/screen-states/<id>` |
+| Screen graph | `POST /v1/screen-graph/state-observations`, `POST /v1/screen-graph/transition-observations`, `GET /v1/screen-graph` (optional paired `build_id` + `application_version` view), `GET /v1/screen-graph/paths`, `GET /v1/screen-states/<id>` (the same optional build scope selects its canonical Snapshot) |
 | Deep Wiki | `POST /v1/wiki/nodes`, `GET /v1/wiki/nodes`, `GET /v1/wiki/nodes/<id>`, `POST /v1/wiki/nodes/<id>/revisions`, `GET /v1/wiki/nodes/<id>/backlinks`, `POST /v1/wiki/links`, `POST /v1/wiki/links/<id>/unlink`, `GET /v1/wiki/related` |
+| Knowledge Collections | `POST /v1/knowledge-collections`, `GET /v1/knowledge-collections`, `GET /v1/knowledge-collections/<id>`, `POST /v1/knowledge-collections/<id>/revisions`, `POST /v1/knowledge-collections/<id>/publication`, `POST /v1/knowledge-collections/<id>/exports` |
 | Validation and build diff | `POST /v1/validation/snapshot-runs`, `POST /v1/validation/graph-runs`, `GET /v1/validation/runs/<id>`, `GET /v1/validation/findings`, `GET /v1/validation/findings/<id>`, `POST /v1/validation/findings/<id>/suppress`, `POST /v1/validation/build-diffs`, `GET /v1/validation/build-diffs/<id>` |
+| Workspace recovery points | `GET /v1/workspace/recovery-points`, `POST /v1/workspace/recovery-points`, `POST /v1/workspace/recovery-points/release` |
 | Portable exchange | `POST /v1/exchange/exports`, `POST /v1/exchange/imports` |
 
 `POST /v1/captures` accepts `{}` and applies this deterministic default Engine command:
@@ -59,6 +61,36 @@ unsupported field mask produces a sanitized capture failure while the
 authenticated Runtime session remains usable.
 
 Object reads support one RFC 9110-style `bytes` range, including bounded, open-ended, and suffix forms. Multiple or unsatisfiable ranges return HTTP `416` and `Content-Range: bytes */<size>`. Payload bytes remain the exact encoded bytes identified by the canonical `ObjectRef`; the HTTP adapter does not transparently decompress them.
+
+## Offline Workspace maintenance
+
+Destructive restore, garbage collection, interrupted-restore recovery, and
+stale-lock recovery are intentionally absent from the online Local API. The
+owning Host must be stopped before the composition root invokes the emitted
+one-shot runner:
+
+```bash
+node .build/typescript/apps/host/workspace-maintenance.js \
+  --workspace /absolute/path/to/workspace
+```
+
+The runner accepts exactly one UTF-8 JSON object on stdin, capped at 64 KiB.
+Duplicate or unknown keys, trailing values, non-canonical hashes, and unknown
+operations fail closed. It writes exactly one sanitized versioned JSON envelope
+to stdout and never writes Workspace paths, SQLite rows, or stack traces.
+
+| Operation | Required command fields | Safety rule |
+|---|---|---|
+| `restore` | `format_version: 1`, `operation`, `backup_hash` | The hash must resolve to a canonical verified Workspace backup whose complete reachable object closure is present. |
+| `collect_garbage` dry run | `format_version: 1`, `operation`, `dry_run: true`; optional `minimum_age_seconds` | Reports candidates, bytes, stale records, hashes, and a canonical `plan_digest`; deletes nothing. |
+| `collect_garbage` apply | `format_version: 1`, `operation`, `dry_run: false`, `expected_plan_digest`; optional matching `minimum_age_seconds` | Recomputes the exact plan and fails if its digest changed before deleting anything. |
+| `recover_interrupted_restore` | `format_version: 1`, `operation` | Uses the durable restore journal and preserved same-volume files; it never guesses recovery state. |
+| `recover_stale_lock` | `format_version: 1`, `operation` | Breaks only a proven stale owner and preserves recovery evidence. |
+
+Online `GET`/`POST /v1/workspace/recovery-points` and
+`POST /v1/workspace/recovery-points/release` remain available while the Host is
+running because they create or change retention roots without replacing live
+metadata. Releasing a policy does not immediately delete its backup.
 
 Errors use one sanitized shape:
 
@@ -95,6 +127,30 @@ await host.waitForRuntime();
 await host.close();
 ```
 
+For a physical-device Runtime, composition selects a separate exact-IP TLS
+listener while the Local API remains on `host` loopback:
+
+```ts
+const host = await startLocalHost({
+  workspaceRoot: "/absolute/path/to/workspace",
+  validator,
+  host: "127.0.0.1",
+  runtimeTls: {
+    host: "fd00::2",
+    certificate: certificatePEM,
+    privateKey: privateKeyPEM,
+  },
+});
+
+// host.runtime.transport === "tls"
+// Deliver host.runtime.certificateSha256 and authorizationToken only through
+// protected Debug/Internal launch configuration.
+```
+
+TLS requires one literal non-wildcard IP and TLS 1.3. The native Runtime pins
+the exact leaf certificate and then completes the normal HMAC handshake. This
+mode does not make the Host Local API remotely reachable.
+
 Before a Runtime is authenticated, `/v1/status` reports
 `runtime_connected: false` and capture returns a sanitized retryable
 `unavailable` response. Reconnecting a Runtime does not reopen storage or
@@ -109,10 +165,24 @@ node .build/typescript/apps/host/serve.js \
   --connection-file /private/tmp/vistrea-host.json
 ```
 
+An operator-managed physical-device listener adds all three TLS arguments as
+one unit; certificate and key paths must be absolute:
+
+```bash
+node .build/typescript/apps/host/serve.js \
+  --workspace /absolute/path/to/workspace \
+  --connection-file /private/tmp/vistrea-host.json \
+  --runtime-host fd00::2 \
+  --runtime-tls-cert /private/tmp/vistrea-runtime-cert.pem \
+  --runtime-tls-key /private/tmp/vistrea-runtime-key.pem
+```
+
 Stdout contains only the process ID, Workspace path, and descriptor path. A
 clean `SIGINT` or `SIGTERM` closes API, Runtime, and storage ownership in order,
 then removes the descriptor. The descriptor contains live secrets and must
-never be committed or shared.
+never be committed or shared. Its `runtime.transport` is `loopback` or `tls`;
+the TLS form also carries `runtime.certificate_sha256` for the authorized
+launcher.
 
 For focused adapter tests, `startHostLocalApi` can still be composed directly
 over explicit ports:
@@ -143,3 +213,5 @@ node .build/typescript/apps/host/serve.js --workspace <abs-path> \
 node .build/typescript/apps/host/serve.js --workspace <abs-path> \
   --automation wda --wda-url http://127.0.0.1:8100
 ```
+
+An exploration run recovers a lost Runtime capture with at most two relaunch-and-restore attempts by default. The caller may set `maximum_recovery_attempts` from zero through five and may provide `application_id` when the Snapshot's Runtime identity is not the platform launch identity. Relaunch and stable-ID path replay consume the same `maximum_actions` budget and are returned as explicit recovery evidence.

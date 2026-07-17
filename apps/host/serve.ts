@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -18,6 +19,11 @@ interface ServeArguments {
   readonly host: HostLocalApiBindAddress;
   readonly runtimePort?: number;
   readonly apiPort?: number;
+  readonly runtimeTls?: {
+    readonly host: string;
+    readonly certificatePath: string;
+    readonly privateKeyPath: string;
+  };
   readonly automation?: HostAutomationConfig;
 }
 
@@ -30,15 +36,25 @@ interface ConnectionDescriptor {
     readonly bearer_token: string;
   };
   readonly runtime: {
-    readonly host: HostLocalApiBindAddress;
+    readonly host: string;
     readonly port: number;
     readonly authorization_token: string;
+    readonly transport: "loopback" | "tls";
+    readonly certificate_sha256?: string;
   };
 }
 
 async function main(): Promise<void> {
   const argumentsValue = parseArguments(process.argv.slice(2));
   const validator = await createRepositoryProtocolValidator({ repositoryRoot: process.cwd() });
+  const runtimeTls =
+    argumentsValue.runtimeTls === undefined
+      ? undefined
+      : {
+          host: argumentsValue.runtimeTls.host,
+          certificate: await fs.readFile(argumentsValue.runtimeTls.certificatePath),
+          privateKey: await fs.readFile(argumentsValue.runtimeTls.privateKeyPath),
+        };
   const host = await startLocalHost({
     workspaceRoot: argumentsValue.workspaceRoot,
     validator,
@@ -47,6 +63,7 @@ async function main(): Promise<void> {
       ? {}
       : { runtimePort: argumentsValue.runtimePort }),
     ...(argumentsValue.apiPort === undefined ? {} : { apiPort: argumentsValue.apiPort }),
+    ...(runtimeTls === undefined ? {} : { runtimeTls }),
     ...(argumentsValue.automation === undefined ? {} : { automation: argumentsValue.automation }),
     applicationVersion: "0.0.0",
   });
@@ -65,6 +82,10 @@ async function main(): Promise<void> {
         host: host.runtime.host,
         port: host.runtime.port,
         authorization_token: host.runtime.authorizationToken,
+        transport: host.runtime.transport,
+        ...(host.runtime.transport === "tls"
+          ? { certificate_sha256: host.runtime.certificateSha256 }
+          : {}),
       },
     });
     descriptorWritten = true;
@@ -114,7 +135,7 @@ function parseArguments(source: readonly string[]): ServeArguments {
   if (source.includes("--help")) {
     process.stdout.write(
       "Usage: vistrea-host --workspace <path> [--connection-file <path>] [--host 127.0.0.1|::1] " +
-        "[--runtime-port <port>] [--api-port <port>] " +
+        "[--runtime-port <port>] [--runtime-host <ip> --runtime-tls-cert <pem> --runtime-tls-key <pem>] [--api-port <port>] " +
         "[--automation adb --automation-serial <serial> [--adb-path <path>] | --automation wda --wda-url <loopback-url>]\n",
     );
     process.exit(0);
@@ -126,6 +147,9 @@ function parseArguments(source: readonly string[]): ServeArguments {
     "--connection-file",
     "--host",
     "--runtime-port",
+    "--runtime-host",
+    "--runtime-tls-cert",
+    "--runtime-tls-key",
     "--api-port",
     "--automation",
     "--automation-serial",
@@ -158,6 +182,7 @@ function parseArguments(source: readonly string[]): ServeArguments {
   const connectionFile = path.resolve(
     values.get("--connection-file") ?? path.join(os.tmpdir(), `vistrea-host-${process.pid}.json`),
   );
+  const runtimeTls = runtimeTlsArguments(values);
   const automation = automationConfig(values);
   return {
     workspaceRoot: path.resolve(workspace),
@@ -165,7 +190,38 @@ function parseArguments(source: readonly string[]): ServeArguments {
     host,
     ...optionalPort(values.get("--runtime-port"), "runtimePort"),
     ...optionalPort(values.get("--api-port"), "apiPort"),
+    ...(runtimeTls === undefined ? {} : { runtimeTls }),
     ...(automation === undefined ? {} : { automation }),
+  };
+}
+
+function runtimeTlsArguments(
+  values: ReadonlyMap<string, string>,
+): ServeArguments["runtimeTls"] {
+  const runtimeHost = values.get("--runtime-host");
+  const certificate = values.get("--runtime-tls-cert");
+  const privateKey = values.get("--runtime-tls-key");
+  if (runtimeHost === undefined && certificate === undefined && privateKey === undefined) {
+    return undefined;
+  }
+  if (
+    runtimeHost === undefined ||
+    certificate === undefined ||
+    privateKey === undefined ||
+    net.isIP(runtimeHost) === 0 ||
+    runtimeHost === "0.0.0.0" ||
+    runtimeHost === "::" ||
+    !path.isAbsolute(certificate) ||
+    !path.isAbsolute(privateKey)
+  ) {
+    throw new UsageError(
+      "TLS Runtime access requires one explicit IP plus absolute certificate and key paths.",
+    );
+  }
+  return {
+    host: runtimeHost,
+    certificatePath: certificate,
+    privateKeyPath: privateKey,
   };
 }
 

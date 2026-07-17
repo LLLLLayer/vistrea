@@ -65,6 +65,14 @@ export interface FileObjectStoreOptions {
   readonly clock?: Clock;
 }
 
+export interface ObjectLifecycleInspection {
+  readonly object: ObjectRef;
+  /** Filesystem time of the immutable payload publication, in UTC. */
+  readonly payload_modified_at: string;
+  readonly retention_policies: readonly RetentionPolicy[];
+  readonly active_retention_policy_ids: readonly string[];
+}
+
 class SystemClock implements Clock {
   now(): string {
     return new Date().toISOString();
@@ -284,6 +292,25 @@ export class FileObjectStore implements ObjectStore {
     }
   }
 
+  async unpin(hash: string, policyId: string): Promise<void> {
+    assertHash(hash);
+    assertRequiredString(policyId, "policy_id", 256);
+    try {
+      await this.#withHashLock(hash, async () => {
+        const sidecar = await this.#readCompleteSidecar(hash);
+        const retentionPolicies = sidecar.retention_policies.filter(
+          (policy) => policy.policy_id !== policyId,
+        );
+        if (retentionPolicies.length === sidecar.retention_policies.length) {
+          return;
+        }
+        await this.#replaceSidecar({ ...sidecar, retention_policies: retentionPolicies });
+      });
+    } catch (error) {
+      throw mapFilesystemError(error, "release the object retention policy");
+    }
+  }
+
   async *inventory(query?: ObjectInventoryQuery): AsyncIterable<ObjectRef> {
     const normalized = normalizeInventoryQuery(query);
     const hashes = await this.#listSidecarHashes();
@@ -309,6 +336,40 @@ export class FileObjectStore implements ObjectStore {
         continue;
       }
       yield toObjectRef(sidecar.object_ref);
+    }
+  }
+
+  /**
+   * Concrete local-maintenance inspection. Product and Engine code continue to
+   * use the ObjectStore port; offline Workspace garbage collection uses this
+   * extra lifecycle evidence before it considers physical deletion.
+   */
+  async inspectLifecycle(hash: string): Promise<ObjectLifecycleInspection> {
+    assertHash(hash);
+    try {
+      const sidecar = await this.#readCompleteSidecar(hash);
+      const payloadPath = this.#payloadPath(hash);
+      const payloadStat = await fs.lstat(payloadPath);
+      if (!payloadStat.isFile() || payloadStat.isSymbolicLink()) {
+        throw new DataError("integrity_error", "The object payload is not a regular file.", {
+          details: { hash },
+        });
+      }
+      const now = parseTimestamp(this.#clock.now(), "clock.now()");
+      return {
+        object: toObjectRef(sidecar.object_ref),
+        payload_modified_at: payloadStat.mtime.toISOString(),
+        retention_policies: sidecar.retention_policies.map((policy) => ({ ...policy })),
+        active_retention_policy_ids: sidecar.retention_policies
+          .filter(
+            (policy) =>
+              policy.retain_until === undefined ||
+              parseTimestamp(policy.retain_until, "retain_until") > now,
+          )
+          .map((policy) => policy.policy_id),
+      };
+    } catch (error) {
+      throw mapFilesystemError(error, "inspect the object lifecycle");
     }
   }
 

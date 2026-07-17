@@ -17,7 +17,12 @@ import {
   createRepositoryProtocolValidator,
 } from "../../data/memory/index.js";
 import { FileObjectStore } from "../../data/objects/index.js";
-import { DesignReviewEngine, SecureUuidV7IdGenerator } from "../../engine/design/index.js";
+import {
+  DesignAcceptanceEngine,
+  DesignReviewEngine,
+  SecureUuidV7IdGenerator,
+} from "../../engine/design/index.js";
+import { ScreenGraphEngine } from "../../engine/exploration/index.js";
 
 const repositoryRoot = process.cwd();
 const validatorPromise = createRepositoryProtocolValidator({ repositoryRoot });
@@ -158,6 +163,24 @@ test("design comparison locates nodes by stable ID and reports frame deviations"
     comparison,
   );
 
+  const issue = context.engine.createReviewIssueFromDifference({
+    comparison_id: String(comparison["comparison_id"]),
+    difference_id: String(difference["difference_id"]),
+    created_by: DESIGNER,
+  });
+  assert.equal(issue["comparison_id"], comparison["comparison_id"]);
+  assert.equal(issue["mapping_id"], misaligned.mapping_id);
+  assert.deepEqual(issue["expected"], difference["expected"]);
+  assert.deepEqual(issue["actual"], difference["actual"]);
+  assert.throws(
+    () => context.engine.createReviewIssueFromDifference({
+      comparison_id: String(comparison["comparison_id"]),
+      difference_id: String(difference["difference_id"]),
+      created_by: DESIGNER,
+    }),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+
   await assert.rejects(
     context.engine.runDesignComparison({
       design_reference_id: referenceId,
@@ -193,6 +216,25 @@ test("the Review Issue lifecycle enforces legal transitions and atomic verificat
   });
   assert.equal(issue.state, "open");
   assert.equal(issue.revision, 1);
+
+  const graph = new ScreenGraphEngine({
+    workspace: context.workspace,
+    validator,
+    ids: new SequenceIdGenerator(500),
+  });
+  const observed = graph.recordStateObservation({ snapshot_id: snapshotId });
+  assert.deepEqual(
+    context.engine
+      .listReviewIssues({ screen_state_id: observed.screen_state.screen_state_id })
+      .items.map((item) => item.issue_id),
+    [issue.issue_id],
+  );
+  assert.deepEqual(
+    context.engine.listReviewIssues({
+      screen_state_id: "screenstate_019f0000-0000-7000-8000-00000000dead",
+    }).items,
+    [],
+  );
 
   // Illegal transitions and premature verification fail closed.
   assert.throws(
@@ -326,7 +368,7 @@ test("secure identifier generation mints canonical typed UUIDv7 values", () => {
 
 import { crc32, deflateSync } from "node:zlib";
 
-import { decodePng } from "../../engine/design/index.js";
+import { comparePixelRegions, decodePng } from "../../engine/design/index.js";
 
 function pngChunk(type: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
@@ -384,7 +426,7 @@ function solidImage(
   return pixels;
 }
 
-test("pixel comparison reports mean-color deviations against the design asset", async (t) => {
+test("pixel comparison reports real per-pixel deviations against the design asset", async (t) => {
   const validator = await validatorPromise;
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "vistrea-design-pixel-"));
   t.after(async () => fs.rm(directory, { recursive: true, force: true }));
@@ -486,8 +528,80 @@ test("pixel comparison reports mean-color deviations against the design asset", 
   assert.equal(expectedColor["green"], 0);
   assert.equal(actualColor["red"], 0);
   assert.equal(actualColor["green"], 1);
+  const metrics = (difference["extensions"] as JsonObject)["vistrea.pixel"] as JsonObject;
+  assert.equal(metrics["comparison"], "normalized_nearest_neighbor");
+  assert.equal(metrics["changed_pixel_ratio"], 1);
+  assert.equal(metrics["max_channel_delta"], 1);
   const comparisonValidator = await validatorPromise;
   comparisonValidator.assert(PROTOCOL_SCHEMA_IDS.designComparison, comparison);
+
+  const baseline = await engine.promoteSnapshotBaseline({
+    snapshot_id: snapshot.snapshot_id,
+    name: "Approved pixel build",
+    created_by: DESIGNER,
+  });
+  assert.equal(baseline["kind"], "approved_build");
+  assert.deepEqual(baseline["source"], {
+    kind: "runtime_snapshot",
+    id: snapshot.snapshot_id,
+    version: "build_019f0000-0000-7000-8000-000000000001",
+  });
+  assert.equal(
+    ((baseline["artifact"] as JsonObject)["object"] as JsonObject)["hash"],
+    screenshotRef.hash,
+  );
+
+  const pixelIssue = engine.createReviewIssueFromDifference({
+    comparison_id: String(comparison["comparison_id"]),
+    difference_id: String(difference["difference_id"]),
+    created_by: DESIGNER,
+  });
+  const readyIssue = engine.updateReviewIssue({
+    issue_id: pixelIssue.issue_id,
+    expected_revision: pixelIssue.revision,
+    to_state: "ready_for_verification",
+    changed_by: DEVELOPER,
+  });
+  const sameBuildAcceptance = new DesignAcceptanceEngine({
+    reviews: engine,
+    capture: { execute: async () => snapshot },
+  });
+  await assert.rejects(
+    sameBuildAcceptance.recaptureAndVerifyIssue({
+      issue_id: readyIssue.issue_id,
+      expected_revision: readyIssue.revision,
+      verified_by: DESIGNER,
+    }),
+    (error: unknown) => isDataError(error, "conflict"),
+  );
+  assert.equal(engine.getReviewIssue(readyIssue.issue_id).state, "ready_for_verification");
+  const recapturedSource = structuredClone(source) as Record<string, unknown>;
+  recapturedSource["snapshot_id"] = "snapshot_019f0000-0000-7000-8000-00000000beef";
+  (recapturedSource["runtime_context"] as Record<string, unknown>)["build_id"] =
+    "build_019f0000-0000-7000-8000-000000000002";
+  (recapturedSource["screenshot"] as Record<string, unknown>)["object"] = designRef;
+  validator.assert(PROTOCOL_SCHEMA_IDS.runtimeSnapshot, recapturedSource);
+  const recaptured = recapturedSource as unknown as RuntimeSnapshot;
+  const acceptance = new DesignAcceptanceEngine({
+    reviews: engine,
+    capture: {
+      execute: async () => {
+        const unit = workspace.beginUnitOfWork("write");
+        unit.snapshots.put(recaptured, [designRef]);
+        unit.commit();
+        return recaptured;
+      },
+    },
+  });
+  const accepted = await acceptance.recaptureAndVerifyIssue({
+    issue_id: readyIssue.issue_id,
+    expected_revision: readyIssue.revision,
+    verified_by: DESIGNER,
+  });
+  assert.equal(accepted.comparison["quality"], "complete");
+  assert.deepEqual(accepted.comparison["differences"], []);
+  assert.equal(accepted.verification["result"], "passed");
+  assert.equal(accepted.issue.state, "resolved");
 
   // Pixel comparison without screenshot evidence degrades honestly.
   const context = await engineContext(t);
@@ -513,6 +627,29 @@ test("pixel comparison reports mean-color deviations against the design asset", 
   const pixelNote = (degraded["extensions"] as JsonObject)["vistrea.pixel"] as JsonObject;
   assert.equal(pixelNote["status"], "unavailable");
   assert.match(String(pixelNote["reason"]), /screenshot/);
+});
+
+test("pixel comparison detects a localized regression even when mean colors match", () => {
+  const expected = {
+    width: 2,
+    height: 1,
+    pixels: Uint8Array.from([255, 0, 0, 255, 0, 255, 0, 255]),
+  };
+  const actual = {
+    width: 2,
+    height: 1,
+    pixels: Uint8Array.from([0, 255, 0, 255, 255, 0, 0, 255]),
+  };
+  const difference = comparePixelRegions(
+    expected,
+    { x: 0, y: 0, width: 2, height: 1 },
+    actual,
+    { x: 0, y: 0, width: 2, height: 1 },
+  );
+  assert.ok(difference !== undefined);
+  assert.deepEqual(difference.expected, difference.actual);
+  assert.equal(difference.changed_pixel_ratio, 1);
+  assert.ok(difference.mean_channel_delta > 0.6);
 });
 
 test("the PNG decoder reconstructs every scanline filter and fails closed", () => {

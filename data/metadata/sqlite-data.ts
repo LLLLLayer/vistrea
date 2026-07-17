@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import fs from "node:fs/promises";
 
 import { DataError } from "../api/errors.js";
 import {
@@ -39,7 +40,7 @@ import type {
   WorkspaceDataSource,
   WorkspaceHealth,
 } from "../api/ports.js";
-import { createEmptyDataState } from "../internal/state.js";
+import { createEmptyDataState, type DataState } from "../internal/state.js";
 import {
   cloneFrozen,
   cloneValue,
@@ -58,6 +59,7 @@ import {
   type AppliedMigrationResult,
   type MigrationAuthorization,
   type SQLiteMigration,
+  verifySQLiteMetadataSchema,
 } from "./migrations.js";
 import {
   deterministicJson,
@@ -110,6 +112,78 @@ export interface SQLiteDataStoreOptions {
   readonly seed?: SQLiteDataSeed;
 }
 
+export interface SQLiteMetadataInspection {
+  readonly schemaVersion: number;
+  readonly generation: number;
+}
+
+export interface SQLiteBackupResult extends SQLiteMetadataInspection {
+  readonly databasePath: string;
+  readonly byteSize: number;
+}
+
+export interface SQLiteMaintenanceSnapshot {
+  readonly generation: number;
+  readonly registeredObjects: ReadonlyMap<string, ObjectRef>;
+  readonly reachableObjectHashes: ReadonlySet<string>;
+}
+
+export interface SQLiteMetadataMaintenanceInspection
+  extends SQLiteMetadataInspection,
+    SQLiteMaintenanceSnapshot {}
+
+export interface InspectSQLiteMetadataFileOptions {
+  readonly databasePath: string;
+  readonly validator: ProtocolValidator;
+  readonly migrations?: readonly SQLiteMigration[];
+  readonly migrationsDirectory?: string;
+}
+
+/** Opens and semantically verifies one metadata file without mutating it. */
+export function inspectSQLiteMetadataFile(
+  options: InspectSQLiteMetadataFileOptions,
+): SQLiteMetadataInspection {
+  const inspection = inspectSQLiteMetadataForMaintenance(options);
+  return {
+    schemaVersion: inspection.schemaVersion,
+    generation: inspection.generation,
+  };
+}
+
+/**
+ * Opens and verifies one metadata file while also deriving its complete object
+ * catalog and reachable object closure. Local Workspace backup, restore, and
+ * garbage collection share this exact reachability implementation.
+ */
+export function inspectSQLiteMetadataForMaintenance(
+  options: InspectSQLiteMetadataFileOptions,
+): SQLiteMetadataMaintenanceInspection {
+  const migrations =
+    options.migrations ?? discoverSQLiteMigrations(options.migrationsDirectory);
+  let database: Database.Database | undefined;
+  try {
+    database = new Database(options.databasePath, {
+      readonly: true,
+      fileMustExist: true,
+      timeout: 5_000,
+    });
+    assertSQLiteFileIdentity(database);
+    database.pragma("foreign_keys = ON");
+    database.pragma("trusted_schema = OFF");
+    database.pragma("busy_timeout = 5000");
+    const schema = verifySQLiteMetadataSchema(database, migrations);
+    const maintenance = readSQLiteMaintenanceSnapshot(database, options.validator);
+    return {
+      schemaVersion: schema.schemaVersion,
+      ...maintenance,
+    };
+  } catch (error) {
+    throw mapSQLiteError(error, "verify the SQLite metadata file");
+  } finally {
+    database?.close();
+  }
+}
+
 export class SQLiteDataStore implements WorkspaceDataSource {
   readonly clock: Clock;
   readonly databasePath: string;
@@ -117,6 +191,7 @@ export class SQLiteDataStore implements WorkspaceDataSource {
   readonly #ids: IdGenerator;
   readonly #validator: ProtocolValidator;
   readonly #database: Database.Database;
+  readonly #migrations: readonly SQLiteMigration[];
   readonly #verifiedObjects = new Map<string, ObjectRef>();
   readonly #openUnits = new Set<string>();
   readonly #unitDatabases = new Map<string, Database.Database>();
@@ -138,6 +213,7 @@ export class SQLiteDataStore implements WorkspaceDataSource {
     this.#ids = options.ids ?? new SystemIdGenerator();
     const migrations =
       options.migrations ?? discoverSQLiteMigrations(options.migrationsDirectory);
+    this.#migrations = migrations;
     let database: Database.Database | undefined;
     try {
       database = new Database(this.databasePath, { timeout: 5_000 });
@@ -320,6 +396,96 @@ export class SQLiteDataStore implements WorkspaceDataSource {
     }
   }
 
+  /** Creates and independently verifies a WAL-aware SQLite backup. */
+  async createVerifiedBackup(destinationPath: string): Promise<SQLiteBackupResult> {
+    this.#assertMaintenanceIdle();
+    try {
+      try {
+        await fs.lstat(destinationPath);
+        throw new DataError("already_exists", "The SQLite backup destination already exists.", {
+          details: { destination_path: destinationPath },
+        });
+      } catch (error) {
+        if (filesystemCode(error) !== "ENOENT") {
+          throw error;
+        }
+      }
+      await this.#database.backup(destinationPath);
+      const stat = await fs.lstat(destinationPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new DataError("integrity_error", "The SQLite backup is not a regular file.");
+      }
+      const inspection = inspectSQLiteMetadataFile({
+        databasePath: destinationPath,
+        validator: this.#validator,
+        migrations: this.#migrations,
+      });
+      return {
+        databasePath: destinationPath,
+        byteSize: stat.size,
+        ...inspection,
+      };
+    } catch (error) {
+      throw mapSQLiteError(error, "create and verify the SQLite metadata backup");
+    }
+  }
+
+  /** Offline-maintenance view used by the local Workspace garbage collector. */
+  maintenanceSnapshot(): SQLiteMaintenanceSnapshot {
+    this.#assertMaintenanceIdle();
+    try {
+      this.#database.exec("BEGIN");
+      const snapshot = readSQLiteMaintenanceSnapshot(this.#database, this.#validator);
+      this.#database.exec("ROLLBACK");
+      return snapshot;
+    } catch (error) {
+      if (this.#database.inTransaction) {
+        this.#database.exec("ROLLBACK");
+      }
+      throw mapSQLiteError(error, "inspect SQLite object reachability");
+    }
+  }
+
+  /**
+   * Removes only catalog rows proven unreachable in the same transaction.
+   * Physical deletion happens afterwards, so interruption can leave a safe
+   * unregistered orphan but never a catalog row that claims missing bytes.
+   */
+  removeUnreferencedObjectCatalogEntries(hashes: readonly string[]): readonly string[] {
+    this.#assertMaintenanceIdle();
+    const requested = [...new Set(hashes)].sort();
+    try {
+      this.#database.exec("BEGIN IMMEDIATE");
+      const catalog = loadObjectCatalog(this.#database, this.#validator);
+      const state = loadMetadataState(this.#database, this.#validator, catalog);
+      const reachable = collectMaintenanceReachableObjectHashes(state);
+      const becameReachable = requested.filter((hash) => reachable.has(hash));
+      if (becameReachable.length > 0) {
+        throw new DataError("conflict", "An object became reachable before catalog cleanup.", {
+          retryable: true,
+          details: { hashes: becameReachable },
+        });
+      }
+      const remove = this.#database.prepare("DELETE FROM vistrea_object_refs WHERE hash = ?");
+      const removed: string[] = [];
+      for (const hash of requested) {
+        if (remove.run(hash).changes === 1) {
+          removed.push(hash);
+        }
+      }
+      this.#database.exec("COMMIT");
+      for (const hash of removed) {
+        this.#verifiedObjects.delete(hash);
+      }
+      return removed;
+    } catch (error) {
+      if (this.#database.inTransaction) {
+        this.#database.exec("ROLLBACK");
+      }
+      throw mapSQLiteError(error, "remove unreachable ObjectRefs from the SQLite catalog");
+    }
+  }
+
   _isVerifiedObject(hash: string): boolean {
     return this.#verifiedObjects.has(hash);
   }
@@ -406,6 +572,15 @@ export class SQLiteDataStore implements WorkspaceDataSource {
   #assertOpen(): void {
     if (this.#closed) {
       throw new DataError("conflict", "The SQLite metadata store is closed.");
+    }
+  }
+
+  #assertMaintenanceIdle(): void {
+    this.#assertOpen();
+    if (this.#openUnits.size > 0) {
+      throw new DataError("conflict", "Workspace maintenance requires all Units of Work to close.", {
+        details: { open_units_of_work: this.#openUnits.size },
+      });
     }
   }
 
@@ -521,6 +696,132 @@ export class SQLiteDataStore implements WorkspaceDataSource {
       }
     }
   }
+}
+
+function readGeneration(database: Database.Database): number {
+  const row = database
+    .prepare("SELECT generation FROM vistrea_store_meta WHERE singleton = 1")
+    .get() as { readonly generation?: unknown } | undefined;
+  if (typeof row?.generation !== "number" || !Number.isSafeInteger(row.generation)) {
+    throw new DataError("integrity_error", "The SQLite Workspace generation is invalid.");
+  }
+  return row.generation;
+}
+
+function readSQLiteMaintenanceSnapshot(
+  database: Database.Database,
+  validator: ProtocolValidator,
+): SQLiteMaintenanceSnapshot {
+  const catalog = loadObjectCatalog(database, validator);
+  const state = loadMetadataState(database, validator, catalog);
+  return {
+    generation: readGeneration(database),
+    registeredObjects: new Map(catalog),
+    reachableObjectHashes: collectMaintenanceReachableObjectHashes(state),
+  };
+}
+
+function collectMaintenanceReachableObjectHashes(state: DataState): ReadonlySet<string> {
+  const hashes = new Set<string>();
+  const rootCommitIds = new Set<string>();
+  const versionMaps = new Set<ReadonlyMap<string, unknown>>([
+    state.commits,
+    state.refs,
+    state.tags,
+    state.workingSets,
+  ]);
+
+  for (const candidate of Object.values(state)) {
+    if (!(candidate instanceof Map) || versionMaps.has(candidate)) {
+      continue;
+    }
+    for (const value of candidate.values()) {
+      for (const hash of collectEmbeddedObjectHashes(value)) {
+        hashes.add(hash);
+      }
+      collectEmbeddedCommitIds(value, state.commits, rootCommitIds);
+    }
+  }
+
+  for (const ref of state.refs.values()) {
+    rootCommitIds.add(ref.commit_id);
+    for (const hash of collectEmbeddedObjectHashes(ref)) {
+      hashes.add(hash);
+    }
+    collectEmbeddedCommitIds(ref, state.commits, rootCommitIds);
+  }
+  for (const tag of state.tags.values()) {
+    rootCommitIds.add(tag.commit_id);
+    for (const hash of collectEmbeddedObjectHashes(tag)) {
+      hashes.add(hash);
+    }
+    collectEmbeddedCommitIds(tag, state.commits, rootCommitIds);
+  }
+  for (const workingSet of state.workingSets.values()) {
+    rootCommitIds.add(workingSet.base_commit_id);
+    for (const hash of collectEmbeddedObjectHashes(workingSet)) {
+      hashes.add(hash);
+    }
+    collectEmbeddedCommitIds(workingSet, state.commits, rootCommitIds);
+  }
+
+  const pending = [...rootCommitIds];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const commitId = pending.pop() as string;
+    if (visited.has(commitId)) {
+      continue;
+    }
+    const commit = state.commits.get(commitId);
+    if (commit === undefined) {
+      throw new DataError("integrity_error", "Live metadata references a missing Commit.", {
+        details: { commit_id: commitId },
+      });
+    }
+    visited.add(commitId);
+    pending.push(...commit.manifest.parents);
+    for (const hash of commit.manifest.object_hashes) {
+      hashes.add(hash);
+    }
+  }
+  return hashes;
+}
+
+function collectEmbeddedCommitIds(
+  value: unknown,
+  commits: ReadonlyMap<string, Commit>,
+  output: Set<string>,
+): void {
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        visit(item);
+      }
+      return;
+    }
+    if (candidate === null || typeof candidate !== "object") {
+      return;
+    }
+    for (const [key, child] of Object.entries(candidate as Record<string, unknown>)) {
+      if (
+        typeof child === "string" &&
+        (key === "commit_id" || key.endsWith("_commit_id")) &&
+        commits.has(child)
+      ) {
+        output.add(child);
+      }
+      visit(child);
+    }
+  };
+  visit(value);
+}
+
+function filesystemCode(error: unknown): string | undefined {
+  if (error !== null && typeof error === "object" && "code" in error) {
+    const code = (error as { readonly code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
 }
 
 function mapSQLiteError(error: unknown, action: string): DataError {

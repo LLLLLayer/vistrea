@@ -2,6 +2,7 @@ import AppKit
 import SceneKit
 import SwiftUI
 import VistreaStudioCore
+import VistreaStudioHostRuntime
 
 /// The primary navigation sections. The Canvas is the landing surface for
 /// the selected Application + Version scope; the flat Snapshot list is the
@@ -9,26 +10,64 @@ import VistreaStudioCore
 enum WorkspaceSection: String, CaseIterable, Identifiable {
     case canvas = "Canvas"
     case evidence = "Evidence"
+    case documents = "Documents"
     case wiki = "Wiki"
+    case quality = "Quality"
+    case hub = "Hub"
 
     var id: String { rawValue }
+
+    var shortcutKey: KeyEquivalent {
+        switch self {
+        case .canvas: "1"
+        case .evidence: "2"
+        case .documents: "3"
+        case .wiki: "4"
+        case .quality: "5"
+        case .hub: "6"
+        }
+    }
 
     var systemImage: String {
         switch self {
         case .canvas: "point.3.connected.trianglepath.dotted"
         case .evidence: "camera.on.rectangle"
+        case .documents: "doc.text.magnifyingglass"
         case .wiki: "book"
+        case .quality: "checkmark.shield"
+        case .hub: "arrow.triangle.2.circlepath.circle"
         }
     }
 }
 
 struct SnapshotWorkspaceView: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @ObservedObject var projectDocuments: StudioProjectDocuments
+    let workspaceName: String?
+    let onManageWorkspaces: (() -> Void)?
     @State private var section: WorkspaceSection = .canvas
+
+    init(
+        model: SnapshotWorkspaceModel,
+        projectDocuments: StudioProjectDocuments,
+        workspaceName: String? = nil,
+        onManageWorkspaces: (() -> Void)? = nil,
+        initialSection: WorkspaceSection = .canvas
+    ) {
+        self.model = model
+        self.projectDocuments = projectDocuments
+        self.workspaceName = workspaceName
+        self.onManageWorkspaces = onManageWorkspaces
+        _section = State(initialValue: initialSection)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            ContextBar(model: model)
+            ContextBar(
+                model: model,
+                workspaceName: workspaceName,
+                onManageWorkspaces: onManageWorkspaces
+            )
             Divider()
             if let operationError = model.operationError {
                 OperationErrorBanner(message: operationError) {
@@ -41,6 +80,23 @@ struct SnapshotWorkspaceView: View {
             EventTimelineStrip(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .studioAccessibilityContainer(StudioAccessibilityID.workspace)
+        .onKeyPress(phases: .down) { press in
+            guard let destination = StudioKeyboardNavigation.section(
+                for: press.key,
+                modifiers: press.modifiers
+            ) else {
+                return .ignored
+            }
+            section = destination
+            return .handled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: StudioNavigationRequest.notification)) {
+            notification in
+            if let destination = StudioNavigationRequest.section(from: notification) {
+                section = destination
+            }
+        }
         .task {
             guard model.contentPhase == .idle else { return }
             await model.refresh()
@@ -53,14 +109,33 @@ struct SnapshotWorkspaceView: View {
         case .idle, .loading:
             ProgressView("Loading the Workspace…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier(StudioAccessibilityID.workspaceLoading)
         case .empty:
-            EmptyWorkspaceView(isCapturing: model.isCapturing) {
-                Task { await model.capture() }
+            HSplitView {
+                NavigationColumn(section: $section)
+                    .frame(
+                        minWidth: StudioLayoutMetrics.navigationMinWidth,
+                        idealWidth: StudioLayoutMetrics.navigationIdealWidth,
+                        maxWidth: StudioLayoutMetrics.navigationMaxWidth
+                    )
+                if section == .documents {
+                    ProjectDocumentsPane(documents: projectDocuments)
+                } else if section == .quality {
+                    QualityWorkspaceView(model: model)
+                } else if section == .hub {
+                    HubPane(model: model)
+                } else {
+                    EmptyWorkspaceView(isCapturing: model.isCapturing) {
+                        Task { await model.capture() }
+                    }
+                }
             }
+            .studioAccessibilityContainer(StudioAccessibilityID.workspaceEmpty)
         case let .failure(message):
             FailureView(message: message, isBusy: model.isRefreshing || model.isCapturing) {
                 Task { await model.refresh() }
             }
+            .studioAccessibilityContainer(StudioAccessibilityID.workspaceFailure)
         case .content:
             HSplitView {
                 NavigationColumn(section: $section)
@@ -74,10 +149,425 @@ struct SnapshotWorkspaceView: View {
                     CanvasSection(model: model)
                 case .evidence:
                     EvidenceSection(model: model)
+                case .documents:
+                    ProjectDocumentsPane(documents: projectDocuments)
                 case .wiki:
                     WikiPane(model: model)
+                case .quality:
+                    QualityWorkspaceView(model: model)
+                case .hub:
+                    HubPane(model: model)
                 }
             }
+        }
+    }
+}
+
+/// Cross-team collaboration remains an optional local-Host workflow. The
+/// secret field is session-only; only the origin, project, and ref names use
+/// UserDefaults so reopening Studio never writes a Hub credential to disk.
+private struct HubPane: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    @AppStorage("vistrea.hub.base-url") private var baseURL = ""
+    @AppStorage("vistrea.hub.project-id") private var projectID = ""
+    @AppStorage("vistrea.hub.ref-names") private var refNames = "teams/design/main"
+    @State private var bearerToken = ""
+    @State private var pushMessage = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            if model.hubSyncStatus == nil {
+                connectionForm
+            } else {
+                connectedContent
+            }
+        }
+        .task(id: model.hubSyncStatus?.remote.projectID) {
+            guard model.hubSyncStatus != nil else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                } catch {
+                    return
+                }
+                await model.loadMoreHubActivity()
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Label("Team Hub", systemImage: "person.2.fill")
+                .font(.headline)
+            if let identity = model.hubSyncStatus?.identity {
+                Text(identity.principalID)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                roleBadge(identity.role)
+            }
+            Spacer()
+            if model.hubSyncStatus != nil {
+                Button("Refresh", systemImage: "arrow.clockwise") {
+                    Task {
+                        await model.refreshHubStatus()
+                        await model.loadMoreHubActivity()
+                    }
+                }
+                .disabled(model.isHubTransferring)
+                Button("Disconnect") {
+                    model.disconnectHub()
+                    bearerToken = ""
+                }
+                    .disabled(model.isHubTransferring)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 9)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var connectionForm: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Connect this local Workspace to an optional Vistrea Hub.", systemImage: "network")
+                    .font(.title3.weight(.semibold))
+                Text("Studio sends the credential only to its authenticated loopback Host. The Host uses TLS for non-local Hub origins and never echoes the token.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                    GridRow {
+                        Text("Hub URL")
+                        TextField("https://hub.example.com", text: $baseURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    GridRow {
+                        Text("Project")
+                        TextField("project_…", text: $projectID)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                    }
+                    GridRow {
+                        Text("Refs")
+                        TextField("teams/design/main", text: $refNames)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                    }
+                    GridRow {
+                        Text("Token")
+                        SecureField("Current Hub bearer token", text: $bearerToken)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                Text("Separate multiple refs with commas. The token is kept only for this Studio session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let error = model.hubSyncError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+                HStack {
+                    Spacer()
+                    Button("Connect", systemImage: "link") {
+                        Task {
+                            await model.connectHub(
+                                baseURL: baseURL,
+                                projectID: projectID,
+                                bearerToken: bearerToken,
+                                refNames: parsedRefNames
+                            )
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || bearerToken.isEmpty
+                            || parsedRefNames.isEmpty
+                            || model.hubSyncPhase == .connecting
+                    )
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var connectedContent: some View {
+        HSplitView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    remoteSection
+                    projectsSection
+                    refsSection
+                    transferSection
+                }
+                .padding(20)
+            }
+            .frame(minWidth: 430, idealWidth: 560)
+            activitySection
+                .frame(minWidth: 330, idealWidth: 430)
+        }
+    }
+
+    @ViewBuilder
+    private var remoteSection: some View {
+        if let status = model.hubSyncStatus {
+            GroupBox("Connected remote") {
+                VStack(alignment: .leading, spacing: 7) {
+                    LabeledContent("Origin") {
+                        Text(status.remote.baseURL).textSelection(.enabled)
+                    }
+                    LabeledContent("Project") {
+                        Text(status.remote.projectID).font(.caption.monospaced()).textSelection(.enabled)
+                    }
+                    LabeledContent("Credential") {
+                        Text(status.identity.credentialScope.rawValue.capitalized)
+                    }
+                    if let organization = status.identity.organizationID,
+                       let team = status.identity.teamID {
+                        LabeledContent("Team") { Text("\(organization) / \(team)") }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var projectsSection: some View {
+        if let projects = model.hubSyncStatus?.accessibleProjects, projects.count > 1 {
+            GroupBox("Team projects") {
+                VStack(spacing: 0) {
+                    ForEach(projects) { project in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(project.projectID).font(.caption.monospaced())
+                                if let team = project.teamID { Text(team).font(.caption2).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            roleBadge(project.role)
+                            if project.projectID != model.hubSyncStatus?.remote.projectID {
+                                Button("Select") {
+                                    projectID = project.projectID
+                                    Task {
+                                        await model.connectHub(
+                                            baseURL: baseURL,
+                                            projectID: project.projectID,
+                                            bearerToken: bearerToken,
+                                            refNames: parsedRefNames
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                        }
+                        .padding(.vertical, 7)
+                        if project.id != projects.last?.id { Divider() }
+                    }
+                }
+            }
+        }
+    }
+
+    private var refsSection: some View {
+        GroupBox("Shared refs") {
+            VStack(spacing: 0) {
+                ForEach(model.hubSyncStatus?.refs ?? []) { ref in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: relationSymbol(ref.relation))
+                            .foregroundStyle(relationColor(ref.relation))
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(ref.name).font(.body.monospaced())
+                            Text(relationLabel(ref.relation))
+                                .font(.caption)
+                                .foregroundStyle(relationColor(ref.relation))
+                            if ref.relation == .diverged {
+                                Text("Local and Hub refs were preserved. Fetch or push will not force either side; merge and publish a new Commit explicitly.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 8)
+                    if ref.id != model.hubSyncStatus?.refs.last?.id { Divider() }
+                }
+            }
+        }
+    }
+
+    private var transferSection: some View {
+        GroupBox("Sync") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button("Fetch", systemImage: "arrow.down.circle") {
+                        Task { await model.fetchFromHub() }
+                    }
+                    .disabled(model.isHubTransferring || !canFetch)
+                    Button("Push", systemImage: "arrow.up.circle") {
+                        Task { await model.pushToHub(message: pushMessage) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isHubTransferring || !canPush)
+                    if model.isHubTransferring { ProgressView().controlSize(.small) }
+                }
+                TextField("Optional push message", text: $pushMessage)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!canPush || model.isHubTransferring)
+                if !canPush {
+                    Text("Push requires a maintainer or admin capability; fetch remains available to viewers.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let transfer = model.lastHubTransfer {
+                    Label(
+                        "\(transfer.direction.rawValue.capitalized): \(transfer.importedCommitCount) commits, \(transfer.importedObjectCount) objects, \(transfer.advancedRefCount) refs advanced",
+                        systemImage: transfer.conflicts.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .foregroundStyle(transfer.conflicts.isEmpty ? Color.green : Color.orange)
+                    if !transfer.conflicts.isEmpty {
+                        ForEach(transfer.conflicts) { conflict in
+                            Text("Conflict: \(conflict.name)")
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                if let error = model.hubSyncError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var activitySection: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Activity", systemImage: "clock.arrow.circlepath")
+                    .font(.headline)
+                Spacer()
+                if model.isHubActivityLoading { ProgressView().controlSize(.small) }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color(nsColor: .controlBackgroundColor))
+            Divider()
+            if model.hubSyncActivity.isEmpty {
+                ContentUnavailableView(
+                    "No collaboration activity",
+                    systemImage: "person.2",
+                    description: Text("New pack, ref, and permission changes will appear here automatically.")
+                )
+            } else {
+                List(model.hubSyncActivity) { event in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: activitySymbol(event.kind))
+                            Text(activityLabel(event.kind)).fontWeight(.medium)
+                            Spacer()
+                            Text("#\(event.sequence)").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Text("\(event.actor.principalID) · \(event.actor.role.rawValue)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(event.resource)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(event.occurredAt)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listStyle(.inset)
+            }
+            if let error = model.hubActivityError {
+                Divider()
+                Text(error).font(.caption).foregroundStyle(.red).padding(8)
+            }
+        }
+    }
+
+    private var parsedRefNames: [String] {
+        refNames.split(separator: ",", omittingEmptySubsequences: false).map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+    }
+
+    private var canFetch: Bool {
+        model.hubSyncStatus?.identity.capabilities.contains("packs.export") == true
+    }
+
+    private var canPush: Bool {
+        let capabilities = model.hubSyncStatus?.identity.capabilities ?? []
+        return capabilities.contains("packs.import") && capabilities.contains("refs.update")
+    }
+
+    private func roleBadge(_ role: HubSyncRole) -> some View {
+        Text(role.rawValue.capitalized)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.accentColor.opacity(0.14), in: Capsule())
+    }
+
+    private func relationLabel(_ relation: HubSyncRefRelation) -> String {
+        switch relation {
+        case .synced: "Synced"
+        case .localOnly: "Local only"
+        case .remoteOnly: "Hub only"
+        case .localAhead: "Local ahead"
+        case .remoteAhead: "Hub ahead"
+        case .diverged: "Conflict — both refs preserved"
+        case .unknown: "Different history — fetch to classify"
+        }
+    }
+
+    private func relationSymbol(_ relation: HubSyncRefRelation) -> String {
+        switch relation {
+        case .synced: "checkmark.circle.fill"
+        case .diverged: "exclamationmark.triangle.fill"
+        case .unknown: "questionmark.circle"
+        case .localOnly, .localAhead: "arrow.up.circle"
+        case .remoteOnly, .remoteAhead: "arrow.down.circle"
+        }
+    }
+
+    private func relationColor(_ relation: HubSyncRefRelation) -> Color {
+        switch relation {
+        case .synced: .green
+        case .diverged: .red
+        case .unknown: .orange
+        case .localOnly, .remoteOnly, .localAhead, .remoteAhead: .accentColor
+        }
+    }
+
+    private func activityLabel(_ kind: String) -> String {
+        switch kind {
+        case "RefUpdated": "Ref updated"
+        case "HubPackImported": "Pack imported"
+        case "HubPackExported": "Pack exported"
+        case "PermissionChanged": "Permission changed"
+        default: kind
+        }
+    }
+
+    private func activitySymbol(_ kind: String) -> String {
+        switch kind {
+        case "RefUpdated": "arrow.triangle.branch"
+        case "HubPackImported": "square.and.arrow.down"
+        case "HubPackExported": "square.and.arrow.up"
+        case "PermissionChanged": "person.badge.key.fill"
+        default: "circle"
         }
     }
 }
@@ -90,8 +580,13 @@ private struct NavigationColumn: View {
             Label(section.rawValue, systemImage: section.systemImage)
                 .tag(section)
                 .accessibilityLabel("\(section.rawValue) section")
+                .accessibilityHint(
+                    Text("Press Command-\(String(section.shortcutKey.character)) to open")
+                )
+                .accessibilityIdentifier(StudioAccessibilityID.section(section))
         }
         .listStyle(.sidebar)
+        .accessibilityIdentifier(StudioAccessibilityID.sectionNavigation)
     }
 
     private var selectionBinding: Binding<WorkspaceSection?> {
@@ -128,6 +623,7 @@ private struct CanvasSection: View {
                     .frame(minWidth: StudioLayoutMetrics.inspectorMinWidth)
             }
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.canvasSection)
     }
 }
 
@@ -171,6 +667,7 @@ private struct StateInspectorView: View {
                 }
             }
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.inspector)
     }
 
     private func header(arrangement: StudioLayoutMetrics.InspectorArrangement) -> some View {
@@ -190,6 +687,7 @@ private struct StateInspectorView: View {
                     .toggleStyle(.button)
                     .help("The window is too narrow to show the state context beside the evidence panes. Toggle between them.")
                     .accessibilityLabel("Show the Screen State context column")
+                    .accessibilityIdentifier(StudioAccessibilityID.inspectorContextToggle)
             }
         }
         .padding(.horizontal)
@@ -215,21 +713,48 @@ private struct StateInspectorView: View {
 /// the design workbench, and the 2D view tree.
 private struct InspectorPanes: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    @State private var surface: InspectorSurface = .screenshot
 
     var body: some View {
         VSplitView {
-            TabView {
-                ScreenshotPane(model: model)
-                    .tabItem { Label("Screenshot", systemImage: "photo") }
-                LayerInspector3DPane(model: model)
-                    .tabItem { Label("3D Layers", systemImage: "square.3.layers.3d") }
-                DesignReviewPane(model: model)
-                    .tabItem { Label("Design Review", systemImage: "square.on.square.dashed") }
+            VStack(spacing: 0) {
+                Picker("Inspector surface", selection: $surface) {
+                    Label("Screenshot", systemImage: "photo")
+                        .tag(InspectorSurface.screenshot)
+                    Label("3D Layers", systemImage: "square.3.layers.3d")
+                        .tag(InspectorSurface.layers)
+                    if StudioFeaturePolicy.designReviewVisibleByDefault {
+                        Label("Design Review", systemImage: "square.on.square.dashed")
+                            .tag(InspectorSurface.designReview)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 360)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .accessibilityIdentifier(StudioAccessibilityID.inspectorMode)
+                Divider()
+
+                switch surface {
+                case .screenshot:
+                    ScreenshotPane(model: model)
+                case .layers:
+                    LayerInspector3DPane(model: model)
+                case .designReview:
+                    DesignReviewPane(model: model)
+                }
             }
             .frame(minHeight: 280)
             ViewTreePane(model: model)
                 .frame(minHeight: 180)
         }
+    }
+
+    private enum InspectorSurface: String, Hashable {
+        case screenshot
+        case layers
+        case designReview
     }
 }
 
@@ -267,13 +792,6 @@ private struct CanvasPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var isExploreFormPresented = false
     @State private var isMergeSheetPresented = false
-
-    private static let columnWidth = StudioLayoutMetrics.canvasColumnWidth
-    private static let rowHeight = StudioLayoutMetrics.canvasRowHeight
-    private static let cardSize = CGSize(
-        width: StudioLayoutMetrics.canvasCardWidth,
-        height: StudioLayoutMetrics.canvasCardHeight
-    )
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -315,301 +833,44 @@ private struct CanvasPane: View {
         case .idle, .loading:
             ProgressView("Loading the Screen Graph…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier(StudioAccessibilityID.canvasLoading)
         case .empty:
-            Text("No Screen States have been observed yet. Record state observations to build the Canvas.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ContentUnavailableView(
+                "No Screen States",
+                systemImage: "point.3.connected.trianglepath.dotted",
+                description: Text(
+                    "Capture or explore the selected build to record its first Screen State."
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasEmpty)
         case let .failure(message):
-            Text(message)
-                .foregroundStyle(.red)
-                .multilineTextAlignment(.center)
-                .padding()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .content:
-            ScrollView([.horizontal, .vertical]) {
-                canvasContent
-                    .padding(24)
-            }
-            if model.selectedCanvasStateID == nil {
-                Divider()
-                Text("Click a Screen State to open its Inspector. Cmd-click selects states for merging.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var canvasContent: some View {
-        let positions = model.canvasStates
-        let graph = model.canvasGraph
-        let entryIDs = Set(graph?.entryStateIDs ?? [])
-        let selectedID = model.selectedCanvasStateID
-        let linkedSelected = !model.relatedWikiNodes.isEmpty
-        let centers = Dictionary(uniqueKeysWithValues: positions.map { positioned in
-            (
-                positioned.id,
-                CGPoint(
-                    x: CGFloat(positioned.column) * Self.columnWidth + Self.cardSize.width / 2,
-                    y: CGFloat(positioned.row) * Self.rowHeight + Self.cardSize.height / 2
+            VStack(spacing: 14) {
+                ContentUnavailableView(
+                    "Screen Graph Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(message)
                 )
-            )
-        })
-        let width = (positions.map(\.column).max() ?? 0) + 1
-        let height = (positions.map(\.row).max() ?? 0) + 1
-        return ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                for transition in graph?.transitions ?? [] {
-                    guard let source = centers[transition.sourceStateID],
-                          let target = centers[transition.targetStateID]
-                    else {
-                        continue
-                    }
-                    var path = Path()
-                    path.move(to: source)
-                    path.addLine(to: target)
-                    context.stroke(path, with: .color(.secondary.opacity(0.6)), lineWidth: 1.5)
-                }
-            }
-            ForEach(positions) { positioned in
-                let isActive = positioned.state.isActive
-                let isMergeSelected = model.mergeSelectionStateIDs.contains(positioned.id)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(positioned.state.title)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    Text(positioned.state.kind)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        if !isActive {
-                            Text(positioned.state.status)
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.secondary)
-                        }
-                        if entryIDs.contains(positioned.id) {
-                            Text("entry")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.blue)
-                        }
-                        if isMergeSelected {
-                            Label("merge", systemImage: "checkmark.circle.fill")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.orange)
-                        }
-                        if positioned.id == selectedID, linkedSelected {
-                            Label("linked", systemImage: "book")
-                                .font(.caption2.weight(.medium))
-                                .foregroundStyle(.purple)
-                        }
-                    }
-                    if !positioned.state.labels.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(positioned.state.labels.prefix(3), id: \.self) { label in
-                                AnnotationLabelChip(label: label)
-                            }
-                            if positioned.state.labels.count > 3 {
-                                Text("+\(positioned.state.labels.count - 3)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .help(positioned.state.labels.joined(separator: ", "))
-                    }
-                    if let summary = positioned.state.summary {
-                        Text(summary)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .help(summary)
-                    }
-                }
-                .padding(10)
-                .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
-                .clipped()
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(
-                            isMergeSelected
-                                ? Color.orange
-                                : positioned.id == selectedID
-                                    ? Color.accentColor
-                                    : entryIDs.contains(positioned.id)
-                                        ? Color.blue
-                                        : Color.secondary.opacity(0.4),
-                            lineWidth: isMergeSelected || positioned.id == selectedID
-                                || entryIDs.contains(positioned.id) ? 2 : 1
-                        )
-                )
-                .opacity(isActive ? 1 : 0.4)
-                .offset(
-                    x: CGFloat(positioned.column) * Self.columnWidth,
-                    y: CGFloat(positioned.row) * Self.rowHeight
-                )
-                .highPriorityGesture(
-                    TapGesture().modifiers(.command).onEnded {
-                        // Cmd-click toggles the merge selection; only active
-                        // states are selectable.
-                        model.toggleMergeSelection(stateID: positioned.id)
-                    }
-                )
-                .onTapGesture {
-                    Task { await model.selectCanvasState(id: positioned.id) }
-                }
-                .help(
-                    isActive
-                        ? "Click for details; Cmd-click to select for merging."
-                        : "This state was \(positioned.state.status) by identity curation."
-                )
-                .accessibilityLabel(
-                    "Screen state \(positioned.state.title), \(positioned.state.status)"
-                )
-            }
-        }
-        .frame(
-            width: CGFloat(width) * Self.columnWidth,
-            height: CGFloat(height) * Self.rowHeight,
-            alignment: .topLeading
-        )
-    }
-}
-
-/// The small Explore form: a bounded action budget, the settle time, and
-/// the stable IDs the walk must never tap.
-private struct ExplorationFormView: View {
-    @ObservedObject var model: SnapshotWorkspaceModel
-    @Binding var isPresented: Bool
-    @State private var maximumActions = 20
-    @State private var settleMilliseconds = 1_500
-    @State private var excludedStableIDs =
-        "android.debug.inspector.open,vistrea.inspector.capture,BackButton"
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Explore the running application")
-                .font(.headline)
-            Stepper(
-                "Maximum actions: \(maximumActions)",
-                value: $maximumActions,
-                in: 1...500
-            )
-            Stepper(
-                "Settle milliseconds: \(settleMilliseconds)",
-                value: $settleMilliseconds,
-                in: 0...60_000,
-                step: 250
-            )
-            Text("Excluded stable IDs (comma-separated)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextField("Excluded stable IDs", text: $excludedStableIDs)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button("Start exploration") {
-                    let excluded = excludedStableIDs
-                        .split(separator: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { !$0.isEmpty }
-                    isPresented = false
+                Button("Retry", systemImage: "arrow.clockwise") {
+                    guard let scope = model.selectedScope else { return }
                     Task {
-                        await model.startExploration(
-                            maximumActions: maximumActions,
-                            settleMilliseconds: settleMilliseconds,
-                            excludedStableIDs: excluded
+                        await model.loadCanvas(
+                            projectID: scope.projectID,
+                            applicationID: scope.applicationID,
+                            applicationVersion: scope.applicationVersion,
+                            buildID: scope.buildID
                         )
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isExploring)
+                .accessibilityIdentifier(StudioAccessibilityID.canvasRetry)
             }
-        }
-        .padding(14)
-        .frame(width: StudioLayoutMetrics.explorationFormWidth)
-    }
-}
-
-/// The live exploration status line: progress while the Operation runs, the
-/// report summary once it succeeded, and the verbatim error otherwise.
-private struct ExplorationStatusView: View {
-    @ObservedObject var model: SnapshotWorkspaceModel
-
-    var body: some View {
-        if model.isExploring
-            || model.isExplorationRunAddressable
-            || model.explorationReport != nil
-            || model.explorationError != nil
-        {
-            VStack(alignment: .leading, spacing: 4) {
-                // Cancel stays reachable for every Operation the Host has not
-                // settled yet — including a run this Studio stopped polling —
-                // so a started exploration can never become unstoppable.
-                if model.isExploring || model.isExplorationRunAddressable {
-                    HStack(spacing: 8) {
-                        if model.isExploring {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(progressLine)
-                            .font(.caption)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer()
-                        Button("Cancel") {
-                            Task { await model.cancelExploration() }
-                        }
-                        .disabled(model.isCancellingExploration)
-                    }
-                }
-                if let report = model.explorationReport {
-                    Text(
-                        "Exploration succeeded: \(report.discoveredStateIDs.count) states discovered · \(report.actionCount) actions · stopped by \(report.stoppedReason)"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.green)
-                    .textSelection(.enabled)
-                }
-                if let error = model.explorationError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 6)
-            .accessibilityLabel("Exploration status")
-            Divider()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .studioAccessibilityContainer(StudioAccessibilityID.canvasFailure)
+        case .content:
+            InteractiveScreenStateCanvas(model: model)
         }
     }
 
-    private var progressLine: String {
-        var parts: [String] = []
-        if let state = model.explorationState {
-            parts.append(state)
-        }
-        if let progress = model.explorationProgress {
-            if let phase = progress.phase {
-                parts.append(phase)
-            }
-            if let completed = progress.completedUnits, let total = progress.totalUnits {
-                parts.append("\(completed)/\(total) \(progress.unit ?? "units")")
-            }
-        }
-        if let message = model.explorationLastEventMessage {
-            parts.append(message)
-        }
-        return parts.isEmpty ? "Starting exploration…" : parts.joined(separator: " · ")
-    }
 }
 
 /// The Canvas identity-curation status line: the changed-elsewhere conflict
@@ -900,6 +1161,7 @@ private struct StateContextColumn: View {
                 isEditingAnnotations = false
             }
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorContext)
     }
 
     @ViewBuilder
@@ -1764,7 +2026,41 @@ private struct DesignDifferenceColumn: View {
             }
             Divider()
             content
+            Divider()
+            issueAction
         }
+    }
+
+    private var issueAction: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button("Create Review Issue", systemImage: "exclamationmark.bubble") {
+                Task { await model.promoteSelectedDifferenceToIssue() }
+            }
+            .controlSize(.small)
+            .disabled(model.selectedDifferenceID == nil || model.isPromotingDifference)
+            if model.isPromotingDifference {
+                ProgressView("Creating Review Issue…")
+                    .controlSize(.small)
+                    .font(.caption)
+            } else if let issue = model.lastPromotedIssue {
+                Text("Created \(issue.title)")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .lineLimit(2)
+                    .accessibilityLabel("Review Issue created: \(issue.title)")
+            } else if let error = model.differenceIssueError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            } else {
+                Text("Select a Difference to preserve its target and evidence as an Issue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
     }
 
     @ViewBuilder
@@ -2071,26 +2367,35 @@ enum LayerSceneBuilder {
 private struct WikiPane: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     @State private var searchText = ""
+    @State private var mode: WikiMode = .nodes
     @State private var isCreating = false
     @State private var editingNode: WikiNodeSummary?
+    @State private var editingCollection: KnowledgeCollectionSummary?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PaneHeader(title: "Deep Wiki", systemImage: "book") {
-                Button("New node", systemImage: "plus") {
+                Button(mode == .nodes ? "New node" : "New Collection", systemImage: "plus") {
                     isCreating = true
                 }
-                .disabled(model.isSavingWikiNode)
+                .disabled(model.isSavingWikiNode || model.isSavingKnowledgeCollection)
             }
             Divider()
+            Picker("Knowledge view", selection: $mode) {
+                ForEach(WikiMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
             HStack(spacing: 8) {
-                TextField("Search knowledge…", text: $searchText)
+                TextField(mode == .nodes ? "Search knowledge…" : "Search Collections…", text: $searchText)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
-                    }
+                    .onSubmit { runSearch() }
                 Button("Search") {
-                    Task { await model.loadWiki(text: searchText.isEmpty ? nil : searchText) }
+                    runSearch()
                 }
             }
             .padding(8)
@@ -2098,15 +2403,42 @@ private struct WikiPane: View {
             content
         }
         .sheet(isPresented: $isCreating) {
-            WikiNodeCreateSheet(model: model)
+            if mode == .nodes {
+                WikiNodeCreateSheet(model: model)
+            } else {
+                KnowledgeCollectionEditorSheet(model: model, collection: nil)
+            }
         }
         .sheet(item: $editingNode) { node in
             WikiNodeEditSheet(model: model, nodeID: node.id)
+        }
+        .sheet(item: $editingCollection) { collection in
+            KnowledgeCollectionEditorSheet(model: model, collection: collection)
+        }
+        .onChange(of: mode) {
+            searchText = ""
+            if mode == .collections {
+                Task {
+                    await model.loadWiki(text: nil)
+                    await model.loadKnowledgeCollections(text: nil)
+                }
+            } else {
+                Task { await model.loadWiki(text: nil) }
+            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
+        if mode == .nodes {
+            nodeContent
+        } else {
+            collectionContent
+        }
+    }
+
+    @ViewBuilder
+    private var nodeContent: some View {
         switch model.wikiPhase {
         case .idle, .loading:
             ProgressView("Loading the Deep Wiki…")
@@ -2160,6 +2492,220 @@ private struct WikiPane: View {
                 .accessibilityLabel("Wiki node \(node.title), \(node.status)")
             }
             .listStyle(.sidebar)
+        }
+    }
+
+    @ViewBuilder
+    private var collectionContent: some View {
+        switch model.knowledgeCollectionsPhase {
+        case .idle, .loading:
+            ProgressView("Loading Knowledge Collections…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .empty:
+            ContentUnavailableView(
+                "No Knowledge Collections",
+                systemImage: "square.stack.3d.up",
+                description: Text(
+                    model.wikiNodes.isEmpty
+                        ? "Create a Wiki node first, then group published knowledge into a Collection."
+                        : "Create a Collection to define an entry point and a versionable knowledge bundle."
+                )
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case let .failure(message):
+            Text(message)
+                .foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
+            List(model.knowledgeCollections) { collection in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(collection.name)
+                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 8) {
+                            Text(collection.publication.state)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(
+                                    collection.publication.state == "published"
+                                        ? Color.green
+                                        : Color.secondary
+                                )
+                            Text("\(collection.nodeIDs.count) nodes")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("revision \(collection.revision)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let summary = collection.summary, !summary.isEmpty {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button("Edit") {
+                        model.beginKnowledgeCollectionEdit(collection)
+                        editingCollection = collection
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 3)
+                .accessibilityLabel(
+                    "Knowledge Collection \(collection.name), \(collection.publication.state), \(collection.nodeIDs.count) nodes"
+                )
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    private func runSearch() {
+        let text = searchText.isEmpty ? nil : searchText
+        if mode == .nodes {
+            Task { await model.loadWiki(text: text) }
+        } else {
+            Task { await model.loadKnowledgeCollections(text: text) }
+        }
+    }
+
+    private enum WikiMode: String, CaseIterable, Identifiable {
+        case nodes
+        case collections
+
+        var id: String { rawValue }
+        var label: String { self == .nodes ? "Wiki Nodes" : "Collections" }
+    }
+}
+
+/// Creates or revises one Knowledge Collection from the current Workspace's
+/// Wiki nodes. Entry nodes are an explicit subset of members; Studio never
+/// silently expands or imports source documents.
+private struct KnowledgeCollectionEditorSheet: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let collection: KnowledgeCollectionSummary?
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var summary = ""
+    @State private var memberNodeIDs: Set<String> = []
+    @State private var entryNodeIDs: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(collection == nil ? "New Knowledge Collection" : "Edit Knowledge Collection")
+                .font(.headline)
+            if let collection {
+                Text("\(collection.publication.state) · revision \(collection.revision)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            TextField("Collection name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            TextField("Summary (optional)", text: $summary)
+                .textFieldStyle(.roundedBorder)
+            Text("Members and entry points")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            List(model.wikiNodes) { node in
+                HStack(spacing: 10) {
+                    Toggle(
+                        isOn: Binding(
+                            get: { memberNodeIDs.contains(node.id) },
+                            set: { isMember in
+                                if isMember {
+                                    memberNodeIDs.insert(node.id)
+                                } else {
+                                    memberNodeIDs.remove(node.id)
+                                    entryNodeIDs.remove(node.id)
+                                }
+                            }
+                        )
+                    ) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(node.title)
+                            Text("\(node.kind) · \(node.status)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    Toggle(
+                        "Entry",
+                        isOn: Binding(
+                            get: { entryNodeIDs.contains(node.id) },
+                            set: { isEntry in
+                                if isEntry {
+                                    memberNodeIDs.insert(node.id)
+                                    entryNodeIDs.insert(node.id)
+                                } else {
+                                    entryNodeIDs.remove(node.id)
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.checkbox)
+                    .disabled(!memberNodeIDs.contains(node.id))
+                }
+            }
+            .frame(minHeight: 220)
+            if let note = model.knowledgeCollectionConflictNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let error = model.knowledgeCollectionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Text("\(memberNodeIDs.count) members · \(entryNodeIDs.count) entries")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button(collection == nil ? "Create" : "Save") {
+                    Task {
+                        let saved: Bool
+                        if collection != nil {
+                            saved = await model.updateSelectedKnowledgeCollection(
+                                name: name,
+                                summary: summary,
+                                nodeIDs: Array(memberNodeIDs),
+                                entryNodeIDs: Array(entryNodeIDs)
+                            )
+                        } else {
+                            saved = await model.createKnowledgeCollection(
+                                name: name,
+                                summary: summary,
+                                nodeIDs: Array(memberNodeIDs),
+                                entryNodeIDs: Array(entryNodeIDs)
+                            )
+                        }
+                        if saved { dismiss() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.isSavingKnowledgeCollection
+                        || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || memberNodeIDs.isEmpty
+                        || entryNodeIDs.isEmpty
+                )
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 620, minHeight: 520)
+        .onAppear {
+            if let collection {
+                name = collection.name
+                summary = collection.summary ?? ""
+                memberNodeIDs = Set(collection.nodeIDs)
+                entryNodeIDs = Set(collection.entryNodeIDs)
+            }
         }
     }
 }
@@ -2452,7 +2998,7 @@ private struct ReviewIssueDetailPanel: View {
             }
             TextField("Transition reason (optional)", text: $reason)
                 .textFieldStyle(.roundedBorder)
-                .disabled(model.isTransitioningIssue)
+                .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
             HStack(spacing: 6) {
                 ForEach(model.legalIssueTransitions, id: \.self) { target in
                     Button(target) {
@@ -2462,10 +3008,44 @@ private struct ReviewIssueDetailPanel: View {
                         }
                     }
                     .font(.caption)
-                    .disabled(model.isTransitioningIssue)
+                    .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
+                }
+            }
+            if issue.state == "ready_for_verification" {
+                Button("Recapture and Verify", systemImage: "camera.badge.ellipsis") {
+                    Task { await model.recaptureAndVerifySelectedIssue() }
+                }
+                .controlSize(.small)
+                .disabled(model.isTransitioningIssue || model.isRecapturingIssue)
+            }
+            if model.isRecapturingIssue {
+                ProgressView("Capturing a later build and verifying…")
+                    .controlSize(.small)
+                    .font(.caption)
+            } else if let result = model.lastIssueVerification,
+                      result.issue.issueID == issue.issueID {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Verification \(result.verification.result.uppercased())")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(
+                            result.verification.result == "passed" ? Color.green : Color.orange
+                        )
+                    Text("Build \(result.verification.verifiedBuildID)")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("The captured Snapshot is available in Evidence.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             if let error = model.issueTransitionError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            }
+            if let error = model.issueVerificationError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -2620,11 +3200,12 @@ private struct EventTimelineStrip: View {
 /// capture entry.
 private struct ContextBar: View {
     @ObservedObject var model: SnapshotWorkspaceModel
+    let workspaceName: String?
+    let onManageWorkspaces: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 14) {
-            Label("Vistrea Studio", systemImage: "rectangle.3.group")
-                .font(.headline)
+            workspaceLabel
             Divider()
                 .frame(height: 18)
             scopePicker
@@ -2648,6 +3229,26 @@ private struct ContextBar: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+        .studioAccessibilityContainer(StudioAccessibilityID.contextBar)
+    }
+
+    @ViewBuilder
+    private var workspaceLabel: some View {
+        if let workspaceName, let onManageWorkspaces {
+            Menu {
+                Button("Manage Workspaces…", action: onManageWorkspaces)
+            } label: {
+                Label(workspaceName, systemImage: "folder.fill")
+                    .font(.headline)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Manage local Workspaces")
+            .accessibilityLabel("Current Workspace, \(workspaceName)")
+        } else {
+            Label("Vistrea Studio", systemImage: "rectangle.3.group")
+                .font(.headline)
+        }
     }
 
     @ViewBuilder
@@ -2799,6 +3400,7 @@ private struct ScreenshotPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorScreenshot)
     }
 
     @ViewBuilder
@@ -2869,6 +3471,7 @@ private struct ViewTreePane: View {
             Divider()
             treeContent
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.inspectorTree)
     }
 
     @ViewBuilder
@@ -2993,33 +3596,32 @@ private struct NodeDetailsPane: View {
     }
 }
 
-/// The alpha preview controls for one selected node. The Host, not this
-/// package, is what protects the capability: a Host without an authorized
-/// Debug Runtime rejects the routes and the failure is shown inline.
+/// Reversible visual-property controls for one selected node. The Host and
+/// Debug Runtime remain the security boundary; Studio only creates canonical
+/// Tuning Patches and renders explicit applied/rejected outcomes.
 private struct TuningPreviewControls: View {
     @ObservedObject var model: SnapshotWorkspaceModel
     let node: NodePresentation
+    @State private var property: TunableProperty = .alpha
     @State private var alphaValue: Double = 1
+    @State private var cornerRadiusValue: Double = 0
+    @State private var foregroundColor = Color.primary
+    @State private var backgroundColor = Color.clear
+    @State private var fontFamily = "System"
+    @State private var fontSize: Double = 17
+    @State private var fontWeight: Double = 400
+    @State private var spacingOriginal: Double = 0
+    @State private var spacingValue: Double = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            LabeledContent(
-                "Source alpha",
-                value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
-            )
-            Slider(value: $alphaValue, in: 0...1) {
-                Text("Alpha")
-            }
-            HStack {
-                Text(alphaValue.formatted(.number.precision(.fractionLength(2))))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Preview alpha") {
-                    Task { await model.previewAlpha(alphaValue) }
+            Picker("Property", selection: $property) {
+                ForEach(TunableProperty.allCases) { value in
+                    Text(value.label).tag(value)
                 }
-                .disabled(model.isApplyingTuning)
             }
+            .accessibilityIdentifier(StudioAccessibilityID.tuningPropertyPicker)
+            propertyEditor
             if model.isApplyingTuning {
                 ProgressView("Applying preview…")
                     .controlSize(.small)
@@ -3033,11 +3635,315 @@ private struct TuningPreviewControls: View {
             if let outcome = model.lastTuningApplication {
                 TuningOutcomeView(application: outcome)
             }
+            if let patch = model.lastTuningPatch {
+                TuningSourceHandoffView(model: model, patch: patch)
+            }
         }
-        .onAppear { alphaValue = node.alpha ?? 1 }
+        .onAppear { resetValues() }
         .onChange(of: node.id) {
-            alphaValue = node.alpha ?? 1
+            resetValues()
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.tuningControls)
+    }
+
+    @ViewBuilder
+    private var propertyEditor: some View {
+        switch property {
+        case .alpha:
+            LabeledContent(
+                "Source alpha",
+                value: (node.alpha ?? 1).formatted(.number.precision(.fractionLength(0...2)))
+            )
+            Slider(value: $alphaValue, in: 0...1)
+                .accessibilityIdentifier(StudioAccessibilityID.tuningAlphaSlider)
+            previewButton("Preview alpha", property: "alpha") {
+                await model.previewAlpha(alphaValue)
+            }
+        case .foregroundColor:
+            colorEditor(
+                label: "Foreground",
+                source: node.foregroundColor,
+                selection: $foregroundColor,
+                property: "foreground_color"
+            )
+        case .backgroundColor:
+            colorEditor(
+                label: "Background",
+                source: node.backgroundColor,
+                selection: $backgroundColor,
+                property: "background_color"
+            )
+        case .font:
+            if let source = node.font {
+                LabeledContent("Source font", value: source.summaryText)
+                TextField("Family", text: $fontFamily)
+                LabeledContent("Size", value: fontSize.formatted(.number.precision(.fractionLength(1))))
+                Slider(value: $fontSize, in: 6...96, step: 0.5)
+                LabeledContent("Weight", value: Int(fontWeight).description)
+                Slider(value: $fontWeight, in: 100...900, step: 100)
+                previewButton("Preview font", property: "font") {
+                    await model.previewTuning(
+                        property: "font",
+                        originalValue: .font(
+                            family: source.family,
+                            size: source.size,
+                            weight: source.weight,
+                            style: source.style
+                        ),
+                        previewValue: .font(
+                            family: fontFamily,
+                            size: fontSize,
+                            weight: Int(fontWeight),
+                            style: source.style
+                        )
+                    )
+                }
+            } else {
+                unavailable("This node did not report a font.")
+            }
+        case .spacing:
+            Text("Enter the observed source spacing. The Runtime re-reads it and rejects a mismatch.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                TextField("Source", value: $spacingOriginal, format: .number)
+                TextField("Preview", value: $spacingValue, format: .number)
+            }
+            previewButton("Preview spacing", property: "spacing") {
+                await model.previewTuning(
+                    property: "spacing",
+                    originalValue: .number(value: spacingOriginal, unit: "logical_point"),
+                    previewValue: .number(value: spacingValue, unit: "logical_point")
+                )
+            }
+        case .cornerRadius:
+            if let source = node.cornerRadius {
+                LabeledContent(
+                    "Source radius",
+                    value: source.formatted(.number.precision(.fractionLength(0...2)))
+                )
+                Slider(value: $cornerRadiusValue, in: 0...64, step: 0.5)
+                previewButton("Preview corner radius", property: "corner-radius") {
+                    await model.previewTuning(
+                        property: "corner_radius",
+                        originalValue: .number(value: source, unit: "logical_point"),
+                        previewValue: .number(value: cornerRadiusValue, unit: "logical_point")
+                    )
+                }
+            } else {
+                unavailable("This node did not report a corner radius.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func colorEditor(
+        label: String,
+        source: ColorRGBAValueSummary?,
+        selection: Binding<Color>,
+        property: String
+    ) -> some View {
+        if let source {
+            LabeledContent("Source \(label.lowercased())", value: source.summaryText)
+            ColorPicker(label, selection: selection, supportsOpacity: true)
+            previewButton("Preview \(label.lowercased())", property: property.replacingOccurrences(of: "_", with: "-")) {
+                guard let preview = rgba(selection.wrappedValue) else { return }
+                await model.previewTuning(
+                    property: property,
+                    originalValue: .color(
+                        red: source.red,
+                        green: source.green,
+                        blue: source.blue,
+                        alpha: source.alpha
+                    ),
+                    previewValue: .color(
+                        red: preview.red,
+                        green: preview.green,
+                        blue: preview.blue,
+                        alpha: preview.alpha
+                    )
+                )
+            }
+        } else {
+            unavailable("This node did not report a \(label.lowercased()).")
+        }
+    }
+
+    private func previewButton(
+        _ title: String,
+        property: String,
+        operation: @escaping () async -> Void
+    ) -> some View {
+        HStack {
+            Spacer()
+            Button(title) { Task { await operation() } }
+                .disabled(model.isApplyingTuning)
+                .accessibilityIdentifier(StudioAccessibilityID.tuningPreview(property))
+        }
+    }
+
+    private func unavailable(_ message: String) -> some View {
+        Text(message).font(.caption).foregroundStyle(.secondary)
+    }
+
+    private func resetValues() {
+        alphaValue = node.alpha ?? 1
+        cornerRadiusValue = node.cornerRadius ?? 0
+        if let color = node.foregroundColor {
+            foregroundColor = Color(
+                red: color.red,
+                green: color.green,
+                blue: color.blue,
+                opacity: color.alpha
+            )
+        }
+        if let color = node.backgroundColor {
+            backgroundColor = Color(
+                red: color.red,
+                green: color.green,
+                blue: color.blue,
+                opacity: color.alpha
+            )
+        }
+        if let font = node.font {
+            fontFamily = font.family
+            fontSize = font.size
+            fontWeight = Double(font.weight)
+        }
+    }
+
+    private func rgba(_ color: Color) -> ColorRGBAValueSummary? {
+        guard let converted = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        return ColorRGBAValueSummary(
+            red: Double(converted.redComponent),
+            green: Double(converted.greenComponent),
+            blue: Double(converted.blueComponent),
+            alpha: Double(converted.alphaComponent)
+        )
+    }
+
+    private enum TunableProperty: String, CaseIterable, Identifiable {
+        case alpha
+        case foregroundColor
+        case backgroundColor
+        case font
+        case spacing
+        case cornerRadius
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .alpha: "Alpha"
+            case .foregroundColor: "Foreground color"
+            case .backgroundColor: "Background color"
+            case .font: "Font"
+            case .spacing: "Spacing"
+            case .cornerRadius: "Corner radius"
+            }
+        }
+    }
+}
+
+/// A Coding Agent handoff generated from the exact persisted Tuning Patch.
+/// Missing source mapping remains visible and never turns into a fabricated
+/// file path.
+private struct TuningSourceHandoffView: View {
+    @ObservedObject var model: SnapshotWorkspaceModel
+    let patch: TuningPatchSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+            HStack {
+                Label("Source Handoff", systemImage: "chevron.left.forwardslash.chevron.right")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button("Prepare") {
+                    Task { await model.loadTuningSourceSuggestions() }
+                }
+                .controlSize(.small)
+                .disabled(isLoading)
+            }
+            Text(patch.title)
+                .font(.caption)
+                .lineLimit(2)
+            Text("Patch \(patch.patchID)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            switch model.tuningSourceSuggestionsPhase {
+            case .idle:
+                Text("Prepare a source-oriented instruction set for a Coding Agent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .loading:
+                ProgressView("Preparing source handoff…")
+                    .controlSize(.small)
+            case .empty:
+                Text("This patch produced no source suggestions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .content:
+                ForEach(model.tuningSourceSuggestions) { suggestion in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(suggestion.property.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .font(.caption.weight(.medium))
+                            Spacer()
+                            Text(suggestion.status == "actionable" ? "Mapped" : "Needs source mapping")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(suggestion.status == "actionable" ? Color.green : Color.orange)
+                        }
+                        if let stableID = suggestion.stableID {
+                            Text(stableID)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        if let sourceContext = suggestion.sourceContextPresentation {
+                            LabeledContent("Source context") {
+                                Text(sourceContext)
+                                    .font(.caption2.monospaced())
+                                    .textSelection(.enabled)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        LabeledContent("Source value") {
+                            Text(suggestion.originalValuePresentation)
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Suggested value") {
+                            Text(suggestion.suggestedValuePresentation)
+                                .font(.caption2.monospaced())
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        ForEach(Array(suggestion.codingAgentInstructions.enumerated()), id: \.offset) { _, instruction in
+                            Text("• \(instruction)")
+                                .font(.caption)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(7)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+        }
+    }
+
+    private var isLoading: Bool {
+        if case .loading = model.tuningSourceSuggestionsPhase { return true }
+        return false
     }
 }
 
@@ -3068,40 +3974,45 @@ private struct ActiveTuningList: View {
     @ObservedObject var model: SnapshotWorkspaceModel
 
     var body: some View {
-        switch model.tuningPhase {
-        case .idle, .loading:
-            ProgressView("Loading active previews…")
-                .controlSize(.small)
-        case .empty:
-            Text("No active tuning previews.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case let .failure(message):
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
-        case .content:
-            ForEach(model.activeTuning) { application in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(application.tuningApplicationID)
-                            .font(.caption.monospaced())
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Text("\(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            switch model.tuningPhase {
+            case .idle, .loading:
+                ProgressView("Loading active previews…")
+                    .controlSize(.small)
+            case .empty:
+                Text("No active tuning previews.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case let .failure(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+            case .content:
+                ForEach(model.activeTuning) { application in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(application.tuningApplicationID)
+                                .font(.caption.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text("\(application.status) · \(application.appliedChanges.count) applied · \(application.rejectedChanges.count) rejected")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Revert") {
+                            Task { await model.revertTuning(id: application.id) }
+                        }
+                        .disabled(model.revertingTuningIDs.contains(application.id))
+                        .accessibilityIdentifier(StudioAccessibilityID.tuningRevert(application.id))
                     }
-                    Spacer()
-                    Button("Revert") {
-                        Task { await model.revertTuning(id: application.id) }
-                    }
-                    .disabled(model.revertingTuningIDs.contains(application.id))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Active tuning preview, status \(application.status)")
                 }
-                .accessibilityLabel("Active tuning preview, status \(application.status)")
             }
         }
+        .studioAccessibilityContainer(StudioAccessibilityID.tuningActivePreviews)
     }
 }
 

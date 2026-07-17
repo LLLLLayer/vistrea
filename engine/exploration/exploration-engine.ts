@@ -7,7 +7,7 @@ import {
   type VersionSelector,
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
-import type { AutomationEngine } from "../automation/index.js";
+import { AutomationError, type AutomationEngine } from "../automation/index.js";
 import {
   ScreenGraphEngine,
   deterministicGraphId,
@@ -15,8 +15,10 @@ import {
 } from "./screen-graph-engine.js";
 
 const DEFAULT_SETTLE_MILLISECONDS = 1_000;
+const DEFAULT_MAXIMUM_RECOVERY_ATTEMPTS = 2;
 const MAXIMUM_ACTION_BUDGET = 500;
 const MAXIMUM_EXPLORATION_DEPTH = 32;
+const MAXIMUM_RECOVERY_ATTEMPTS = 5;
 const TAG_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 
 export interface ExplorationCapturePort {
@@ -36,6 +38,10 @@ export interface ExploreCommand {
   readonly maximum_actions: number;
   readonly maximum_depth?: number;
   readonly settle_milliseconds?: number;
+  /** Optional launch identity overriding the captured Runtime application ID. */
+  readonly application_id?: string;
+  /** Number of bounded relaunch-and-restore attempts; defaults to two. */
+  readonly maximum_recovery_attempts?: number;
   /**
    * Stable IDs exploration must never tap. Debug tooling controls (for
    * example the in-app Inspector launcher) belong to Vistrea, not to the
@@ -59,8 +65,19 @@ export interface ExplorationReport {
   readonly initial_state_id: string;
   readonly steps: readonly ExecutedExplorationStep[];
   readonly discovered_state_ids: readonly string[];
+  /** Every provider action, including relaunch and restoration replay. */
   readonly action_count: number;
+  readonly recovery_attempt_count: number;
+  readonly recovery_count: number;
+  readonly restoration_action_count: number;
+  readonly recoveries: readonly ExplorationRecoveryEvent[];
   readonly stopped_reason: "action_budget" | "frontier_exhausted" | "stuck" | "cancelled";
+}
+
+export interface ExplorationRecoveryEvent {
+  readonly attempt: number;
+  readonly restored_state_id: string;
+  readonly replayed_action_count: number;
 }
 
 /** Per-run observation hooks for long-running callers such as Operations. */
@@ -88,6 +105,33 @@ export interface TaggedGraphVersion {
 interface FrontierEntry {
   readonly stableId: string;
 }
+
+interface RestorationFrame {
+  readonly stateId: string;
+  /** Action from the previous frame; absent only when no replay path is known. */
+  readonly viaStableId?: string;
+}
+
+interface ActionBudget {
+  remaining: number;
+  used: number;
+}
+
+interface RecoveryTracker {
+  remainingAttempts: number;
+  attemptsUsed: number;
+  restorationActions: number;
+  readonly events: ExplorationRecoveryEvent[];
+}
+
+interface ExplorationStepResult {
+  readonly snapshot: RuntimeSnapshot;
+  readonly observed: RecordStateObservationResult;
+  readonly transitionId: string;
+  readonly createdTransition: boolean;
+}
+
+class ExplorationActionBudgetExhausted extends Error {}
 
 /**
  * Bounded deterministic depth-first exploration over real executed actions.
@@ -144,6 +188,26 @@ export class ExplorationEngine {
         "settle_milliseconds is outside the supported range.",
       );
     }
+    const recoveryAttempts =
+      command.maximum_recovery_attempts ?? DEFAULT_MAXIMUM_RECOVERY_ATTEMPTS;
+    if (
+      !Number.isSafeInteger(recoveryAttempts) ||
+      recoveryAttempts < 0 ||
+      recoveryAttempts > MAXIMUM_RECOVERY_ATTEMPTS
+    ) {
+      throw new DataError(
+        "invalid_argument",
+        "maximum_recovery_attempts is outside the supported range.",
+      );
+    }
+    if (
+      command.application_id !== undefined &&
+      (typeof command.application_id !== "string" ||
+        command.application_id.length === 0 ||
+        command.application_id.length > 256)
+    ) {
+      throw new DataError("invalid_argument", "application_id is invalid.");
+    }
     const excluded = command.excluded_stable_ids ?? [];
     if (
       !Array.isArray(excluded) ||
@@ -161,6 +225,14 @@ export class ExplorationEngine {
     const maximumDepth = command.maximum_depth ?? 8;
     const settleMilliseconds = command.settle_milliseconds ?? DEFAULT_SETTLE_MILLISECONDS;
     const excludedStableIds = new Set(command.excluded_stable_ids ?? []);
+    const actionBudget: ActionBudget = { remaining: command.maximum_actions, used: 0 };
+    const recovery: RecoveryTracker = {
+      remainingAttempts:
+        command.maximum_recovery_attempts ?? DEFAULT_MAXIMUM_RECOVERY_ATTEMPTS,
+      attemptsUsed: 0,
+      restorationActions: 0,
+      events: [],
+    };
 
     let snapshot = await this.#capture.captureSnapshot("before_action");
     let observed = this.#graph.recordStateObservation({
@@ -174,16 +246,17 @@ export class ExplorationEngine {
     const executedByState = new Map<string, Set<string>>();
     const discovered = new Set<string>([initialStateId]);
     const steps: ExecutedExplorationStep[] = [];
-    const depthStack: string[] = [observed.screen_state.screen_state_id];
-    let actionCount = 0;
+    const depthStack: RestorationFrame[] = [
+      { stateId: observed.screen_state.screen_state_id },
+    ];
     let stoppedReason: ExplorationReport["stopped_reason"] = "frontier_exhausted";
 
-    while (actionCount < command.maximum_actions) {
+    while (actionBudget.remaining > 0) {
       if (hooks.shouldContinue?.() === false) {
         stoppedReason = "cancelled";
         break;
       }
-      const currentStateId = depthStack[depthStack.length - 1] as string;
+      const currentStateId = (depthStack[depthStack.length - 1] as RestorationFrame).stateId;
       const candidate = this.#nextCandidate(
         snapshot,
         executedByState,
@@ -197,13 +270,24 @@ export class ExplorationEngine {
           stoppedReason = "frontier_exhausted";
           break;
         }
-        const back = await this.#step(
-          command,
-          snapshot,
-          { kind: "back" },
-          settleMilliseconds,
-        );
-        actionCount += 1;
+        let back: ExplorationStepResult;
+        try {
+          back = await this.#step(
+            command,
+            snapshot,
+            { kind: "back" },
+            settleMilliseconds,
+            depthStack,
+            actionBudget,
+            recovery,
+          );
+        } catch (error) {
+          if (error instanceof ExplorationActionBudgetExhausted) {
+            stoppedReason = "action_budget";
+            break;
+          }
+          throw error;
+        }
         snapshot = back.snapshot;
         const returnedStateId = back.observed.screen_state.screen_state_id;
         steps.push({
@@ -221,13 +305,14 @@ export class ExplorationEngine {
           break;
         }
         depthStack.pop();
-        if (depthStack[depthStack.length - 1] !== returnedStateId) {
+        if (depthStack[depthStack.length - 1]?.stateId !== returnedStateId) {
           // Back landed somewhere unexpected; restart the branch bookkeeping
-          // from the actually observed state.
+          // from the actually observed state. With no known replay path,
+          // recovery later fails honestly instead of guessing navigation.
           depthStack.length = 0;
-          depthStack.push(returnedStateId);
+          depthStack.push({ stateId: returnedStateId });
         }
-        if (actionCount >= command.maximum_actions) {
+        if (actionBudget.remaining === 0) {
           // The budget ran out on the return navigation, not the frontier.
           stoppedReason = "action_budget";
           break;
@@ -236,13 +321,24 @@ export class ExplorationEngine {
       }
 
       this.#markExecuted(executedByState, currentStateId, candidate.stableId);
-      const forward = await this.#step(
-        command,
-        snapshot,
-        { kind: "tap", stableId: candidate.stableId },
-        settleMilliseconds,
-      );
-      actionCount += 1;
+      let forward: ExplorationStepResult;
+      try {
+        forward = await this.#step(
+          command,
+          snapshot,
+          { kind: "tap", stableId: candidate.stableId },
+          settleMilliseconds,
+          depthStack,
+          actionBudget,
+          recovery,
+        );
+      } catch (error) {
+        if (error instanceof ExplorationActionBudgetExhausted) {
+          stoppedReason = "action_budget";
+          break;
+        }
+        throw error;
+      }
       snapshot = forward.snapshot;
       const targetStateId = forward.observed.screen_state.screen_state_id;
       const discoveredNewState = !discovered.has(targetStateId);
@@ -259,16 +355,19 @@ export class ExplorationEngine {
       hooks.onStep?.(steps[steps.length - 1] as ExecutedExplorationStep);
       if (targetStateId !== currentStateId) {
         if (discoveredNewState && depthStack.length < maximumDepth) {
-          depthStack.push(targetStateId);
-        } else if (depthStack.length >= 2 && depthStack[depthStack.length - 2] === targetStateId) {
+          depthStack.push({ stateId: targetStateId, viaStableId: candidate.stableId });
+        } else if (
+          depthStack.length >= 2 &&
+          depthStack[depthStack.length - 2]?.stateId === targetStateId
+        ) {
           // The action navigated back on its own.
           depthStack.pop();
         } else {
           depthStack.length = 0;
-          depthStack.push(targetStateId);
+          depthStack.push({ stateId: targetStateId });
         }
       }
-      if (actionCount >= command.maximum_actions) {
+      if (actionBudget.remaining === 0) {
         stoppedReason = "action_budget";
         break;
       }
@@ -279,7 +378,11 @@ export class ExplorationEngine {
       initial_state_id: initialStateId,
       steps,
       discovered_state_ids: [...discovered],
-      action_count: actionCount,
+      action_count: actionBudget.used,
+      recovery_attempt_count: recovery.attemptsUsed,
+      recovery_count: recovery.events.length,
+      restoration_action_count: recovery.restorationActions,
+      recoveries: recovery.events,
       stopped_reason: stoppedReason,
     };
   }
@@ -350,63 +453,215 @@ export class ExplorationEngine {
     beforeSnapshot: RuntimeSnapshot,
     action: { readonly kind: "tap" | "back"; readonly stableId?: string },
     settleMilliseconds: number,
-  ): Promise<{
-    snapshot: RuntimeSnapshot;
-    observed: RecordStateObservationResult;
-    transitionId: string;
-    createdTransition: boolean;
-  }> {
-    const result = await this.#automation.execute({
-      automation_session_id: command.automation_session_id,
-      kind: action.kind,
-      ...(action.kind === "tap"
-        ? {
-            target: { stable_id: action.stableId as string },
-            expected_snapshot_id: beforeSnapshot.snapshot_id,
-          }
-        : {}),
-      intent: {
-        requested_effect:
-          action.kind === "tap"
-            ? `Exploration tap on ${action.stableId as string}`
-            : "Exploration back navigation",
-      },
-    });
-    if (result.outcome === "blocked" || result.outcome === "failed") {
-      // The provider's own words explain the refusal (a locked display, an
-      // unsafe input) far better than the outcome word alone.
-      throw new DataError("conflict", `An exploration action did not execute: ${result.detail}`, {
-        details: { outcome: result.outcome, kind: action.kind },
-      });
-    }
-    if (settleMilliseconds > 0) {
-      await this.#sleep(settleMilliseconds);
-    }
-    const snapshot = await this.#capture.captureSnapshot("after_action");
-    const observed = this.#graph.recordStateObservation({
-      snapshot_id: snapshot.snapshot_id,
-      capture_source: "automation",
-    });
-    const transition = this.#graph.recordTransitionObservation({
-      before_snapshot_id: beforeSnapshot.snapshot_id,
-      after_snapshot_id: snapshot.snapshot_id,
-      action: {
+    restorationPath: readonly RestorationFrame[],
+    actionBudget: ActionBudget,
+    recovery: RecoveryTracker,
+  ): Promise<ExplorationStepResult> {
+    let attemptSnapshot = beforeSnapshot;
+    while (true) {
+      this.#consumeAction(actionBudget);
+      const result = await this.#automation.execute({
+        automation_session_id: command.automation_session_id,
         kind: action.kind,
-        requested_effect:
-          action.kind === "tap"
-            ? `Exploration tap on ${action.stableId as string}`
-            : "Exploration back navigation",
-        risk: "safe",
-        ...(action.kind === "tap" ? { target: { stable_id: action.stableId as string } } : {}),
-      },
-      capture_source: "automation",
-    });
-    return {
-      snapshot,
-      observed,
-      transitionId: transition.transition.transition_id,
-      createdTransition: transition.created,
-    };
+        ...(action.kind === "tap"
+          ? {
+              target: { stable_id: action.stableId as string },
+              expected_snapshot_id: attemptSnapshot.snapshot_id,
+            }
+          : {}),
+        intent: {
+          requested_effect:
+            action.kind === "tap"
+              ? `Exploration tap on ${action.stableId as string}`
+              : "Exploration back navigation",
+        },
+      });
+      if (result.outcome === "blocked" || result.outcome === "failed") {
+        // The provider's own words explain the refusal (a locked display, an
+        // unsafe input) far better than the outcome word alone.
+        throw new DataError(
+          "conflict",
+          `An exploration action did not execute: ${result.detail}`,
+          { details: { outcome: result.outcome, kind: action.kind } },
+        );
+      }
+      if (settleMilliseconds > 0) {
+        await this.#sleep(settleMilliseconds);
+      }
+
+      let snapshot: RuntimeSnapshot;
+      try {
+        snapshot = await this.#capture.captureSnapshot("after_action");
+      } catch (error) {
+        if (!isRecoverableCaptureFailure(error) || recovery.remainingAttempts === 0) {
+          throw error;
+        }
+        const runtimeContext = beforeSnapshot["runtime_context"] as JsonObject;
+        const applicationId = command.application_id ?? runtimeContext["application_id"];
+        if (typeof applicationId !== "string" || applicationId.length === 0) {
+          throw error;
+        }
+        attemptSnapshot = await this.#restoreState(
+          command,
+          restorationPath,
+          applicationId,
+          settleMilliseconds,
+          actionBudget,
+          recovery,
+        );
+        continue;
+      }
+
+      const observed = this.#graph.recordStateObservation({
+        snapshot_id: snapshot.snapshot_id,
+        capture_source: "automation",
+      });
+      const transition = this.#graph.recordTransitionObservation({
+        before_snapshot_id: attemptSnapshot.snapshot_id,
+        after_snapshot_id: snapshot.snapshot_id,
+        action: {
+          kind: action.kind,
+          requested_effect:
+            action.kind === "tap"
+              ? `Exploration tap on ${action.stableId as string}`
+              : "Exploration back navigation",
+          risk: "safe",
+          ...(action.kind === "tap"
+            ? { target: { stable_id: action.stableId as string } }
+            : {}),
+        },
+        capture_source: "automation",
+      });
+      return {
+        snapshot,
+        observed,
+        transitionId: transition.transition.transition_id,
+        createdTransition: transition.created,
+      };
+    }
+  }
+
+  /**
+   * Relaunches the app and deterministically replays the known path from the
+   * entry state. Recovery succeeds only when every structural Screen State
+   * identity matches the pre-crash path; it never guesses from coordinates or
+   * reports an unverified state as restored.
+   */
+  async #restoreState(
+    command: ExploreCommand,
+    restorationPath: readonly RestorationFrame[],
+    applicationId: string,
+    settleMilliseconds: number,
+    actionBudget: ActionBudget,
+    recovery: RecoveryTracker,
+  ): Promise<RuntimeSnapshot> {
+    recoveryAttempt: while (recovery.remainingAttempts > 0) {
+      recovery.remainingAttempts -= 1;
+      recovery.attemptsUsed += 1;
+      const attempt = recovery.attemptsUsed;
+
+      this.#consumeAction(actionBudget);
+      const launched = await this.#automation.execute({
+        automation_session_id: command.automation_session_id,
+        kind: "launch",
+        intent: { requested_effect: `Recover ${applicationId} after a lost Runtime connection` },
+        payload: { bundle_id: applicationId, package_id: applicationId },
+      });
+      if (launched.outcome === "blocked" || launched.outcome === "failed") {
+        continue;
+      }
+      if (settleMilliseconds > 0) {
+        await this.#sleep(settleMilliseconds);
+      }
+
+      let currentSnapshot: RuntimeSnapshot;
+      try {
+        currentSnapshot = await this.#capture.captureSnapshot("after_action");
+      } catch (error) {
+        if (isRecoverableCaptureFailure(error)) {
+          continue;
+        }
+        throw error;
+      }
+      let currentObserved = this.#graph.recordStateObservation({
+        snapshot_id: currentSnapshot.snapshot_id,
+        capture_source: "automation",
+      });
+      const root = restorationPath[0];
+      if (root === undefined || currentObserved.screen_state.screen_state_id !== root.stateId) {
+        continue;
+      }
+
+      let replayedThisAttempt = 0;
+      for (const frame of restorationPath.slice(1)) {
+        const stableId = frame.viaStableId;
+        if (stableId === undefined) {
+          continue recoveryAttempt;
+        }
+        const replayBefore = currentSnapshot;
+        this.#consumeAction(actionBudget);
+        const replayed = await this.#automation.execute({
+          automation_session_id: command.automation_session_id,
+          kind: "tap",
+          target: { stable_id: stableId },
+          expected_snapshot_id: replayBefore.snapshot_id,
+          intent: { requested_effect: `Restore state by replaying ${stableId}` },
+        });
+        recovery.restorationActions += 1;
+        if (replayed.outcome === "blocked" || replayed.outcome === "failed") {
+          continue recoveryAttempt;
+        }
+        if (settleMilliseconds > 0) {
+          await this.#sleep(settleMilliseconds);
+        }
+        try {
+          currentSnapshot = await this.#capture.captureSnapshot("after_action");
+        } catch (error) {
+          if (isRecoverableCaptureFailure(error)) {
+            continue recoveryAttempt;
+          }
+          throw error;
+        }
+        currentObserved = this.#graph.recordStateObservation({
+          snapshot_id: currentSnapshot.snapshot_id,
+          capture_source: "automation",
+        });
+        this.#graph.recordTransitionObservation({
+          before_snapshot_id: replayBefore.snapshot_id,
+          after_snapshot_id: currentSnapshot.snapshot_id,
+          action: {
+            kind: "tap",
+            requested_effect: `Exploration tap on ${stableId}`,
+            risk: "safe",
+            target: { stable_id: stableId },
+          },
+          capture_source: "automation",
+        });
+        replayedThisAttempt += 1;
+        if (currentObserved.screen_state.screen_state_id !== frame.stateId) {
+          continue recoveryAttempt;
+        }
+      }
+
+      recovery.events.push({
+        attempt,
+        restored_state_id: currentObserved.screen_state.screen_state_id,
+        replayed_action_count: replayedThisAttempt,
+      });
+      return currentSnapshot;
+    }
+    throw new AutomationError(
+      "timeout",
+      "The app could not be restored to the pre-crash Screen State within the recovery limit.",
+    );
+  }
+
+  #consumeAction(budget: ActionBudget): void {
+    if (budget.remaining <= 0) {
+      throw new ExplorationActionBudgetExhausted();
+    }
+    budget.remaining -= 1;
+    budget.used += 1;
   }
 
   #nextCandidate(
@@ -449,4 +704,13 @@ export class ExplorationEngine {
       existing.add(stableId);
     }
   }
+}
+
+/** Only lost/late Runtime connectivity is safe to repair with a relaunch. */
+function isRecoverableCaptureFailure(error: unknown): boolean {
+  if (error === null || typeof error !== "object") {
+    return false;
+  }
+  const code = (error as { readonly code?: unknown }).code;
+  return code === "unavailable" || code === "timeout";
 }

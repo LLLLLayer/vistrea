@@ -1,0 +1,68 @@
+name: VistreaStudioUIRegression
+
+options:
+  bundleIdPrefix: dev.vistrea
+  deploymentTarget:
+    macOS: "14.0"
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  minimumXcodeGenVersion: 2.45.4
+
+packages:
+  VistreaStudio:
+    path: ../../apps/studio-macos
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.4
+
+targets:
+  VistreaStudioUITestHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: ../../apps/studio-macos/Sources/VistreaStudioApp
+    dependencies:
+      - package: VistreaStudio
+        product: VistreaStudioCore
+      - package: VistreaStudio
+        product: VistreaStudioHostRuntime
+      - package: Sparkle
+        product: Sparkle
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.studio-ui-test-host
+        PRODUCT_NAME: VistreaStudio
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+
+  VistreaStudioUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: VistreaStudioUITestHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vistrea.studio-ui-tests
+        SWIFT_VERSION: 6.0
+        SWIFT_STRICT_CONCURRENCY: complete
+        GENERATE_INFOPLIST_FILE: true
+
+schemes:
+  VistreaStudioUIRegression:
+    build:
+      targets:
+        VistreaStudioUITestHost: all
+        VistreaStudioUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - VistreaStudioUITests

@@ -37,7 +37,7 @@ It connects those capabilities into a persistent Runtime UI Knowledge System.
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │                    Vistrea Studio for macOS                  │
-│ Canvas / Deep Wiki / Design Review / Tuning / Inspector     │
+│ Canvas / Documents / Deep Wiki / Tuning / Inspector         │
 └──────────────────────────────┬───────────────────────────────┘
                                │ public use cases
 ┌──────────────────────────────▼───────────────────────────────┐
@@ -98,7 +98,7 @@ Initial platform sources:
 | Android View | Activity, Fragment, Window, ViewGroup | Resource ID and accessibility |
 | Android Compose | Semantics Tree and TestTag | Host View and explicit semantics |
 
-The current verified native slice covers UIKit and Android View hierarchy capture, synchronized PNG screenshots, protected Debug/Internal Runtime connection, canonical Snapshot delivery to the local Host, negotiated Runtime Event Batch streaming, and reversible allowlisted tuning previews. SwiftUI and Compose ship semantics annotation bridges that feed the existing capture; full SwiftUI and Compose semantic-tree capture remains follow-up adapter work.
+The current verified native slice covers UIKit and Android View hierarchy capture, full Compose semantics-tree capture, accessibility-runtime-dependent SwiftUI element capture, synchronized PNG screenshots, protected Debug/Internal Runtime connection, canonical Snapshot delivery to the local Host, and negotiated Runtime Event Batch streaming. The UIKit and Android View adapters implement reversible allowlisted alpha, color, font, spacing, inset, and corner-radius previews; physical-device acceptance of every supported view/property combination remains follow-up work.
 
 The SDK observes. It must not bypass real UI paths by calling arbitrary business methods.
 
@@ -135,7 +135,22 @@ It manages:
 
 Device automation performs real tap, type, swipe, back, launch, and system UI interaction. SDK-reported nodes may guide targeting, but the action still occurs through the real automation layer.
 
-The implemented Host slice owns authenticated loopback Runtime sessions, canonical Snapshot capture/get/list use cases, ordered Object-before-metadata persistence, the loopback Local API, and production local Workspace composition. Device automation (`adb` and WebDriverAgent providers), deterministic exploration with Screen State identity, design review and reversible tuning, Deep Wiki knowledge, core validation and build diff, and optional Hub pack sync are implemented behind the same Data ports; real-input automation is verified on Android while the iOS WebDriverAgent lane awaits its first device run. Dedicated versioning and long-running operation use cases above the Data ports remain future Engine slices.
+The implemented Host slice owns authenticated Runtime sessions (plaintext only
+on literal loopback, or exact-IP TLS 1.3 with leaf-certificate pinning for the
+physical-device profile), canonical Snapshot capture/get/list use cases,
+ordered Object-before-metadata persistence, the independent loopback Local API,
+and production local Workspace composition. Device automation (`adb` and
+WebDriverAgent providers), deterministic exploration with Screen State
+identity, bounded crash recovery and state restoration, design review and
+reversible tuning, Deep Wiki knowledge, core validation and build diff, and
+optional Hub pack sync are implemented behind the same Data ports. The basic
+real-input, dangerous-action, and raised Storefront acceptances are verified on
+both platforms; iOS also proves real clear and dismiss actions. The iOS
+physical vertical is verified through pinned TLS, Studio/CLI equality,
+production reopen, credential rotation, secret scanning, and cleanup on an
+iPhone 14 Pro running iOS 26.5. The Android physical runner remains implemented
+but hardware-unverified. Dedicated versioning and generic long-running
+operation use cases above the Data ports remain future Engine slices.
 
 ### 2.5 Vistrea Studio for macOS
 
@@ -146,8 +161,9 @@ It includes:
 - device and Runtime SDK connection;
 - current screenshot and live Snapshot inspection;
 - Screen State Canvas;
+- configured read-only project Markdown documents;
 - versioned Deep Wiki;
-- design review and visual tuning workspace;
+- visual tuning workspace;
 - 2D View/Semantics Tree;
 - Lookin-style 3D View/Layer Inspector;
 - validation and build-diff results;
@@ -155,13 +171,15 @@ It includes:
 
 Studio composes Engine use cases. Views and ViewModels must not access SQLite, object paths, automation implementations, or Hub transport directly.
 
-The current native SwiftUI Studio implements the Snapshot workspace — Host status, capture and list, screenshot evidence, 2D UI tree, node properties, scenario/build/source context, and explicit loading/error states — plus a persisted Runtime event timeline, a Review Issues pane, a Screen State Canvas tab, a Deep Wiki search tab, and a SceneKit 3D Layer Inspector. Wiki editing, Canvas curation, the design comparison workbench, and validation, build-diff, and sync screens remain planned; `apps/studio-macos/README.md` tracks the exact implemented surface.
+The current native SwiftUI Studio is Canvas-first: an Application Version + Build scope selects a build-scoped Screen State Canvas, and a selected state resolves that build's canonical Snapshot into screenshot, 2D tree, hierarchy-depth 3D, node properties, tuning, annotations, knowledge links, and Screen State-scoped Review Issues, while a secondary Evidence library retains raw Snapshots. Runtime events live in a bottom timeline. A separate Documents section associates the Workspace with a local source checkout and browses the Markdown roots declared by the repository-owned `vistrea.project.json`; those read-only files remain outside SQLite and the Deep Wiki. Wiki node and Knowledge Collection editing, Canvas merge/split curation, state annotations, live exploration progress, Tuning Patch source handoff, Snapshot and Screen Graph validation, Finding suppression, and same-application Build Diff are implemented. The design comparison, Difference-to-Issue promotion, and fresh-build verification stack remains available through Engine, Host, CLI, and tests, but Design Review is intentionally absent from the default Studio Inspector. A packaged Studio owns an embedded production Host and manages local Workspaces through a Welcome and recent-location surface with explicit create, open, switch, reveal, and close actions. It restores the last available Workspace, reports missing or unrecognized locations without modifying them, and lets registered `.vistrea` directory packages reopen through Finder; environment-provided Host credentials remain an explicit development integration. A separate Workspace Manager exposes online recovery-point create/list/release and runs restore, exact-plan object garbage collection, interrupted-restore recovery, and stale-lock recovery through a strict Host stop, one-shot offline runner, and Host reopen lifecycle. Maintenance and reopen failures remain independently visible. Generic Agent activity review and broader collaboration editors remain follow-up product surfaces; `apps/studio-macos/README.md` tracks the exact implemented surface.
+
+Local Studio packaging remains outside the product-layer boundary: a release tool assembles the SwiftPM executable into a Universal app, embeds pinned architecture-specific Node.js and production Host runtimes plus the pinned but metadata-disabled Sparkle dependency, and produces local ZIP/DMG artifacts. The credential-free ad-hoc package and a real packaged-app launch/clean-quit loop are verified. The canonical packager has no formal-distribution credential branch. Public macOS distribution, update publication, and installed old-to-new update acceptance are deferred, and no tag-triggered release workflow is active.
 
 ### 2.6 Design review and UI tuning
 
 Designers must be able to open a real Screen State from a device, build, Canvas, or Deep Wiki and compare it with a design reference or approved build baseline.
 
-Planned review capabilities:
+The implemented review foundation includes:
 
 - side-by-side, overlay, opacity-slider, and pixel-diff comparison;
 - mapping between design regions and runtime UI nodes;
@@ -171,7 +189,7 @@ Planned review capabilities:
 - Review Issue ownership, severity, state, evidence, and verification history;
 - re-verification against a later build.
 
-Planned tuning capabilities:
+The implemented tuning foundation includes:
 
 - preview allowlisted visual-property changes in a Debug/Internal application;
 - display source value and preview value separately;
@@ -211,7 +229,7 @@ The Deep Wiki is not just a canvas. It must be persistent, searchable, linked, v
 
 ### 2.8 Native Demo Apps
 
-Vistrea includes canonical native Demo Apps for iOS and Android. Both applications implement all 12 required shared Scenario IDs and act as executable contract fixtures, not marketing samples. The `demo.navigation.basic` Runtime Snapshot path is verified end to end on iOS UIKit and Android View, Runtime events and reversible tuning are verified on both platforms, and real-input automation is verified on Android; `examples/scenarios/manifest.json` records the authoritative per-platform capability status for the remaining scenario contracts.
+Vistrea includes canonical native Demo Apps for iOS and Android. Both applications implement all 17 required shared Scenario IDs and act as executable contract fixtures, not marketing samples. The `demo.navigation.basic` Runtime Snapshot path is verified end to end on iOS UIKit and Android View; Runtime events, reversible tuning, basic real-input automation, state identity, exploration, dangerous-action confirmation, and the Storefront-deep walk are verified on both platforms. The iOS acceptance also proves real search clearing and overlay dismissal; `examples/scenarios/manifest.json` records the authoritative per-platform capability status for the remaining scenario contracts.
 
 Both applications must implement the same required Scenario IDs for:
 
@@ -394,7 +412,7 @@ Vistrea exposes the same Engine use cases through:
 
 Public commands, queries, events, errors, and lifecycle behavior are specified under `docs/interfaces/`. Studio workflows map to those same use cases under `docs/product/STUDIO_INTERACTIONS.md`.
 
-The implemented Agent slice exposes 55 Host operations — Workspace status, Snapshot capture and inspection, Runtime event timelines, design review, reversible tuning, the Screen Graph, exploration Operations, the Deep Wiki, validation, build diffs, portable packs, and object downloads — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite or artifact paths. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
+The implemented Agent slice exposes 72 Host operations — Workspace status and recovery points, Snapshot capture and inspection, Runtime event timelines, design review and acceptance, reversible tuning, the Screen Graph, exploration Operations, Wiki nodes and Collections, immutable publication, readable export, validation, build diffs, portable packs, object downloads, and Hub status/fetch/push/activity — through one authenticated Host Local API client. The strict JSON CLI (with named toolset focus through `VISTREA_CLI_TOOLSETS`), the Skills, the installable Claude Code plugin, and the headless CI gate consume that same client without accessing SQLite, artifact paths, or Hub transport details. ADR-0008 retired the stdio MCP server in favor of the single CLI adapter; `docs/interfaces/OPERATION_CATALOG.md` is the authoritative operation inventory.
 
 Additional Skill concepts:
 
@@ -460,7 +478,7 @@ Phase markers summarize the current boundary status; `docs/DEVELOPMENT_PROGRESS.
 - Core runtime, design, version, and object models are verified as protocol v1 schemas and fixtures.
 - Common, Runtime connection, automation, Engine, Data, Agent, and Hub interfaces are documented.
 - The language-owned Data API, in-memory reference adapter, SQLite metadata, content-addressed local Object Store, and Commit/Ref persistence are verified.
-- Portable full and thin `.vistrea-pack` export/import is verified over the shared Commit and ObjectRef identity; readable Markdown/HTML exports remain a later exchange slice.
+- Portable full and thin `.vistrea-pack` export/import and immutable Knowledge Collection publication with readable Markdown/HTML exports are verified over the shared Commit and ObjectRef identity.
 
 ### Phase 1: native Snapshot loops — verified for UIKit and Android View
 
@@ -479,16 +497,16 @@ Phase markers summarize the current boundary status; `docs/DEVELOPMENT_PROGRESS.
 - Review Issues;
 - allowlisted tuning and reversible Tuning Patches.
 
-Runtime events and reversible tuning are verified on both platforms; the design comparison workbench and full SwiftUI/Compose capture continue as follow-up slices.
+Runtime events and reversible alpha/color/font/spacing/insets/corner-radius tuning are implemented on both native platforms, and the Studio design comparison and tuning workbenches are implemented. Design acceptance can promote a captured screenshot into a content-addressed approved-build baseline, compare mapped regions with per-pixel metrics, promote a Difference directly into an Issue, generate source-oriented Coding Agent suggestions from a Tuning Patch, and recapture/re-verify a ready Issue. Compose supplies its full semantics tree; SwiftUI remains an accessibility-element bridge whose content is observable only while an accessibility runtime is active.
 
-### Phase 3: exploration and Deep Wiki — verified on Android, implemented on iOS
+### Phase 3: exploration and Deep Wiki — core verified on both platforms
 
 - WDA/UIAutomator execution;
 - deterministic exploration;
 - state identity, deduplication, recovery, and safety;
 - Canvas, paths, backlinks, search, and version history.
 
-The real-input automation acceptance has passed on Android; the iOS WebDriverAgent lane is implemented and awaits its first device run. Exploration and the Deep Wiki are implemented with passing integration tests.
+The basic real-input automation, dangerous-action confirmation, and raised Storefront-deep exploration acceptances have passed on both platforms. Both providers implement `clear_text` and targeted/targetless `dismiss`; the iOS lane verifies clear and targeted dismiss through fresh structural captures. Exploration relaunches after a lost Runtime capture, replays the known stable-ID path, validates every restored structural state, and retries inside the original action budget. That recovery is integration-verified; deliberate real-device crash injection remains follow-up acceptance work.
 
 ### Phase 4: validation and advanced inspection — implemented
 
@@ -503,7 +521,22 @@ The real-input automation acceptance has passed on Android; the iOS WebDriverAge
 - affected-subgraph verification;
 - Hub push/pull, team spaces, permissions, discovery, and collaboration.
 
-The Agent adapters cover all 45 implemented Host operations, and an optional loopback Hub pack relay serves push and fetch; team spaces, permissions, discovery, and collaboration remain future Hub work.
+The Agent adapters cover all 72 implemented Host operations through one strict
+JSON CLI, with a machine-readable operation manifest enforcing Host/CLI/catalog
+parity. The optional multi-project Hub pack relay serves fast-forward push and
+fetch over loopback or TLS 1.3 with project-scoped viewer, contributor,
+reviewer, maintainer, and admin grants plus organization-scoped team grants
+that inherit into associated projects. Direct and inherited roles combine by
+effective maximum while preserving their source. It persists an append-only
+operational audit log and exposes admin audit/permission views plus a
+project-safe pollable activity feed; team permission evidence fans out to every
+affected project. Admins can grant, re-role, revoke, and rotate named-principal
+access. Project roles and team directory state persist in separate private
+atomic service documents while plaintext tokens remain one-time or
+descriptor-only values and rotate at restart. Full-text Hub search,
+organization-wide roles, multi-team sharing, versioned collaboration
+mutations, subscriptions, and guided conflict resolution remain future Hub
+work.
 
 ## 12. First complete demonstration
 
@@ -524,15 +557,14 @@ A meaningful first complete demonstration should:
 
 ## 13. Open decisions
 
-- Screen State fingerprint and dynamic-field normalization;
+- dynamic-field normalization beyond the current structural Screen State identity;
 - initial design source: image, local file, Figma, or approved build;
 - design-to-runtime node mapping strategy;
-- initial tuning-property allowlist;
-- initial WDA/UIAutomator provider packaging and device lifecycle;
-- View-only versus View-and-Layer first 3D scope;
-- portable `.vistrea-pack` thin-pack and redaction policy;
-- packaging and distribution for the macOS Studio and native SDK artifacts;
-- expanded CLI/Skill operation rollout after Snapshot inspection;
+- physical-device acceptance for every broader tuning adapter/property combination;
+- automatic physical-iPhone discovery/forwarding beyond the accepted explicit
+  CoreDevice/operator IP and pinned-TLS authorization profile;
+- hierarchy-depth 3D versus native View/Layer tree inspection;
+- public distribution and update channels for the macOS Studio and native SDK artifacts;
 - Hub deployment, identity, permissions, and storage providers.
 
 These choices may evolve without changing the central definition: Vistrea connects runtime structure, design review and tuning, real exploration, versioned knowledge, validation, and Agent workflows around one shared application UI fact base.

@@ -129,3 +129,45 @@ A module task is complete when:
 - documentation accurately distinguishes implemented behavior from planned behavior.
 
 A cross-module feature additionally requires an integration test or a documented, repeatable end-to-end verification path.
+
+## 10. Pull request CI matrix
+
+Every pull request and push to `main` runs seven independent required jobs from
+`.github/workflows/pull-request-ci.yml`:
+
+| Job | Runner | Required gate |
+|---|---|---|
+| Node and Host | Ubuntu 24.04 | Locked install and `pnpm check` |
+| Vistrea Studio | macOS 15 | Managed Host build, Swift tests, Node/Swift Runtime interoperability, and Release build |
+| Vistrea Studio UI regression | macOS 15 | Deterministic presentation goldens, keyboard and accessibility checks, XCUITest workflows, and uploaded failure evidence |
+| iOS SDK | macOS 15 | Swift tests and Release build |
+| iOS Demo App | macOS 15 | Checksum-verified XcodeGen regeneration, generated-project diff, Simulator tests, and Release Simulator build |
+| Android SDK | Ubuntu 24.04 with Node, JDK 17, and API 36 | Unit tests, Debug/Release builds, Android Lint, Compose gates, Node/Kotlin Runtime interoperability, and the Release artifact boundary |
+| Android Demo App | Ubuntu 24.04 with JDK 17 and API 36 | Debug/Release builds, unit tests, and Android Lint |
+
+All referenced GitHub Actions use immutable commit SHAs. Tool versions that are
+not supplied by an Action are installed from a pinned release with a checked
+digest. These jobs intentionally exclude connected Android tests, dedicated
+temporary-device loops, WebDriverAgent, and physical-device acceptance; those
+belong to explicit opt-in end-to-end lanes and must not be inferred from a green
+pull request matrix.
+
+Physical-device vertical loops are separate operator-owned gates and always
+require an explicit device selector:
+
+```bash
+VISTREA_ANDROID_DEVICE_SERIAL=<adb-serial> \
+  pnpm test:e2e:android-physical-vertical
+
+VISTREA_IOS_DEVICE=<device-id-or-udid> \
+VISTREA_IOS_DEVELOPMENT_TEAM=<team-id> \
+  pnpm test:e2e:ios-physical-vertical
+```
+
+The Android lane uses a temporary `adb reverse` rule. The iOS lane uses an
+ephemeral TLS 1.3 certificate pinned by the Runtime over an explicit
+CoreDevice/operator IP. Neither lane may auto-select, install to, or alter a
+developer's currently used device without the opt-in variable and selector.
+Their implementation is not evidence of hardware verification; record the
+exact device and successful command in `docs/DEVELOPMENT_PROGRESS.md` only
+after a complete run.

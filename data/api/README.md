@@ -5,6 +5,7 @@ Strict TypeScript storage ports independent of database and transport implementa
 The public source entry point is `index.ts`. Initial ports include:
 
 - `WorkspaceRepository`
+- `WorkspaceMaintenancePort`
 - `SnapshotRepository`
 - `ObservationRepository`
 - `RuntimeEventRepository`
@@ -20,6 +21,10 @@ The public source entry point is `index.ts`. Initial ports include:
 - `SyncClient`
 
 Interfaces use models from `protocol/` and one transaction-bound `DataUnitOfWork`. They must not expose SQLite rows, file handles, physical paths, or HTTP responses.
+
+`WorkspaceMaintenancePort` is the online-safe recovery-point boundary. It
+creates and lists verified retained metadata backups and releases one retention
+policy without exposing offline restore, lock recovery, or object paths.
 
 All repositories expose an opaque Unit of Work identity. A composition using repositories from different transactions fails before mutation. Revisioned values use creation revision `1` and compare-and-set replacement revision `N + 1`; immutable evidence rejects a second create.
 

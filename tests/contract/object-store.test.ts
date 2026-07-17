@@ -359,6 +359,11 @@ test("retention pins survive reopen and safe deletion never uses caller paths", 
     expectDataError("invalid_argument"),
   );
   assert.equal((await reopened.stat(pinned.hash)).hash, pinned.hash);
+  await reopened.unpin(pinned.hash, "unknown-policy");
+  await assert.rejects(reopened.deletePhysical(pinned.hash), expectDataError("conflict"));
+  await reopened.unpin(pinned.hash, "baseline");
+  await reopened.unpin(pinned.hash, "baseline");
+  await reopened.deletePhysical(pinned.hash);
 
   const afterNanosecond = await FileObjectStore.open({
     workspaceRoot,

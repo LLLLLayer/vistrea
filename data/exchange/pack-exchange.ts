@@ -1,4 +1,5 @@
 import { createHash, type Hash } from "node:crypto";
+import { TextDecoder } from "node:util";
 
 import { DataError, isDataError } from "../api/errors.js";
 import {
@@ -9,12 +10,15 @@ import {
   type ImportPackCommand,
   type ImportPackResult,
   type JsonObject,
+  type KnowledgeCollection,
+  type KnowledgeGraph,
   type ObjectPutMetadata,
   type ObjectRef,
   type PackRefConflict,
   type ProtocolValidator,
   type Ref,
   type RefUpdatePrecondition,
+  type ReadableKnowledgeFormat,
 } from "../api/models.js";
 import type {
   ByteStream,
@@ -30,9 +34,13 @@ export const PACK_FORMAT_VERSION = 1;
 export const PACK_MEDIA_TYPE = "application/vnd.vistrea-pack";
 export const PACK_LOGICAL_NAME = "workspace-export.vistrea-pack";
 
+const EXPORTED_OBJECT_RETENTION_REASON =
+  "Preserve an explicitly exported artifact until a future user-managed retention workflow releases it.";
+
 const HEADER_LINE_LIMIT = 4_096;
 const TRAILER_LINE_LIMIT = 4_096;
 const MANIFEST_BYTE_LIMIT = 64 * 1024 * 1024;
+const KNOWLEDGE_BUNDLE_BYTE_LIMIT = 64 * 1024 * 1024;
 const LINE_FEED = 0x0a;
 
 interface PackRefWire extends JsonObject {
@@ -184,6 +192,10 @@ export class PackExchangeService implements ExchangeService {
       media_type: PACK_MEDIA_TYPE,
       compression: "none",
       logical_name: PACK_LOGICAL_NAME,
+    });
+    await this.#objects.pin(packRef.hash, {
+      policy_id: `workspace-export:${packRef.hash}`,
+      reason: EXPORTED_OBJECT_RETENTION_REASON,
     });
     this.#data.registerVerifiedObjects([packRef]);
     return packRef;
@@ -353,13 +365,103 @@ export class PackExchangeService implements ExchangeService {
     }
   }
 
-  exportReadable(_command: ExportReadableCommand): Promise<readonly ObjectRef[]> {
-    return Promise.reject(
-      new DataError(
-        "unsupported",
-        "Readable exports are a later Data slice; exportPack is the portable exchange path.",
-      ),
+  async exportReadable(command: ExportReadableCommand): Promise<readonly ObjectRef[]> {
+    const formats = normalizeReadableFormats(command.formats);
+    const unit = this.#data.beginUnitOfWork("read");
+    let collection: KnowledgeCollection;
+    let root: ObjectRef;
+    try {
+      collection = unit.wiki.getCollection(command.collection_id);
+      const publication = collection.publication;
+      if (publication["state"] !== "published") {
+        throw new DataError(
+          "conflict",
+          "Readable export requires a published Knowledge Collection.",
+          { details: { collection_id: command.collection_id } },
+        );
+      }
+      const commitId = publication["commit_id"];
+      if (typeof commitId !== "string") {
+        throw new DataError("integrity_error", "Published Knowledge Collection has no Commit ID.");
+      }
+      const commit = unit.versions.getCommit(commitId);
+      const candidate = commit.manifest.roots["wiki"];
+      this.#validator.assert(PROTOCOL_SCHEMA_IDS.objectRef, candidate);
+      root = candidate as unknown as ObjectRef;
+      if (!commit.manifest.object_hashes.includes(root.hash)) {
+        throw new DataError(
+          "integrity_error",
+          "The Knowledge Commit does not account for its Wiki root object.",
+          { details: { commit_id: commitId, hash: root.hash } },
+        );
+      }
+    } finally {
+      unit.rollback();
+    }
+
+    const bundleText = await readVerifiedUtf8Object(
+      this.#objects,
+      root,
+      KNOWLEDGE_BUNDLE_BYTE_LIMIT,
     );
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(bundleText) as unknown;
+    } catch {
+      throw new DataError("integrity_error", "The Knowledge Commit root is not valid JSON.");
+    }
+    this.#validator.assert(PROTOCOL_SCHEMA_IDS.knowledgeGraph, parsed);
+    if (canonicalizeIdentityJson(parsed as JsonObject) !== bundleText) {
+      throw new DataError(
+        "integrity_error",
+        "The Knowledge Commit root is not canonical identity JSON.",
+      );
+    }
+    const bundle = parsed as KnowledgeGraph;
+    const frozenCollection = bundle.collections.find(
+      (candidate) => candidate.collection_id === collection.collection_id,
+    );
+    if (
+      frozenCollection === undefined ||
+      frozenCollection.publication["state"] !== "draft" ||
+      frozenCollection.revision + 1 !== collection.revision
+    ) {
+      throw new DataError(
+        "integrity_error",
+        "The published Knowledge Collection does not match its immutable Commit root.",
+        { details: { collection_id: collection.collection_id } },
+      );
+    }
+
+    const outputs: ObjectRef[] = [];
+    for (const format of formats) {
+      const rendered =
+        format === "markdown"
+          ? renderKnowledgeMarkdown(collection, bundle)
+          : renderKnowledgeHtml(collection, bundle);
+      outputs.push(
+        await this.#objects.put(bytesOf(Buffer.from(rendered, "utf8")), {
+          media_type: format === "markdown" ? "text/markdown" : "text/html",
+          compression: "none",
+          logical_name: `${collection.collection_id}.${format === "markdown" ? "md" : "html"}`,
+          extensions: {
+            "vistrea.knowledge_export": {
+              collection_id: collection.collection_id,
+              commit_id: collection.publication["commit_id"] as string,
+              format,
+            },
+          },
+        }),
+      );
+    }
+    for (const output of outputs) {
+      await this.#objects.pin(output.hash, {
+        policy_id: `readable-export:${output.hash}`,
+        reason: EXPORTED_OBJECT_RETENTION_REASON,
+      });
+    }
+    this.#data.registerVerifiedObjects(outputs);
+    return outputs;
   }
 
   async *#packByteStream(manifest: PackManifestWire): ByteStream {
@@ -430,6 +532,345 @@ export class PackExchangeService implements ExchangeService {
     }
     return value as JsonObject;
   }
+}
+
+function normalizeReadableFormats(
+  formats: readonly ReadableKnowledgeFormat[] | undefined,
+): readonly ReadableKnowledgeFormat[] {
+  if (formats === undefined) {
+    return ["markdown", "html"];
+  }
+  if (
+    !Array.isArray(formats) ||
+    formats.length === 0 ||
+    formats.length > 2 ||
+    new Set(formats).size !== formats.length ||
+    formats.some((format) => format !== "markdown" && format !== "html")
+  ) {
+    throw new DataError(
+      "invalid_argument",
+      "Readable export formats must be a unique non-empty subset of markdown and html.",
+    );
+  }
+  return (["markdown", "html"] as const).filter((format) => formats.includes(format));
+}
+
+async function readVerifiedUtf8Object(
+  objects: ObjectStore,
+  expected: ObjectRef,
+  maximumBytes: number,
+): Promise<string> {
+  if (expected.compression !== "none") {
+    throw new DataError(
+      "unsupported",
+      "Readable Knowledge export currently requires an uncompressed Commit root.",
+      { details: { hash: expected.hash, compression: expected.compression } },
+    );
+  }
+  if (expected.byte_size > maximumBytes) {
+    throw new DataError("resource_exhausted", "The Knowledge Commit root exceeds the reader limit.", {
+      details: { hash: expected.hash, byte_size: expected.byte_size, maximum_bytes: maximumBytes },
+    });
+  }
+  const stored = await objects.stat(expected.hash);
+  if (canonicalizeIdentityJson(stored) !== canonicalizeIdentityJson(expected)) {
+    throw new DataError(
+      "integrity_error",
+      "The stored Knowledge Commit root metadata no longer matches its ObjectRef.",
+      { details: { hash: expected.hash } },
+    );
+  }
+  const chunks: Buffer[] = [];
+  const digest = createHash("sha256");
+  let length = 0;
+  for await (const chunk of await objects.open(expected.hash)) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.byteLength;
+    if (length > expected.byte_size || length > maximumBytes) {
+      throw packedObjectMismatch(expected);
+    }
+    digest.update(bytes);
+    chunks.push(bytes);
+  }
+  if (length !== expected.byte_size || `sha256:${digest.digest("hex")}` !== expected.hash) {
+    throw packedObjectMismatch(expected);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+  } catch {
+    throw new DataError("integrity_error", "The Knowledge Commit root is not valid UTF-8.");
+  }
+}
+
+function renderKnowledgeMarkdown(
+  collection: KnowledgeCollection,
+  bundle: KnowledgeGraph,
+): string {
+  const publication = collection.publication;
+  const frozen = bundle.collections.find(
+    (candidate) => candidate.collection_id === collection.collection_id,
+  ) as KnowledgeCollection;
+  const nodesById = new Map(bundle.nodes.map((node) => [node.wiki_node_id, node]));
+  const linksBySource = new Map<string, typeof bundle.links>();
+  for (const link of bundle.links) {
+    linksBySource.set(link.source_node_id, [
+      ...(linksBySource.get(link.source_node_id) ?? []),
+      link,
+    ]);
+  }
+  const lines = [
+    `# ${escapeMarkdownText(String(frozen.name))}`,
+    "",
+    ...(frozen.summary === undefined ? [] : [String(frozen.summary), ""]),
+    `- Collection: \`${collection.collection_id}\``,
+    `- Commit: \`${String(publication["commit_id"])}\``,
+    `- Ref: \`${String(publication["ref_name"])}\``,
+    `- Published: ${String(publication["published_at"])}`,
+    "",
+    "## Contents",
+    "",
+    ...frozen.node_ids.map((nodeId) => {
+      const node = nodesById.get(nodeId);
+      return `- ${escapeMarkdownText(String(node?.["title"] ?? nodeId))} (\`${nodeId}\`)`;
+    }),
+    "",
+  ];
+  for (const nodeId of frozen.node_ids) {
+    const node = nodesById.get(nodeId);
+    if (node === undefined) {
+      continue;
+    }
+    lines.push(
+      `## ${escapeMarkdownText(String(node["title"]))}`,
+      "",
+      `Node: \`${node.wiki_node_id}\` · Kind: \`${String(node["kind"])}\` · Revision: ${node.revision}`,
+      "",
+    );
+    const summary = node["summary"];
+    if (typeof summary === "string" && summary.length > 0) {
+      lines.push(summary, "");
+    }
+    lines.push(readableNodeContent(node), "");
+    const related = node.related_resources;
+    if (related.length > 0) {
+      lines.push(
+        "### Related resources",
+        "",
+        ...related.map((ref) => `- \`${ref.kind}:${ref.id}\``),
+        "",
+      );
+    }
+    const links = linksBySource.get(node.wiki_node_id) ?? [];
+    if (links.length > 0) {
+      lines.push(
+        "### Links",
+        "",
+        ...links.map(
+          (link) =>
+            `- \`${String(link["relation"])}\` → \`${link.target.kind}:${link.target.id}\`` +
+            (link["label"] === undefined ? "" : ` — ${String(link["label"])}`),
+        ),
+        "",
+      );
+    }
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function renderKnowledgeHtml(
+  collection: KnowledgeCollection,
+  bundle: KnowledgeGraph,
+): string {
+  const publication = collection.publication;
+  const frozen = bundle.collections.find(
+    (candidate) => candidate.collection_id === collection.collection_id,
+  ) as KnowledgeCollection;
+  const nodesById = new Map(bundle.nodes.map((node) => [node.wiki_node_id, node]));
+  const linksBySource = new Map<string, typeof bundle.links>();
+  for (const link of bundle.links) {
+    linksBySource.set(link.source_node_id, [
+      ...(linksBySource.get(link.source_node_id) ?? []),
+      link,
+    ]);
+  }
+  const nodeSections = frozen.node_ids
+    .map((nodeId) => nodesById.get(nodeId))
+    .filter((node) => node !== undefined)
+    .map((node) => {
+      const related = node.related_resources;
+      const links = linksBySource.get(node.wiki_node_id) ?? [];
+      return [
+        `<section id="${escapeHtml(node.wiki_node_id)}">`,
+        `<h2>${escapeHtml(String(node["title"]))}</h2>`,
+        `<p class="meta"><code>${escapeHtml(node.wiki_node_id)}</code> · ${escapeHtml(String(node["kind"]))} · revision ${node.revision}</p>`,
+        ...(typeof node["summary"] === "string"
+          ? [`<p>${escapeHtml(node["summary"] as string)}</p>`]
+          : []),
+        renderMarkdownFragment(readableNodeContent(node)),
+        ...(related.length === 0
+          ? []
+          : [
+              "<h3>Related resources</h3><ul>",
+              ...related.map(
+                (ref) => `<li><code>${escapeHtml(`${ref.kind}:${ref.id}`)}</code></li>`,
+              ),
+              "</ul>",
+            ]),
+        ...(links.length === 0
+          ? []
+          : [
+              "<h3>Links</h3><ul>",
+              ...links.map(
+                (link) =>
+                  `<li><code>${escapeHtml(String(link["relation"]))}</code> → <code>${escapeHtml(`${link.target.kind}:${link.target.id}`)}</code>${link["label"] === undefined ? "" : ` — ${escapeHtml(String(link["label"]))}`}</li>`,
+              ),
+              "</ul>",
+            ]),
+        "</section>",
+      ].join("\n");
+    })
+    .join("\n");
+  const contents = frozen.node_ids
+    .map((nodeId) => {
+      const node = nodesById.get(nodeId);
+      return `<li><a href="#${escapeHtml(nodeId)}">${escapeHtml(String(node?.["title"] ?? nodeId))}</a></li>`;
+    })
+    .join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(String(frozen.name))}</title>
+<style>body{font:16px/1.55 system-ui,sans-serif;max-width:880px;margin:40px auto;padding:0 24px;color:#1f2328}code,pre{font-family:ui-monospace,monospace}pre{padding:16px;overflow:auto;background:#f6f8fa;border-radius:8px}.meta{color:#59636e}section{border-top:1px solid #d1d9e0;margin-top:32px;padding-top:20px}blockquote{border-left:4px solid #d1d9e0;margin-left:0;padding-left:16px;color:#59636e}</style>
+</head>
+<body>
+<header>
+<h1>${escapeHtml(String(frozen.name))}</h1>
+${frozen.summary === undefined ? "" : `<p>${escapeHtml(String(frozen.summary))}</p>`}
+<ul>
+<li>Collection: <code>${escapeHtml(collection.collection_id)}</code></li>
+<li>Commit: <code>${escapeHtml(String(publication["commit_id"]))}</code></li>
+<li>Ref: <code>${escapeHtml(String(publication["ref_name"]))}</code></li>
+<li>Published: ${escapeHtml(String(publication["published_at"]))}</li>
+</ul>
+</header>
+<nav aria-label="Contents"><h2>Contents</h2><ul>${contents}</ul></nav>
+${nodeSections}
+</body>
+</html>
+`;
+}
+
+function readableNodeContent(node: KnowledgeGraph["nodes"][number]): string {
+  const content = node["content"] as JsonObject;
+  if (content["storage"] === "inline" && typeof content["text"] === "string") {
+    return content["text"];
+  }
+  const object = content["object"] as JsonObject | undefined;
+  return object === undefined
+    ? "_Content is unavailable._"
+    : `_Object-backed content: \`${String(object["hash"])}\`._`;
+}
+
+function renderMarkdownFragment(markdown: string): string {
+  const output: string[] = [];
+  const paragraph: string[] = [];
+  let list: "ul" | "ol" | undefined;
+  let fenced = false;
+  let codeLanguage = "";
+  const code: string[] = [];
+  const flushParagraph = (): void => {
+    if (paragraph.length > 0) {
+      output.push(`<p>${paragraph.map(escapeHtml).join(" ")}</p>`);
+      paragraph.length = 0;
+    }
+  };
+  const closeList = (): void => {
+    if (list !== undefined) {
+      output.push(`</${list}>`);
+      list = undefined;
+    }
+  };
+  for (const line of markdown.split(/\r?\n/)) {
+    const fence = /^```([A-Za-z0-9_+-]*)\s*$/.exec(line);
+    if (fence !== null) {
+      if (fenced) {
+        output.push(
+          `<pre><code${codeLanguage === "" ? "" : ` class="language-${escapeHtml(codeLanguage)}"`}>${escapeHtml(code.join("\n"))}</code></pre>`,
+        );
+        code.length = 0;
+        fenced = false;
+      } else {
+        flushParagraph();
+        closeList();
+        fenced = true;
+        codeLanguage = fence[1] ?? "";
+      }
+      continue;
+    }
+    if (fenced) {
+      code.push(line);
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading !== null) {
+      flushParagraph();
+      closeList();
+      const level = heading[1]?.length ?? 1;
+      output.push(`<h${level}>${escapeHtml(heading[2] ?? "")}</h${level}>`);
+      continue;
+    }
+    const unordered = /^[-*+]\s+(.+)$/.exec(line);
+    const ordered = /^[0-9]+[.)]\s+(.+)$/.exec(line);
+    if (unordered !== null || ordered !== null) {
+      flushParagraph();
+      const nextList = unordered === null ? "ol" : "ul";
+      if (list !== nextList) {
+        closeList();
+        list = nextList;
+        output.push(`<${list}>`);
+      }
+      output.push(`<li>${escapeHtml((unordered ?? ordered)?.[1] ?? "")}</li>`);
+      continue;
+    }
+    const quote = /^>\s?(.*)$/.exec(line);
+    if (quote !== null) {
+      flushParagraph();
+      closeList();
+      output.push(`<blockquote><p>${escapeHtml(quote[1] ?? "")}</p></blockquote>`);
+      continue;
+    }
+    if (line.trim().length === 0) {
+      flushParagraph();
+      closeList();
+    } else {
+      paragraph.push(line.trim());
+    }
+  }
+  if (fenced) {
+    output.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+  }
+  flushParagraph();
+  closeList();
+  return output.join("\n");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function escapeMarkdownText(value: string): string {
+  return value.replace(/[\\`*_{}[\]()#+.!|>-]/g, "\\$&");
+}
+
+async function* bytesOf(bytes: Buffer): ByteStream {
+  yield bytes;
 }
 
 function packedObjectMismatch(object: ObjectRef): DataError {

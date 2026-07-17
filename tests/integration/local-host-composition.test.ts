@@ -37,6 +37,70 @@ test("the local Host owns production storage and reports live Runtime availabili
     runtime_connected: false,
   });
 
+  const emptyRecoveryPoints = await authorizedFetch(
+    first.api.baseUrl,
+    first.api.bearerToken,
+    "/v1/workspace/recovery-points",
+  );
+  assert.equal(emptyRecoveryPoints.status, 200);
+  assert.deepEqual(await emptyRecoveryPoints.json(), { recovery_points: [] });
+
+  const createdRecoveryPoint = await authorizedFetch(
+    first.api.baseUrl,
+    first.api.bearerToken,
+    "/v1/workspace/recovery-points",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "Production Host composition acceptance." }),
+    },
+  );
+  assert.equal(createdRecoveryPoint.status, 201);
+  const recoveryPoint = (await createdRecoveryPoint.json()) as {
+    recovery_point_id: string;
+    source: string;
+    active_retention_policy_ids: string[];
+  };
+  assert.match(recoveryPoint.recovery_point_id, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(recoveryPoint.source, "manual");
+  assert.equal(recoveryPoint.active_retention_policy_ids.length, 1);
+
+  const listedRecoveryPoints = await authorizedFetch(
+    first.api.baseUrl,
+    first.api.bearerToken,
+    "/v1/workspace/recovery-points",
+  );
+  assert.equal(listedRecoveryPoints.status, 200);
+  const listedRecoveryPointsBody = (await listedRecoveryPoints.json()) as {
+    recovery_points: readonly { recovery_point_id: string }[];
+  };
+  assert.equal(
+    listedRecoveryPointsBody.recovery_points[0]?.recovery_point_id,
+    recoveryPoint.recovery_point_id,
+  );
+
+  const retentionPolicyId = recoveryPoint.active_retention_policy_ids[0];
+  assert.ok(retentionPolicyId !== undefined);
+  const releasedRecoveryPoint = await authorizedFetch(
+    first.api.baseUrl,
+    first.api.bearerToken,
+    "/v1/workspace/recovery-points/release",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recovery_point_id: recoveryPoint.recovery_point_id,
+        retention_policy_id: retentionPolicyId,
+      }),
+    },
+  );
+  assert.equal(releasedRecoveryPoint.status, 200);
+  assert.deepEqual(
+    ((await releasedRecoveryPoint.json()) as { active_retention_policy_ids: string[] })
+      .active_retention_policy_ids,
+    [],
+  );
+
   const unavailableCapture = await authorizedFetch(
     first.api.baseUrl,
     first.api.bearerToken,
@@ -257,11 +321,17 @@ test("the Host executable writes credentials only to a private ephemeral descrip
   const readyLine = await withTimeout(readLine(child.stdout), 10_000, "Host ready output");
   const descriptor = JSON.parse(await fs.readFile(connectionFile, "utf8")) as {
     readonly api: { readonly base_url: string; readonly bearer_token: string };
-    readonly runtime: { readonly authorization_token: string };
+    readonly runtime: {
+      readonly authorization_token: string;
+      readonly transport: "loopback" | "tls";
+      readonly certificate_sha256?: string;
+    };
   };
   assert.equal((await fs.stat(connectionFile)).mode & 0o777, 0o600);
   assert.match(descriptor.api.bearer_token, /^[A-Za-z0-9_-]{43}$/);
   assert.match(descriptor.runtime.authorization_token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(descriptor.runtime.transport, "loopback");
+  assert.equal(descriptor.runtime.certificate_sha256, undefined);
   assert.equal(readyLine.includes(descriptor.api.bearer_token), false);
   assert.equal(readyLine.includes(descriptor.runtime.authorization_token), false);
   assert.equal(JSON.parse(readyLine).connection_file, connectionFile);

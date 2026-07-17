@@ -466,7 +466,7 @@ test("import rejects payloads that are not version 1 packs", async (t) => {
   );
 });
 
-test("pack export validates its command and readable export stays unsupported", async (t) => {
+test("pack and readable exports validate missing inputs", async (t) => {
   const context = await memoryContext(t, "vistrea-pack-command");
   await seedHistory(context);
 
@@ -486,5 +486,19 @@ test("pack export validates its command and readable export stays unsupported", 
       }),
     expectDataError("invalid_argument"),
   );
-  await assert.rejects(() => context.exchange.exportReadable({}), expectDataError("unsupported"));
+  await assert.rejects(
+    () =>
+      context.exchange.exportReadable({
+        collection_id: "collection_019f0000-0000-7000-8000-00000000dead",
+      }),
+    expectDataError("not_found"),
+  );
+  await assert.rejects(
+    () =>
+      context.exchange.exportReadable({
+        collection_id: "collection_019f0000-0000-7000-8000-00000000dead",
+        formats: ["markdown", "markdown"],
+      }),
+    expectDataError("invalid_argument"),
+  );
 });

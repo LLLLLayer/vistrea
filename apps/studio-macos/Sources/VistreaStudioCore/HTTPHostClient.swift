@@ -80,7 +80,7 @@ public final class URLSessionHostHTTPTransport: HostHTTPTransport, @unchecked Se
     }
 }
 
-public struct HTTPHostClient: HostClient, Sendable {
+public struct HTTPHostClient: HostClient, WorkspaceMaintenanceClient, Sendable {
     static let maximumJSONResponseBytes = 64 * 1_024 * 1_024
     static let maximumObjectResponseBytes = 256 * 1_024 * 1_024
 
@@ -122,6 +122,47 @@ public struct HTTPHostClient: HostClient, Sendable {
 
     public func getStatus() async throws -> HostStatus {
         try await requestJSON(HostStatus.self, method: "GET", path: ["v1", "status"])
+    }
+
+    public func listRecoveryPoints() async throws -> WorkspaceRecoveryPointPage {
+        try await requestJSON(
+            WorkspaceRecoveryPointPage.self,
+            method: "GET",
+            path: ["v1", "workspace", "recovery-points"]
+        )
+    }
+
+    public func createRecoveryPoint(reason: String) async throws -> WorkspaceRecoveryPoint {
+        try Self.validateRecoveryPointReason(reason)
+        return try await sendJSON(
+            WorkspaceRecoveryPoint.self,
+            path: ["v1", "workspace", "recovery-points"],
+            body: CreateWorkspaceRecoveryPointBody(reason: reason),
+            expectedStatus: 201
+        )
+    }
+
+    public func releaseRecoveryPoint(
+        recoveryPointID: String,
+        retentionPolicyID: String
+    ) async throws -> WorkspaceRecoveryPoint {
+        guard Self.isCanonicalSHA256Reference(recoveryPointID) else {
+            throw HostClientError.invalidIdentifier(recoveryPointID)
+        }
+        guard !retentionPolicyID.contains("\0"), (1...256).contains(retentionPolicyID.utf16.count) else {
+            throw HostClientError.invalidConfiguration(
+                "A retention policy ID must contain 1 through 256 characters."
+            )
+        }
+        return try await sendJSON(
+            WorkspaceRecoveryPoint.self,
+            path: ["v1", "workspace", "recovery-points", "release"],
+            body: ReleaseWorkspaceRecoveryPointBody(
+                recoveryPointID: recoveryPointID,
+                retentionPolicyID: retentionPolicyID
+            ),
+            expectedStatus: 200
+        )
     }
 
     public func listSnapshots() async throws -> SnapshotPage {
@@ -195,6 +236,13 @@ public struct HTTPHostClient: HostClient, Sendable {
     }
 
     public func listReviewIssues(states: [String]? = nil) async throws -> ReviewIssuePage {
+        try await listReviewIssues(states: states, screenStateID: nil)
+    }
+
+    public func listReviewIssues(
+        states: [String]?,
+        screenStateID: String?
+    ) async throws -> ReviewIssuePage {
         if let states {
             guard !states.isEmpty,
                   states.count <= 8,
@@ -203,10 +251,19 @@ public struct HTTPHostClient: HostClient, Sendable {
                 throw HostClientError.invalidIdentifier(states.joined(separator: ","))
             }
         }
+        if let screenStateID, !Self.isTypedIdentifier(screenStateID, prefix: "screenstate") {
+            throw HostClientError.invalidIdentifier(screenStateID)
+        }
+        var query = states.map {
+            [URLQueryItem(name: "states", value: $0.joined(separator: ","))]
+        } ?? []
+        if let screenStateID {
+            query.append(URLQueryItem(name: "screen_state_id", value: screenStateID))
+        }
         let response = try await request(
             method: "GET",
             path: ["v1", "review-issues"],
-            query: states.map { [URLQueryItem(name: "states", value: $0.joined(separator: ","))] } ?? []
+            query: query
         )
         try requireStatus(response, expected: [200])
         try requireJSONSize(response.body)
@@ -218,18 +275,56 @@ public struct HTTPHostClient: HostClient, Sendable {
     }
 
     public func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
+        try await getScreenGraph(
+            projectID: projectID,
+            applicationID: applicationID,
+            scope: nil
+        )
+    }
+
+    public func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        guard Self.isTypedIdentifier(buildID, prefix: "build"),
+              !applicationVersion.isEmpty,
+              applicationVersion.count <= 128
+        else {
+            throw HostClientError.invalidIdentifier("\(applicationVersion)/\(buildID)")
+        }
+        return try await getScreenGraph(
+            projectID: projectID,
+            applicationID: applicationID,
+            scope: (applicationVersion, buildID)
+        )
+    }
+
+    private func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        scope: (applicationVersion: String, buildID: String)?
+    ) async throws -> CanvasGraph {
         guard projectID.range(of: "^project_[0-9a-f-]{36}$", options: .regularExpression) != nil,
               applicationID.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$", options: .regularExpression) != nil
         else {
             throw HostClientError.invalidIdentifier("\(projectID)/\(applicationID)")
         }
+        var query = [
+            URLQueryItem(name: "project_id", value: projectID),
+            URLQueryItem(name: "application_id", value: applicationID),
+        ]
+        if let scope {
+            query.append(URLQueryItem(name: "build_id", value: scope.buildID))
+            query.append(
+                URLQueryItem(name: "application_version", value: scope.applicationVersion)
+            )
+        }
         let response = try await request(
             method: "GET",
             path: ["v1", "screen-graph"],
-            query: [
-                URLQueryItem(name: "project_id", value: projectID),
-                URLQueryItem(name: "application_id", value: applicationID),
-            ]
+            query: query
         )
         try requireStatus(response, expected: [200])
         try requireJSONSize(response.body)
@@ -260,6 +355,102 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func listKnowledgeCollections(
+        text: String?,
+        publicationStates: [String]?
+    ) async throws -> KnowledgeCollectionPage {
+        if let text {
+            guard !text.isEmpty, text.utf8.count <= 512 else {
+                throw HostClientError.invalidIdentifier("collection search text")
+            }
+        }
+        if let publicationStates {
+            guard !publicationStates.isEmpty,
+                  publicationStates.count <= 3,
+                  Set(publicationStates).count == publicationStates.count,
+                  publicationStates.allSatisfy({ ["draft", "published", "archived"].contains($0) })
+            else {
+                throw HostClientError.invalidIdentifier("collection publication states")
+            }
+        }
+        var query = text.map { [URLQueryItem(name: "text", value: $0)] } ?? []
+        if let publicationStates {
+            query.append(
+                URLQueryItem(
+                    name: "publication_states",
+                    value: publicationStates.joined(separator: ",")
+                )
+            )
+        }
+        return try await requestJSON(
+            KnowledgeCollectionPage.self,
+            method: "GET",
+            path: ["v1", "knowledge-collections"],
+            query: query
+        )
+    }
+
+    public func getKnowledgeCollection(id: String) async throws -> KnowledgeCollectionSummary {
+        guard Self.isTypedIdentifier(id, prefix: "collection") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            KnowledgeCollectionSummary.self,
+            method: "GET",
+            path: ["v1", "knowledge-collections", id]
+        )
+    }
+
+    public func createKnowledgeCollection(
+        _ draft: KnowledgeCollectionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        try Self.validateKnowledgeCollection(
+            name: draft.name,
+            nodeIDs: draft.nodeIDs,
+            entryNodeIDs: draft.entryNodeIDs
+        )
+        return try await sendJSON(
+            KnowledgeCollectionSummary.self,
+            path: ["v1", "knowledge-collections"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func reviseKnowledgeCollection(
+        id: String,
+        _ draft: KnowledgeCollectionRevisionDraft
+    ) async throws -> KnowledgeCollectionSummary {
+        guard Self.isTypedIdentifier(id, prefix: "collection"), draft.expectedRevision >= 1 else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        if let name = draft.name, name.isEmpty || name.count > 256 {
+            throw HostClientError.invalidConfiguration(
+                "A Knowledge Collection name must contain 1 through 256 characters."
+            )
+        }
+        if let nodeIDs = draft.nodeIDs {
+            guard !nodeIDs.isEmpty, Set(nodeIDs).count == nodeIDs.count else {
+                throw HostClientError.invalidConfiguration(
+                    "A Knowledge Collection requires unique member nodes."
+                )
+            }
+        }
+        if let entryNodeIDs = draft.entryNodeIDs {
+            guard !entryNodeIDs.isEmpty, Set(entryNodeIDs).count == entryNodeIDs.count else {
+                throw HostClientError.invalidConfiguration(
+                    "A Knowledge Collection requires unique entry nodes."
+                )
+            }
+        }
+        return try await sendJSON(
+            KnowledgeCollectionSummary.self,
+            path: ["v1", "knowledge-collections", id, "revisions"],
+            body: draft,
+            expectedStatus: 200
+        )
+    }
+
     public func createTuningPatch(_ draft: TuningPatchDraft) async throws -> TuningPatchSummary {
         guard (try? SnapshotID(validating: draft.targetSnapshotID)) != nil else {
             throw HostClientError.invalidIdentifier(draft.targetSnapshotID)
@@ -269,6 +460,19 @@ public struct HTTPHostClient: HostClient, Sendable {
             path: ["v1", "tuning-patches"],
             body: draft,
             expectedStatus: 201
+        )
+    }
+
+    public func getTuningSourceSuggestions(
+        patchID: String
+    ) async throws -> TuningSourceSuggestionResult {
+        guard Self.isTypedIdentifier(patchID, prefix: "patch") else {
+            throw HostClientError.invalidIdentifier(patchID)
+        }
+        return try await requestJSON(
+            TuningSourceSuggestionResult.self,
+            method: "GET",
+            path: ["v1", "tuning-patches", patchID, "source-suggestions"]
         )
     }
 
@@ -343,6 +547,44 @@ public struct HTTPHostClient: HostClient, Sendable {
         )
     }
 
+    public func createReviewIssueFromDifference(
+        comparisonID: String,
+        _ request: CreateReviewIssueFromDifferenceRequest
+    ) async throws -> ReviewIssueSummary {
+        guard Self.isTypedIdentifier(comparisonID, prefix: "comparison") else {
+            throw HostClientError.invalidIdentifier(comparisonID)
+        }
+        guard Self.isTypedIdentifier(request.differenceID, prefix: "difference") else {
+            throw HostClientError.invalidIdentifier(request.differenceID)
+        }
+        return try await sendJSON(
+            ReviewIssueSummary.self,
+            path: ["v1", "design-comparisons", comparisonID, "issues"],
+            body: request,
+            expectedStatus: 201
+        )
+    }
+
+    public func recaptureAndVerifyReviewIssue(
+        id: String,
+        _ request: RecaptureReviewIssueRequest
+    ) async throws -> RecaptureReviewIssueResult {
+        guard Self.isTypedIdentifier(id, prefix: "issue") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        guard request.expectedRevision >= 1 else {
+            throw HostClientError.invalidConfiguration(
+                "The expected Review Issue revision must be at least 1."
+            )
+        }
+        return try await sendJSON(
+            RecaptureReviewIssueResult.self,
+            path: ["v1", "review-issues", id, "recapture-verifications"],
+            body: request,
+            expectedStatus: 201
+        )
+    }
+
     public func createWikiNode(_ draft: WikiNodeDraft) async throws -> WikiNodeDetail {
         try await sendJSON(
             WikiNodeDetail.self,
@@ -386,6 +628,29 @@ public struct HTTPHostClient: HostClient, Sendable {
             ScreenStateDetail.self,
             method: "GET",
             path: ["v1", "screen-states", id]
+        )
+    }
+
+    public func getScreenState(
+        id: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> ScreenStateDetail {
+        guard Self.isTypedIdentifier(id, prefix: "screenstate"),
+              Self.isTypedIdentifier(buildID, prefix: "build"),
+              !applicationVersion.isEmpty,
+              applicationVersion.count <= 128
+        else {
+            throw HostClientError.invalidIdentifier("\(id)/\(applicationVersion)/\(buildID)")
+        }
+        return try await requestJSON(
+            ScreenStateDetail.self,
+            method: "GET",
+            path: ["v1", "screen-states", id],
+            query: [
+                URLQueryItem(name: "build_id", value: buildID),
+                URLQueryItem(name: "application_version", value: applicationVersion),
+            ]
         )
     }
 
@@ -646,6 +911,199 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    public func validateSnapshot(
+        _ draft: ValidateSnapshotDraft
+    ) async throws -> ValidationOutcomeSummary {
+        guard (try? SnapshotID(validating: draft.snapshotID)) != nil else {
+            throw HostClientError.invalidIdentifier(draft.snapshotID)
+        }
+        try Self.validateValidationCategories(draft.categories)
+        return try await sendJSON(
+            ValidationOutcomeSummary.self,
+            path: ["v1", "validation", "snapshot-runs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func validateScreenGraph(
+        _ draft: ValidateScreenGraphDraft
+    ) async throws -> ValidationOutcomeSummary {
+        try Self.validateGraphIdentity(
+            projectID: draft.projectID,
+            applicationID: draft.applicationID
+        )
+        return try await sendJSON(
+            ValidationOutcomeSummary.self,
+            path: ["v1", "validation", "graph-runs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func getValidationRun(id: String) async throws -> ValidationRunSummary {
+        guard Self.isTypedIdentifier(id, prefix: "validationrun") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            ValidationRunSummary.self,
+            method: "GET",
+            path: ["v1", "validation", "runs", id]
+        )
+    }
+
+    public func listValidationFindings(runID: String?) async throws -> ValidationFindingPage {
+        if let runID, !Self.isTypedIdentifier(runID, prefix: "validationrun") {
+            throw HostClientError.invalidIdentifier(runID)
+        }
+        return try await requestJSON(
+            ValidationFindingPage.self,
+            method: "GET",
+            path: ["v1", "validation", "findings"],
+            query: runID.map { [URLQueryItem(name: "validation_run_id", value: $0)] } ?? []
+        )
+    }
+
+    public func suppressValidationFinding(
+        id: String,
+        _ draft: SuppressValidationFindingDraft
+    ) async throws -> ValidationFindingSummary {
+        guard Self.isTypedIdentifier(id, prefix: "finding"),
+              draft.expectedFindingRevision >= 1,
+              ["false_positive", "accepted_risk", "known_issue", "environment_variance", "other"]
+                .contains(draft.reasonCode),
+              !draft.justification.isEmpty,
+              draft.justification.count <= 2_048
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Finding suppression requires a canonical Finding, reason, current revision, and bounded justification."
+            )
+        }
+        return try await sendJSON(
+            ValidationFindingSummary.self,
+            path: ["v1", "validation", "findings", id, "suppress"],
+            body: draft,
+            expectedStatus: 200
+        )
+    }
+
+    public func compareBuilds(_ draft: BuildDiffCommandDraft) async throws -> BuildDiffSummary {
+        try Self.validateGraphIdentity(
+            projectID: draft.projectID,
+            applicationID: draft.applicationID
+        )
+        guard Self.isTypedIdentifier(draft.leftBuildID, prefix: "build"),
+              Self.isTypedIdentifier(draft.rightBuildID, prefix: "build"),
+              draft.leftBuildID != draft.rightBuildID
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Build Diff requires two distinct canonical Build IDs."
+            )
+        }
+        return try await sendJSON(
+            BuildDiffSummary.self,
+            path: ["v1", "validation", "build-diffs"],
+            body: draft,
+            expectedStatus: 201
+        )
+    }
+
+    public func getBuildDiff(id: String) async throws -> BuildDiffSummary {
+        guard Self.isTypedIdentifier(id, prefix: "builddiff") else {
+            throw HostClientError.invalidIdentifier(id)
+        }
+        return try await requestJSON(
+            BuildDiffSummary.self,
+            method: "GET",
+            path: ["v1", "validation", "build-diffs", id]
+        )
+    }
+
+    public func getSyncStatus(
+        remote: HubSyncRemote,
+        refNames: [String]?
+    ) async throws -> HubSyncStatus {
+        try Self.validateHubRemote(remote)
+        if let refNames { try Self.validateSyncRefNames(refNames) }
+        return try await sendJSON(
+            HubSyncStatus.self,
+            path: ["v1", "sync", "status"],
+            body: HubSyncStatusRequest(remote: remote, refNames: refNames),
+            expectedStatus: 200
+        )
+    }
+
+    public func fetchWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor
+    ) async throws -> HubSyncFetchOutcome {
+        try Self.validateHubRemote(remote)
+        try Self.validateSyncRefNames(refNames)
+        try Self.validateSyncActor(actor)
+        return try await sendJSON(
+            HubSyncFetchOutcome.self,
+            path: ["v1", "sync", "fetch"],
+            body: HubSyncTransferRequest(
+                remote: remote,
+                refNames: refNames,
+                createdBy: actor,
+                message: nil
+            ),
+            expectedStatus: 200
+        )
+    }
+
+    public func pushWorkspace(
+        remote: HubSyncRemote,
+        refNames: [String],
+        actor: HubSyncActor,
+        message: String?
+    ) async throws -> HubSyncPushOutcome {
+        try Self.validateHubRemote(remote)
+        try Self.validateSyncRefNames(refNames)
+        try Self.validateSyncActor(actor)
+        if let message, message.isEmpty || message.utf8.count > 1_024 {
+            throw HostClientError.invalidConfiguration(
+                "A Hub push message must contain 1 through 1024 UTF-8 bytes."
+            )
+        }
+        return try await sendJSON(
+            HubSyncPushOutcome.self,
+            path: ["v1", "sync", "push"],
+            body: HubSyncTransferRequest(
+                remote: remote,
+                refNames: refNames,
+                createdBy: actor,
+                message: message
+            ),
+            expectedStatus: 200
+        )
+    }
+
+    public func getSyncActivity(
+        remote: HubSyncRemote,
+        afterSequence: UInt64?,
+        limit: Int?
+    ) async throws -> HubSyncActivityPage {
+        try Self.validateHubRemote(remote)
+        if let limit, !(1...500).contains(limit) {
+            throw HostClientError.invalidConfiguration(
+                "A Hub activity page limit must be between 1 and 500."
+            )
+        }
+        return try await sendJSON(
+            HubSyncActivityPage.self,
+            path: ["v1", "sync", "activity"],
+            body: HubSyncActivityRequest(
+                remote: remote,
+                afterSequence: afterSequence,
+                limit: limit
+            ),
+            expectedStatus: 200
+        )
+    }
+
     public func capture(_ requestValue: CaptureRequest = CaptureRequest()) async throws -> RuntimeSnapshot {
         let body: Data
         do {
@@ -784,6 +1242,61 @@ public struct HTTPHostClient: HostClient, Sendable {
         }
     }
 
+    private static func validateRecoveryPointReason(_ reason: String) throws {
+        guard !reason.contains("\0"),
+              !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              reason.utf16.count <= 1_024
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A recovery-point reason must contain 1 through 1024 characters."
+            )
+        }
+    }
+
+    private static func validateHubRemote(_ remote: HubSyncRemote) throws {
+        guard isTypedIdentifier(remote.projectID, prefix: "project"),
+              remote.bearerToken.range(
+                  of: "^[A-Za-z0-9_-]{43}$",
+                  options: .regularExpression
+              ) != nil,
+              let url = URL(string: remote.baseURL),
+              url.user == nil,
+              url.password == nil,
+              url.query == nil,
+              url.fragment == nil,
+              url.path.isEmpty,
+              (url.scheme == "https" && url.host != nil
+                  || url.scheme == "http" && ["127.0.0.1", "::1", "localhost"].contains(url.host))
+        else {
+            throw HostClientError.invalidConfiguration(
+                "The Hub requires an HTTPS origin (or loopback HTTP), a canonical Project ID, and its 43-character bearer token."
+            )
+        }
+    }
+
+    private static func validateSyncRefNames(_ refNames: [String]) throws {
+        let pattern = "^(users|teams|builds|baselines|releases)/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$"
+        guard !refNames.isEmpty,
+              refNames.count <= 64,
+              Set(refNames).count == refNames.count,
+              refNames.allSatisfy({ $0.range(of: pattern, options: .regularExpression) != nil })
+        else {
+            throw HostClientError.invalidConfiguration(
+                "Hub refs must be 1 through 64 unique canonical ref names."
+            )
+        }
+    }
+
+    private static func validateSyncActor(_ actor: HubSyncActor) throws {
+        guard ["human", "agent", "service"].contains(actor.kind),
+              actor.id.range(
+            of: "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+            options: .regularExpression
+        ) != nil else {
+            throw HostClientError.invalidConfiguration("The Hub actor identity is invalid.")
+        }
+    }
+
     /// Validates the Screen Graph identity pair every curation write names.
     private static func validateGraphIdentity(projectID: String, applicationID: String) throws {
         guard projectID.range(of: "^project_[0-9a-f-]{36}$", options: .regularExpression) != nil,
@@ -811,6 +1324,38 @@ public struct HTTPHostClient: HostClient, Sendable {
                     "The curation justification must contain 1 through 1024 characters."
                 )
             }
+        }
+    }
+
+    private static func validateKnowledgeCollection(
+        name: String,
+        nodeIDs: [String],
+        entryNodeIDs: [String]
+    ) throws {
+        guard !name.isEmpty,
+              name.count <= 256,
+              !nodeIDs.isEmpty,
+              Set(nodeIDs).count == nodeIDs.count,
+              !entryNodeIDs.isEmpty,
+              Set(entryNodeIDs).count == entryNodeIDs.count,
+              Set(entryNodeIDs).isSubset(of: Set(nodeIDs))
+        else {
+            throw HostClientError.invalidConfiguration(
+                "A Knowledge Collection needs a name, unique member nodes, and entry nodes contained in that membership."
+            )
+        }
+    }
+
+    private static func validateValidationCategories(_ categories: [String]?) throws {
+        guard let categories else { return }
+        let allowed = Set(["structural", "visual", "behavioral", "accessibility"])
+        guard !categories.isEmpty,
+              Set(categories).count == categories.count,
+              Set(categories).isSubset(of: allowed)
+        else {
+            throw HostClientError.invalidConfiguration(
+                "Validation categories must be a unique subset of the core rule categories."
+            )
         }
     }
 
@@ -927,3 +1472,17 @@ private struct TuningApplicationRequestBody: Encodable {
 
 /// An explicit empty JSON object body for parameterless POST routes.
 private struct EmptyJSONBody: Encodable {}
+
+private struct CreateWorkspaceRecoveryPointBody: Encodable {
+    let reason: String
+}
+
+private struct ReleaseWorkspaceRecoveryPointBody: Encodable {
+    let recoveryPointID: String
+    let retentionPolicyID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case recoveryPointID = "recovery_point_id"
+        case retentionPolicyID = "retention_policy_id"
+    }
+}

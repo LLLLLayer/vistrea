@@ -4,8 +4,10 @@ import {
   randomBytes,
   randomUUID,
   timingSafeEqual,
+  X509Certificate,
 } from "node:crypto";
 import net, { type Server, type Socket } from "node:net";
+import tls, { type Server as TlsServer } from "node:tls";
 
 import type { ByteStream } from "../../data/api/index.js";
 import { SecureUuidV7IdGenerator } from "../design/uuid-v7.js";
@@ -188,9 +190,8 @@ export function computeLoopbackHostProof(
   return hmacHex(token, message);
 }
 
-export interface LoopbackRuntimeHostOptions {
+interface RuntimeHostCommonOptions {
   readonly token: LoopbackAuthorizationToken;
-  readonly host?: "127.0.0.1" | "::1";
   readonly port?: number;
   readonly maximumLineBytes?: number;
   readonly maximumObjectBytes?: number;
@@ -199,10 +200,35 @@ export interface LoopbackRuntimeHostOptions {
   readonly captureTimeoutMs?: number;
 }
 
+export interface LoopbackRuntimeHostOptions extends RuntimeHostCommonOptions {
+  readonly host?: "127.0.0.1" | "::1";
+  readonly tls?: never;
+}
+
+export interface TlsRuntimeHostOptions extends RuntimeHostCommonOptions {
+  /** Exact local IP address. Hostnames and wildcard binds fail closed. */
+  readonly host: string;
+  readonly tls: {
+    readonly certificate: string | Buffer;
+    readonly privateKey: string | Buffer;
+  };
+}
+
 export interface LoopbackRuntimeEndpoint {
   readonly host: "127.0.0.1" | "::1";
   readonly port: number;
+  readonly transport: "loopback";
 }
+
+export interface TlsRuntimeEndpoint {
+  readonly host: string;
+  readonly port: number;
+  readonly transport: "tls";
+  /** Lowercase SHA-256 of the exact DER leaf certificate the client pins. */
+  readonly certificateSha256: string;
+}
+
+export type RuntimeEndpoint = LoopbackRuntimeEndpoint | TlsRuntimeEndpoint;
 
 interface TransportLimits {
   readonly maximumLineBytes: number;
@@ -218,41 +244,81 @@ interface SessionWaiter {
 }
 
 export class LoopbackRuntimeHost {
-  readonly #server: Server;
+  readonly #server: Server | TlsServer;
   readonly #secret: Buffer;
   readonly #limits: TransportLimits;
+  readonly #allowsNonLoopbackPeers: boolean;
   readonly #connections = new Set<HostRuntimeConnection>();
   readonly #readySessions: LoopbackRuntimeSession[] = [];
   readonly #waiters: SessionWaiter[] = [];
   #closed = false;
 
   private constructor(
-    server: Server,
+    server: Server | TlsServer,
     secret: Buffer,
     limits: TransportLimits,
-    readonly endpoint: LoopbackRuntimeEndpoint,
+    readonly endpoint: RuntimeEndpoint,
+    secure: boolean,
   ) {
     this.#server = server;
     this.#secret = secret;
     this.#limits = limits;
-    this.#server.on("connection", (socket) => this.#acceptSocket(socket));
+    this.#allowsNonLoopbackPeers = secure;
+    if (secure) {
+      (this.#server as TlsServer).on("secureConnection", (socket) => this.#acceptSocket(socket));
+    } else {
+      (this.#server as Server).on("connection", (socket) => this.#acceptSocket(socket));
+    }
     this.#server.on("error", () => {
       void this.close();
     });
   }
 
-  static async listen(options: LoopbackRuntimeHostOptions): Promise<LoopbackRuntimeHost> {
+  static async listen(
+    options: LoopbackRuntimeHostOptions | TlsRuntimeHostOptions,
+  ): Promise<LoopbackRuntimeHost> {
     const host = options.host ?? "127.0.0.1";
-    if (host !== "127.0.0.1" && host !== "::1") {
+    const secure = options.tls !== undefined;
+    if (!secure && host !== "127.0.0.1" && host !== "::1") {
       throw new LoopbackTransportError(
         "forbidden",
         "The Runtime Host listener must bind to an explicit loopback address.",
       );
     }
+    if (secure && (!isExplicitBindableIp(host) || isUnspecifiedAddress(host))) {
+      throw new LoopbackTransportError(
+        "forbidden",
+        "The TLS Runtime Host listener must bind to one explicit non-wildcard IP address.",
+      );
+    }
     const port = normalizePort(options.port ?? 0);
     const limits = normalizeLimits(options);
     const secret = normalizeToken(options.token);
-    const server = net.createServer({ allowHalfOpen: false, pauseOnConnect: false });
+    let certificateSha256: string | undefined;
+    let server: Server | TlsServer;
+    try {
+      if (options.tls === undefined) {
+        server = net.createServer({ allowHalfOpen: false, pauseOnConnect: false });
+      } else {
+        const certificate = new X509Certificate(options.tls.certificate);
+        certificateSha256 = createHash("sha256").update(certificate.raw).digest("hex");
+        server = tls.createServer({
+          allowHalfOpen: false,
+          pauseOnConnect: false,
+          cert: options.tls.certificate,
+          key: options.tls.privateKey,
+          minVersion: "TLSv1.3",
+          maxVersion: "TLSv1.3",
+          requestCert: false,
+        });
+      }
+    } catch {
+      secret.fill(0);
+      throw new LoopbackTransportError(
+        "protocol_error",
+        "The TLS Runtime Host certificate or private key is invalid.",
+      );
+    }
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -280,10 +346,19 @@ export class LoopbackRuntimeHost {
           "The loopback Runtime Host listener has no TCP endpoint.",
         );
       }
-      return new LoopbackRuntimeHost(server, secret, limits, {
-        host,
-        port: address.port,
-      });
+      const endpoint: RuntimeEndpoint = secure
+        ? {
+            host,
+            port: address.port,
+            transport: "tls",
+            certificateSha256: certificateSha256 as string,
+          }
+        : {
+            host: host as "127.0.0.1" | "::1",
+            port: address.port,
+            transport: "loopback",
+          };
+      return new LoopbackRuntimeHost(server, secret, limits, endpoint, secure);
     } catch (error) {
       secret.fill(0);
       if (server.listening) {
@@ -336,7 +411,10 @@ export class LoopbackRuntimeHost {
   }
 
   #acceptSocket(socket: Socket): void {
-    if (this.#closed || !isLoopbackAddress(socket.remoteAddress)) {
+    if (
+      this.#closed ||
+      (!this.#allowsNonLoopbackPeers && !isLoopbackAddress(socket.remoteAddress))
+    ) {
       socket.destroy();
       return;
     }
@@ -1819,7 +1897,7 @@ function optionalSafeUnsigned(value: unknown): number | undefined {
   return value as number;
 }
 
-function normalizeLimits(options: LoopbackRuntimeHostOptions): TransportLimits {
+function normalizeLimits(options: RuntimeHostCommonOptions): TransportLimits {
   const maximumLineBytes = normalizePositiveLimit(
     options.maximumLineBytes ?? DEFAULT_MAXIMUM_LINE_BYTES,
     "maximumLineBytes",
@@ -2105,6 +2183,14 @@ function secureHexEquals(actual: string, expected: string): boolean {
 
 function isLoopbackAddress(value: string | undefined): boolean {
   return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1";
+}
+
+function isExplicitBindableIp(value: string): boolean {
+  return net.isIP(value) !== 0;
+}
+
+function isUnspecifiedAddress(value: string): boolean {
+  return value === "0.0.0.0" || value === "::" || value === "0:0:0:0:0:0:0:0";
 }
 
 function publicErrorMessage(code: LoopbackTransportErrorCode): string {

@@ -14,7 +14,6 @@ import {
   type JsonObject,
   type ObjectStore,
   type PageRequest,
-  type ProtocolValidator,
   type WorkspaceDataSource,
 } from "../../data/api/index.js";
 import {
@@ -24,15 +23,15 @@ import {
   ListSnapshotsQuery,
   LoopbackTransportError,
   type CaptureSnapshotCommand,
-  type RuntimeCapturePort,
   type RuntimeEventPumpStatus,
 } from "../../engine/connection/index.js";
 import {
+  DesignAcceptanceEngine,
   DesignReviewEngine,
   TuningEngine,
   type RuntimeTuningPort,
 } from "../../engine/design/index.js";
-import { AutomationEngine, type AutomationProviderPort } from "../../engine/automation/index.js";
+import { AutomationEngine } from "../../engine/automation/index.js";
 import {
   ExplorationEngine,
   ExplorationOperationEngine,
@@ -42,6 +41,22 @@ import {
 import { KnowledgeEngine } from "../../engine/knowledge/index.js";
 import { BuildDiffEngine, ValidationEngine } from "../../engine/validation/index.js";
 import { PACK_LOGICAL_NAME, PACK_MEDIA_TYPE, PackExchangeService } from "../../data/exchange/index.js";
+import { HubPackSync } from "../../data/sync/index.js";
+import { WorkspaceSyncEngine, type WorkspaceSyncRemote } from "../../engine/sync/index.js";
+import { WorkspaceMaintenanceEngine } from "../../engine/workspace/index.js";
+import type {
+  HostLocalApiBindAddress,
+  HostLocalApiDependencies,
+  HostLocalApiHandle,
+  StartHostLocalApiOptions,
+} from "./local-api-contracts.js";
+
+export type {
+  HostLocalApiBindAddress,
+  HostLocalApiDependencies,
+  HostLocalApiHandle,
+  StartHostLocalApiOptions,
+} from "./local-api-contracts.js";
 
 const DEFAULT_MAXIMUM_JSON_BODY_BYTES = 64 * 1024;
 const MAXIMUM_CONFIGURED_JSON_BODY_BYTES = 1024 * 1024;
@@ -59,46 +74,6 @@ const CAPTURE_REASONS = new Set<CaptureSnapshotCommand["reason"]>([
   "review",
   "validation",
 ]);
-
-export type HostLocalApiBindAddress = "127.0.0.1" | "::1";
-
-export interface HostLocalApiDependencies {
-  readonly runtime: RuntimeCapturePort;
-  /** The live tuning boundary; absent when the composition is Snapshot-only. */
-  readonly runtimeTuning?: RuntimeTuningPort;
-  /** Reports live Runtime readiness without exposing transport state to API consumers. */
-  readonly isRuntimeConnected?: () => boolean;
-  /** Reports the Runtime event pump status when the Host composition runs one. */
-  readonly runtimeEventsStatus?: () => RuntimeEventPumpStatus | undefined;
-  /** Reports Runtime self-reversion audit counts when the composition tracks them. */
-  readonly tuningReversionsStatus?: () => { recorded: number; failed: number } | undefined;
-  /**
-   * The device automation provider exploration runs on; absent when the
-   * composition has no configured device, in which case the exploration
-   * routes fail closed as unsupported.
-   */
-  readonly automationProvider?: AutomationProviderPort;
-  readonly workspace: WorkspaceDataSource;
-  readonly objects: ObjectStore;
-  readonly validator: ProtocolValidator;
-}
-
-export interface StartHostLocalApiOptions extends HostLocalApiDependencies {
-  /** A literal loopback address is required. Hostnames and wildcard addresses fail closed. */
-  readonly host: HostLocalApiBindAddress;
-  /** Zero asks the operating system for an unused port. */
-  readonly port?: number;
-  readonly maximumJsonBodyBytes?: number;
-}
-
-export interface HostLocalApiHandle {
-  readonly host: HostLocalApiBindAddress;
-  readonly port: number;
-  readonly baseUrl: string;
-  /** Generated once for this server lifetime and never written to the Workspace. */
-  readonly bearerToken: string;
-  close(): Promise<void>;
-}
 
 interface HostApiErrorBody {
   readonly request_id: string;
@@ -170,6 +145,7 @@ export async function startHostLocalApi(
   const listSnapshots = new ListSnapshotsQuery(options.workspace);
   const getEventTimeline = new GetEventTimelineQuery(options.workspace);
   const design = new DesignReviewEngine(options);
+  const designAcceptance = new DesignAcceptanceEngine({ capture, reviews: design });
   const tuning = new TuningEngine(options);
   const graph = new ScreenGraphEngine(options);
   const knowledge = new KnowledgeEngine(options);
@@ -180,6 +156,18 @@ export async function startHostLocalApi(
     objects: options.objects,
     validator: options.validator,
   });
+  const sync = new WorkspaceSyncEngine({
+    workspace: options.workspace,
+    remote: new HubPackSync({
+      workspace: options.workspace,
+      objects: options.objects,
+      validator: options.validator,
+    }),
+  });
+  const maintenance =
+    options.maintenance === undefined
+      ? undefined
+      : new WorkspaceMaintenanceEngine({ maintenance: options.maintenance });
   // Version tagging freezes the materialized graph; it drives no device, so
   // it must work on a Host with no automation provider configured.
   const explorationCapture = {
@@ -244,12 +232,15 @@ export async function startHostLocalApi(
         listSnapshots,
         getEventTimeline,
         design,
+        designAcceptance,
         tuning,
         graph,
         knowledge,
         validation,
         buildDiffs,
         exchange,
+        sync,
+        ...(maintenance === undefined ? {} : { maintenance }),
         exploration: tagging,
         ...(explorationOperations === undefined ? {} : { explorationOperations }),
         ...(options.runtimeTuning === undefined ? {} : { runtimeTuning: options.runtimeTuning }),
@@ -315,12 +306,15 @@ interface RequestHandlerContext {
   readonly listSnapshots: ListSnapshotsQuery;
   readonly getEventTimeline: GetEventTimelineQuery;
   readonly design: DesignReviewEngine;
+  readonly designAcceptance: DesignAcceptanceEngine;
   readonly tuning: TuningEngine;
   readonly graph: ScreenGraphEngine;
   readonly knowledge: KnowledgeEngine;
   readonly validation: ValidationEngine;
   readonly buildDiffs: BuildDiffEngine;
   readonly exchange: PackExchangeService;
+  readonly sync: WorkspaceSyncEngine;
+  readonly maintenance?: WorkspaceMaintenanceEngine;
   readonly exploration: ExplorationEngine;
   readonly explorationOperations?: ExplorationOperationEngine;
   readonly runtimeTuning?: RuntimeTuningPort;
@@ -352,6 +346,113 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       ...(reversions === undefined ? {} : { tuning_reversions: reversions }),
       ...(health.ok ? {} : { message: "Workspace health verification reported an issue." }),
     });
+    return;
+  }
+
+  if (pathname === "/v1/workspace/recovery-points") {
+    const maintenance = requireWorkspaceMaintenance(context);
+    assertNoSearchParameters(url);
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      writeJson(response, 200, {
+        recovery_points: await maintenance.listRecoveryPoints(),
+      });
+      return;
+    }
+    assertMethod(request, "POST");
+    const command = parseCreateRecoveryPointCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+    );
+    writeJson(response, 201, await maintenance.createRecoveryPoint(command));
+    return;
+  }
+
+  if (pathname === "/v1/workspace/recovery-points/release") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const maintenance = requireWorkspaceMaintenance(context);
+    const command = parseReleaseRecoveryPointCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+    );
+    writeJson(response, 200, await maintenance.releaseRecoveryPoint(command));
+    return;
+  }
+
+  if (pathname === "/v1/sync/status") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "status",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.getStatus({
+        remote: command.remote,
+        ...(command.refNames === undefined ? {} : { ref_names: command.refNames }),
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/fetch") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "fetch",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.fetch({
+        remote: command.remote,
+        ref_names: command.refNames as readonly string[],
+        created_by: command.createdBy as JsonObject,
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/push") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "push",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.push({
+        remote: command.remote,
+        ref_names: command.refNames as readonly string[],
+        created_by: command.createdBy as JsonObject,
+        ...(command.message === undefined ? {} : { message: command.message }),
+      }),
+    );
+    return;
+  }
+
+  if (pathname === "/v1/sync/activity") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const command = parseSyncCommand(
+      await readJsonBody(request, context.maximumJsonBodyBytes),
+      "activity",
+    );
+    writeJson(
+      response,
+      200,
+      await context.sync.listActivity({
+        remote: command.remote,
+        ...(command.afterSequence === undefined
+          ? {}
+          : { after_sequence: command.afterSequence }),
+        ...(command.limit === undefined ? {} : { limit: command.limit }),
+      }),
+    );
     return;
   }
 
@@ -422,16 +523,29 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
-    const command = parseCommandObject(input, [
-      "name",
-      "kind",
-      "canvas_size",
-      "pixel_size",
-      "asset_hash",
-      "created_by",
-    ]);
+    const command = parseCommandObject(
+      input,
+      ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "source", "created_by"],
+      ["name", "kind", "canvas_size", "pixel_size", "asset_hash", "created_by"],
+    );
     const reference = await context.design.addDesignReference(
       command as unknown as Parameters<DesignReviewEngine["addDesignReference"]>[0],
+    );
+    writeJson(response, 201, reference as unknown as JsonObject);
+    return;
+  }
+
+  if (pathname === "/v1/design-baselines") {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["snapshot_id", "name", "created_by"],
+      ["snapshot_id", "name", "created_by"],
+    );
+    const reference = await context.design.promoteSnapshotBaseline(
+      command as unknown as Parameters<DesignReviewEngine["promoteSnapshotBaseline"]>[0],
     );
     writeJson(response, 201, reference as unknown as JsonObject);
     return;
@@ -512,6 +626,28 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoRequestBody(request);
     const comparisonId = decodeResourceSegment(designComparisonMatch[1] as string, "comparison ID");
     writeJson(response, 200, context.design.getDesignComparison(comparisonId) as unknown as JsonObject);
+    return;
+  }
+
+  const comparisonIssueMatch = /^\/v1\/design-comparisons\/([^/]+)\/issues$/.exec(pathname);
+  if (comparisonIssueMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const comparisonId = decodeResourceSegment(comparisonIssueMatch[1] as string, "comparison ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["difference_id", "title", "description", "created_by"],
+      ["difference_id", "created_by"],
+    );
+    const issue = context.design.createReviewIssueFromDifference({
+      ...(command as unknown as Omit<
+        Parameters<DesignReviewEngine["createReviewIssueFromDifference"]>[0],
+        "comparison_id"
+      >),
+      comparison_id: comparisonId,
+    });
+    writeJson(response, 201, issue as unknown as JsonObject);
     return;
   }
 
@@ -624,6 +760,28 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     return;
   }
 
+  const issueRecaptureMatch = /^\/v1\/review-issues\/([^/]+)\/recapture-verifications$/.exec(pathname);
+  if (issueRecaptureMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const issueId = decodeResourceSegment(issueRecaptureMatch[1] as string, "review issue ID");
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["expected_revision", "verified_by"],
+      ["expected_revision", "verified_by"],
+    );
+    const result = await context.designAcceptance.recaptureAndVerifyIssue({
+      ...(command as unknown as Omit<
+        Parameters<DesignAcceptanceEngine["recaptureAndVerifyIssue"]>[0],
+        "issue_id"
+      >),
+      issue_id: issueId,
+    });
+    writeJson(response, 201, result as unknown as JsonObject);
+    return;
+  }
+
   if (pathname === "/v1/tuning-patches") {
     assertMethod(request, "POST");
     assertNoSearchParameters(url);
@@ -647,6 +805,16 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     assertNoRequestBody(request);
     const patchId = decodeResourceSegment(tuningPatchMatch[1] as string, "tuning patch ID");
     writeJson(response, 200, context.tuning.getTuningPatch(patchId) as unknown as JsonObject);
+    return;
+  }
+
+  const tuningSuggestionMatch = /^\/v1\/tuning-patches\/([^/]+)\/source-suggestions$/.exec(pathname);
+  if (tuningSuggestionMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const patchId = decodeResourceSegment(tuningSuggestionMatch[1] as string, "tuning patch ID");
+    writeJson(response, 200, context.tuning.generateSourceSuggestions(patchId) as unknown as JsonObject);
     return;
   }
 
@@ -746,7 +914,12 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   if (pathname === "/v1/screen-graph") {
     assertMethod(request, "GET");
     assertNoRequestBody(request);
-    const values = readSingleValueParameters(url, ["project_id", "application_id"]);
+    const values = readSingleValueParameters(url, [
+      "project_id",
+      "application_id",
+      "build_id",
+      "application_version",
+    ]);
     const projectId = values["project_id"];
     const applicationId = values["application_id"];
     if (projectId === undefined || applicationId === undefined) {
@@ -758,6 +931,10 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       context.graph.getGraph({
         project_id: projectId,
         application_id: applicationId,
+        ...(values["build_id"] === undefined ? {} : { build_id: values["build_id"] }),
+        ...(values["application_version"] === undefined
+          ? {}
+          : { application_version: values["application_version"] }),
       }) as unknown as JsonObject,
     );
     return;
@@ -924,7 +1101,15 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
     const input = await readJsonBody(request, context.maximumJsonBodyBytes);
     const command = parseCommandObject(
       input,
-      ["maximum_actions", "maximum_depth", "settle_milliseconds", "excluded_stable_ids", "actor_id"],
+      [
+        "maximum_actions",
+        "maximum_depth",
+        "settle_milliseconds",
+        "application_id",
+        "maximum_recovery_attempts",
+        "excluded_stable_ids",
+        "actor_id",
+      ],
       ["maximum_actions"],
     );
     const ref = engine.run(command as unknown as RunExplorationCommand);
@@ -963,10 +1148,19 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
   const screenStateMatch = /^\/v1\/screen-states\/([^/]+)$/.exec(pathname);
   if (screenStateMatch !== null) {
     assertMethod(request, "GET");
-    assertNoSearchParameters(url);
     assertNoRequestBody(request);
+    const values = readSingleValueParameters(url, ["build_id", "application_version"]);
     const stateId = decodeResourceSegment(screenStateMatch[1] as string, "screen state ID");
-    writeJson(response, 200, context.graph.getState(stateId) as unknown as JsonObject);
+    writeJson(
+      response,
+      200,
+      context.graph.getState(stateId, {
+        ...(values["build_id"] === undefined ? {} : { build_id: values["build_id"] }),
+        ...(values["application_version"] === undefined
+          ? {}
+          : { application_version: values["application_version"] }),
+      }) as unknown as JsonObject,
+    );
     return;
   }
 
@@ -1115,6 +1309,193 @@ async function handleRequest(context: RequestHandlerContext): Promise<void> {
       response,
       200,
       context.knowledge.relatedTo({ kind, id }, readPageValues(url)) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  if (pathname === "/v1/knowledge-collections") {
+    if (request.method === "GET") {
+      assertNoRequestBody(request);
+      const values = readSingleValueParameters(url, [
+        "text",
+        "publication_states",
+        "limit",
+        "cursor",
+      ]);
+      const query = {
+        ...(values["text"] === undefined ? {} : { text: values["text"] }),
+        ...(values["publication_states"] === undefined
+          ? {}
+          : { publication_states: values["publication_states"].split(",") }),
+      };
+      writeJson(
+        response,
+        200,
+        context.knowledge.listCollections(query, readPageValues(url)) as unknown as JsonObject,
+      );
+      return;
+    }
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      ["name", "summary", "node_ids", "link_ids", "entry_node_ids", "created_by"],
+      ["name", "node_ids", "entry_node_ids", "created_by"],
+      {
+        name: "string",
+        summary: "string",
+        node_ids: "string_array",
+        link_ids: "string_array",
+        entry_node_ids: "string_array",
+        created_by: "object",
+      },
+    );
+    writeJson(
+      response,
+      201,
+      context.knowledge.createCollection(
+        command as unknown as Parameters<KnowledgeEngine["createCollection"]>[0],
+      ) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  const collectionRevisionMatch = /^\/v1\/knowledge-collections\/([^/]+)\/revisions$/.exec(
+    pathname,
+  );
+  if (collectionRevisionMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const collectionId = decodeResourceSegment(
+      collectionRevisionMatch[1] as string,
+      "Knowledge Collection ID",
+    );
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "expected_revision",
+        "name",
+        "summary",
+        "node_ids",
+        "link_ids",
+        "entry_node_ids",
+        "updated_by",
+      ],
+      ["expected_revision", "updated_by"],
+      {
+        expected_revision: "integer",
+        name: "string",
+        summary: "string",
+        node_ids: "string_array",
+        link_ids: "string_array",
+        entry_node_ids: "string_array",
+        updated_by: "object",
+      },
+    );
+    writeJson(
+      response,
+      200,
+      context.knowledge.updateCollection({
+        ...(command as unknown as Omit<
+          Parameters<KnowledgeEngine["updateCollection"]>[0],
+          "collection_id"
+        >),
+        collection_id: collectionId,
+      }) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  const collectionPublicationMatch =
+    /^\/v1\/knowledge-collections\/([^/]+)\/publication$/.exec(pathname);
+  if (collectionPublicationMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const collectionId = decodeResourceSegment(
+      collectionPublicationMatch[1] as string,
+      "Knowledge Collection ID",
+    );
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(
+      input,
+      [
+        "expected_revision",
+        "base_commit_id",
+        "target_ref_name",
+        "ref_precondition",
+        "published_by",
+        "message",
+      ],
+      [
+        "expected_revision",
+        "base_commit_id",
+        "target_ref_name",
+        "ref_precondition",
+        "published_by",
+      ],
+      {
+        expected_revision: "integer",
+        base_commit_id: "string",
+        target_ref_name: "string",
+        ref_precondition: "object",
+        published_by: "object",
+        message: "string",
+      },
+    );
+    writeJson(
+      response,
+      201,
+      (await context.knowledge.publishCollection({
+        ...(command as unknown as Omit<
+          Parameters<KnowledgeEngine["publishCollection"]>[0],
+          "collection_id"
+        >),
+        collection_id: collectionId,
+      })) as unknown as JsonObject,
+    );
+    return;
+  }
+
+  const collectionExportMatch = /^\/v1\/knowledge-collections\/([^/]+)\/exports$/.exec(
+    pathname,
+  );
+  if (collectionExportMatch !== null) {
+    assertMethod(request, "POST");
+    assertNoSearchParameters(url);
+    const collectionId = decodeResourceSegment(
+      collectionExportMatch[1] as string,
+      "Knowledge Collection ID",
+    );
+    const input = await readJsonBody(request, context.maximumJsonBodyBytes);
+    const command = parseCommandObject(input, ["formats"], [], { formats: "string_array" });
+    const objects = await context.exchange.exportReadable({
+      collection_id: collectionId,
+      ...(command["formats"] === undefined
+        ? {}
+        : { formats: command["formats"] as readonly ("markdown" | "html")[] }),
+    });
+    writeJson(response, 201, {
+      collection_id: collectionId,
+      objects: objects as unknown as JsonObject[],
+    });
+    return;
+  }
+
+  const knowledgeCollectionMatch = /^\/v1\/knowledge-collections\/([^/]+)$/.exec(pathname);
+  if (knowledgeCollectionMatch !== null) {
+    assertMethod(request, "GET");
+    assertNoSearchParameters(url);
+    assertNoRequestBody(request);
+    const collectionId = decodeResourceSegment(
+      knowledgeCollectionMatch[1] as string,
+      "Knowledge Collection ID",
+    );
+    writeJson(
+      response,
+      200,
+      context.knowledge.getCollection(collectionId) as unknown as JsonObject,
     );
     return;
   }
@@ -1383,6 +1764,129 @@ const EVENT_EPOCH_ID_PATTERN =
 const EVENT_KIND_QUERY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const MAXIMUM_DESIGN_ASSET_BYTES = 64 * 1024 * 1024;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/;
+const HUB_REMOTE_URL_PATTERN =
+  /^(?:http:\/\/(?:127\.0\.0\.1|\[::1\]|localhost)|https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,253}[A-Za-z0-9])?)(?::[0-9]{1,5})?$/;
+const HUB_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const PROJECT_ID_PATTERN =
+  /^project_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SYNC_REF_NAME_PATTERN =
+  /^(?:users|teams|builds|baselines|releases)\/[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})*$/;
+
+type SyncCommandKind = "status" | "fetch" | "push" | "activity";
+
+interface ParsedSyncCommand {
+  readonly remote: WorkspaceSyncRemote;
+  readonly refNames?: readonly string[];
+  readonly createdBy?: JsonObject;
+  readonly message?: string;
+  readonly afterSequence?: number;
+  readonly limit?: number;
+}
+
+function parseSyncCommand(input: unknown, kind: SyncCommandKind): ParsedSyncCommand {
+  const allowedByKind: Readonly<Record<SyncCommandKind, readonly string[]>> = {
+    status: ["remote", "ref_names"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by", "message"],
+    activity: ["remote", "after_sequence", "limit"],
+  };
+  const requiredByKind: Readonly<Record<SyncCommandKind, readonly string[]>> = {
+    status: ["remote"],
+    fetch: ["remote", "ref_names", "created_by"],
+    push: ["remote", "ref_names", "created_by"],
+    activity: ["remote"],
+  };
+  const value = parseCommandObject(
+    input,
+    allowedByKind[kind],
+    requiredByKind[kind],
+    {
+      remote: "object",
+      ref_names: "string_array",
+      created_by: "object",
+      message: "string",
+      after_sequence: "integer",
+      limit: "integer",
+    },
+  );
+  const remoteValue = requirePlainRecord(value["remote"], "Hub remote");
+  assertAllowedKeys(remoteValue, ["base_url", "project_id", "bearer_token"], "Hub remote");
+  if (
+    !["base_url", "project_id", "bearer_token"].every((key) => Object.hasOwn(remoteValue, key))
+  ) {
+    throw invalidArgument("Hub remote requires base_url, project_id, and bearer_token.");
+  }
+  const baseUrl = remoteValue["base_url"];
+  const projectId = remoteValue["project_id"];
+  const bearerToken = remoteValue["bearer_token"];
+  if (typeof baseUrl !== "string" || !HUB_REMOTE_URL_PATTERN.test(baseUrl)) {
+    throw invalidArgument("The Hub URL must be loopback HTTP or an HTTPS origin.");
+  }
+  if (typeof projectId !== "string" || !PROJECT_ID_PATTERN.test(projectId)) {
+    throw invalidArgument("The Hub project_id must be a canonical Project ID.");
+  }
+  if (typeof bearerToken !== "string" || !HUB_TOKEN_PATTERN.test(bearerToken)) {
+    throw invalidArgument("The Hub bearer token is invalid.");
+  }
+  const refNames = value["ref_names"] as readonly string[] | undefined;
+  if (
+    refNames !== undefined &&
+    (refNames.length === 0 ||
+      refNames.length > 64 ||
+      new Set(refNames).size !== refNames.length ||
+      refNames.some((name) => !SYNC_REF_NAME_PATTERN.test(name)))
+  ) {
+    throw invalidArgument("ref_names must contain unique canonical ref names.");
+  }
+  const message = value["message"] as string | undefined;
+  if (message !== undefined && (message.length === 0 || message.length > 1024)) {
+    throw invalidArgument("message must contain 1 through 1024 characters.");
+  }
+  const afterSequence = value["after_sequence"] as number | undefined;
+  if (afterSequence !== undefined && (afterSequence < 0 || !Number.isSafeInteger(afterSequence))) {
+    throw invalidArgument("after_sequence must be a JSON-safe unsigned integer.");
+  }
+  const limit = value["limit"] as number | undefined;
+  if (limit !== undefined && (limit < 1 || limit > 500)) {
+    throw invalidArgument("limit must be an integer from 1 through 500.");
+  }
+  const createdBy =
+    value["created_by"] === undefined ? undefined : parseSyncActor(value["created_by"]);
+  return {
+    remote: { baseUrl, projectId, bearerToken },
+    ...(refNames === undefined ? {} : { refNames }),
+    ...(createdBy === undefined ? {} : { createdBy }),
+    ...(message === undefined ? {} : { message }),
+    ...(afterSequence === undefined ? {} : { afterSequence }),
+    ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+function parseSyncActor(value: unknown): JsonObject {
+  const actor = requirePlainRecord(value, "Sync actor");
+  assertAllowedKeys(actor, ["kind", "id", "display_name", "extensions"], "Sync actor");
+  if (!["kind", "id", "extensions"].every((key) => Object.hasOwn(actor, key))) {
+    throw invalidArgument("created_by must be a canonical ActorRef.");
+  }
+  const kind = actor["kind"];
+  const id = actor["id"];
+  const displayName = actor["display_name"];
+  const extensions = actor["extensions"];
+  if (
+    (kind !== "human" && kind !== "agent" && kind !== "service") ||
+    typeof id !== "string" ||
+    id.length === 0 ||
+    id.length > 320 ||
+    (displayName !== undefined &&
+      (typeof displayName !== "string" || displayName.length === 0 || displayName.length > 256)) ||
+    extensions === null ||
+    typeof extensions !== "object" ||
+    Array.isArray(extensions)
+  ) {
+    throw invalidArgument("created_by must be a canonical ActorRef.");
+  }
+  return actor as JsonObject;
+}
 
 function requireExplorationOperations(
   context: RequestHandlerContext,
@@ -1408,6 +1912,58 @@ function requireRuntimeTuning(context: RequestHandlerContext): RuntimeTuningPort
     });
   }
   return context.runtimeTuning;
+}
+
+function requireWorkspaceMaintenance(
+  context: RequestHandlerContext,
+): WorkspaceMaintenanceEngine {
+  if (context.maintenance === undefined) {
+    throw new RequestError({
+      status: 501,
+      code: "unsupported",
+      message: "Workspace maintenance is not configured on this Host.",
+      retryable: false,
+    });
+  }
+  return context.maintenance;
+}
+
+function parseCreateRecoveryPointCommand(input: unknown): { readonly reason: string } {
+  const command = parseCommandObject(input, ["reason"], ["reason"], {
+    reason: "string",
+  });
+  const reason = command["reason"] as string;
+  if (reason.trim().length === 0 || reason.length > 1_024) {
+    throw invalidArgument("reason must contain 1 through 1024 characters.");
+  }
+  return { reason };
+}
+
+function parseReleaseRecoveryPointCommand(input: unknown): {
+  readonly recovery_point_id: string;
+  readonly retention_policy_id: string;
+} {
+  const command = parseCommandObject(
+    input,
+    ["recovery_point_id", "retention_policy_id"],
+    ["recovery_point_id", "retention_policy_id"],
+    {
+      recovery_point_id: "string",
+      retention_policy_id: "string",
+    },
+  );
+  const recoveryPointId = command["recovery_point_id"] as string;
+  const retentionPolicyId = command["retention_policy_id"] as string;
+  if (!OBJECT_HASH_PATTERN.test(recoveryPointId)) {
+    throw invalidArgument("recovery_point_id must be a canonical SHA-256 Object hash.");
+  }
+  if (retentionPolicyId.length === 0 || retentionPolicyId.length > 256) {
+    throw invalidArgument("retention_policy_id must contain 1 through 256 characters.");
+  }
+  return {
+    recovery_point_id: recoveryPointId,
+    retention_policy_id: retentionPolicyId,
+  };
 }
 
 /** Structural command parsing; protocol-value validation stays in the Engine. */
@@ -1465,8 +2021,16 @@ const COMMAND_TYPE_NAMES: Readonly<Record<CommandFieldType, string>> = {
   object: "an object",
 };
 
-function parseReviewIssueQuery(url: URL): { states?: string[]; design_reference_id?: string } | undefined {
-  const allowed = new Set(["states", "design_reference_id", "limit", "cursor"]);
+function parseReviewIssueQuery(url: URL):
+  | { states?: string[]; design_reference_id?: string; screen_state_id?: string }
+  | undefined {
+  const allowed = new Set([
+    "states",
+    "design_reference_id",
+    "screen_state_id",
+    "limit",
+    "cursor",
+  ]);
   for (const key of url.searchParams.keys()) {
     if (!allowed.has(key)) {
       throw invalidArgument(`Unsupported review-issues query parameter: ${key}.`);
@@ -1486,12 +2050,22 @@ function parseReviewIssueQuery(url: URL): { states?: string[]; design_reference_
     throw invalidArgument("states must be a comma-separated list of issue states.");
   }
   const designReferenceId = url.searchParams.get("design_reference_id") ?? undefined;
-  if (states === undefined && designReferenceId === undefined) {
+  const screenStateId = url.searchParams.get("screen_state_id") ?? undefined;
+  if (
+    screenStateId !== undefined &&
+    !/^screenstate_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      screenStateId,
+    )
+  ) {
+    throw invalidArgument("screen_state_id must be a canonical Screen State ID.");
+  }
+  if (states === undefined && designReferenceId === undefined && screenStateId === undefined) {
     return undefined;
   }
   return {
     ...(states === undefined ? {} : { states }),
     ...(designReferenceId === undefined ? {} : { design_reference_id: designReferenceId }),
+    ...(screenStateId === undefined ? {} : { screen_state_id: screenStateId }),
   };
 }
 
@@ -2182,6 +2756,24 @@ function toPublicError(error: unknown): PublicError {
     return error;
   }
   if (error instanceof DataError) {
+    const hubErrorCode = error.details["hub_error_code"];
+    if (hubErrorCode === "unauthenticated") {
+      return {
+        status: 401,
+        code: "unauthenticated",
+        message: "The Hub rejected the supplied credential.",
+        retryable: false,
+        headers: { "www-authenticate": 'Bearer realm="vistrea-hub", charset="UTF-8"' },
+      };
+    }
+    if (hubErrorCode === "forbidden") {
+      return {
+        status: 403,
+        code: "forbidden",
+        message: "The Hub credential does not permit this operation.",
+        retryable: false,
+      };
+    }
     switch (error.code) {
       case "invalid_argument":
         return {
@@ -2356,7 +2948,11 @@ function assertDependencies(options: HostLocalApiDependencies): void {
     typeof options.objects?.put !== "function" ||
     typeof options.objects?.stat !== "function" ||
     typeof options.objects?.open !== "function" ||
-    typeof options.validator?.assert !== "function"
+    typeof options.validator?.assert !== "function" ||
+    (options.maintenance !== undefined &&
+      (typeof options.maintenance?.createRecoveryPoint !== "function" ||
+        typeof options.maintenance?.listRecoveryPoints !== "function" ||
+        typeof options.maintenance?.releaseRecoveryPoint !== "function"))
   ) {
     throw new DataError("invalid_argument", "Host Local API dependencies are incomplete.");
   }

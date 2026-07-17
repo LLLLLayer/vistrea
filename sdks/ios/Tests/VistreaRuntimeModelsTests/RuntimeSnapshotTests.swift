@@ -136,7 +136,7 @@ final class RuntimeSnapshotTests: XCTestCase {
         let data = try fixtureData("runtime-snapshot/invalid/unknown-core-field.json")
 
         XCTAssertThrowsError(try RuntimeSnapshotCodec.decode(data)) { error in
-            XCTAssertTrue(String(describing: error).contains("Unknown core field 'unexpected'"))
+            self.assertUnknownCoreFieldError(error, field: "unexpected")
         }
     }
 
@@ -153,7 +153,7 @@ final class RuntimeSnapshotTests: XCTestCase {
         let invalidData = try JSONSerialization.data(withJSONObject: object)
 
         XCTAssertThrowsError(try RuntimeSnapshotCodec.decode(invalidData)) { error in
-            XCTAssertTrue(String(describing: error).contains("Unknown core field 'unexpected'"))
+            self.assertUnknownCoreFieldError(error, field: "unexpected")
         }
     }
 
@@ -173,6 +173,18 @@ final class RuntimeSnapshotTests: XCTestCase {
         let decodedAgain = try RuntimeSnapshotCodec.decode(encoded)
         XCTAssertEqual(decodedAgain, snapshot)
         XCTAssertEqual(try jsonObject(from: encoded), try jsonObject(from: originalData))
+    }
+
+    private func assertUnknownCoreFieldError(_ error: Error, field: String) {
+        guard case let DecodingError.dataCorrupted(context) = error else {
+            XCTFail("Expected DecodingError.dataCorrupted, received \(String(reflecting: error))")
+            return
+        }
+        XCTAssertEqual(context.codingPath.last?.stringValue, field)
+        XCTAssertEqual(
+            context.debugDescription,
+            "Unknown core field '\(field)'. Add compatible values under a namespaced extensions key."
+        )
     }
 
     private func jsonObject(from data: Data) throws -> NSDictionary {

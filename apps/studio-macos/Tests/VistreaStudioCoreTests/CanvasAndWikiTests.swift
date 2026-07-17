@@ -93,6 +93,389 @@ final class CanvasAndWikiTests: XCTestCase {
         XCTAssertEqual(positions, CanvasLayout.positions(for: Self.fixtureGraph()))
     }
 
+    func testCanvasViewportProjectionCapsFitAndSnapsToRetinaPixels() {
+        let projected = CanvasViewportProjection.point(
+            CGPoint(x: 10.1, y: 20.2),
+            zoom: 1.15,
+            offset: CGSize(width: 0.12, height: 0.26),
+            displayScale: 2
+        )
+        XCTAssertEqual(projected, CGPoint(x: 11.5, y: 23.5))
+
+        let smallGraph = CanvasViewportProjection.fit(
+            bounds: CGRect(x: 10, y: 20, width: 200, height: 128),
+            viewportSize: CGSize(width: 1_000, height: 1_000),
+            padding: 52,
+            minimumZoom: 0.45,
+            maximumZoom: 1,
+            displayScale: 2
+        )
+        XCTAssertEqual(smallGraph.zoom, 1)
+        XCTAssertEqual(smallGraph.offset, CGSize(width: 390, height: 416))
+
+        let largeGraph = CanvasViewportProjection.fit(
+            bounds: CGRect(x: 0, y: 0, width: 2_000, height: 1_000),
+            viewportSize: CGSize(width: 1_000, height: 600),
+            padding: 52,
+            minimumZoom: 0.45,
+            maximumZoom: 1,
+            displayScale: 2
+        )
+        XCTAssertEqual(largeGraph.zoom, 0.45)
+        XCTAssertEqual(largeGraph.offset, CGSize(width: 50, height: 75))
+    }
+
+    func testCanvasViewportZoomKeepsTheGestureAnchorStationary() {
+        let anchor = CGPoint(x: 420, y: 260)
+        let originalOffset = CGSize(width: -180, height: 40)
+        let logicalPoint = CGPoint(
+            x: (anchor.x - originalOffset.width) / 0.75,
+            y: (anchor.y - originalOffset.height) / 0.75
+        )
+
+        let viewport = CanvasViewportProjection.zoom(
+            from: 0.75,
+            to: 1.25,
+            offset: originalOffset,
+            anchor: anchor,
+            displayScale: 2
+        )
+        let projected = CanvasViewportProjection.point(
+            logicalPoint,
+            zoom: viewport.zoom,
+            offset: viewport.offset,
+            displayScale: 2
+        )
+
+        XCTAssertEqual(viewport.zoom, 1.25)
+        XCTAssertEqual(projected, anchor)
+    }
+
+    func testCanvasViewportZoomRejectsInvalidScaleWithoutMovingTheViewport() {
+        let originalOffset = CGSize(width: 20, height: -12)
+        let viewport = CanvasViewportProjection.zoom(
+            from: 0,
+            to: 1.2,
+            offset: originalOffset,
+            anchor: CGPoint(x: 100, y: 100),
+            displayScale: 2
+        )
+
+        XCTAssertEqual(viewport.zoom, 0)
+        XCTAssertEqual(viewport.offset, originalOffset)
+    }
+
+    func testCanvasFitCanShowARealLargeGraphInOverviewMode() {
+        let bounds = CGRect(x: 500, y: 300, width: 20_000, height: 1_000)
+        let viewportSize = CGSize(width: 1_000, height: 600)
+        let fit = CanvasViewportProjection.fit(
+            bounds: bounds,
+            viewportSize: viewportSize,
+            padding: 52,
+            minimumZoom: 0.04,
+            maximumZoom: 1,
+            displayScale: 2
+        )
+
+        XCTAssertEqual(fit.zoom, 0.0448, accuracy: 0.000_001)
+        let topLeft = CanvasViewportProjection.point(
+            bounds.origin,
+            zoom: fit.zoom,
+            offset: fit.offset,
+            displayScale: 2
+        )
+        let bottomRight = CanvasViewportProjection.point(
+            CGPoint(x: bounds.maxX, y: bounds.maxY),
+            zoom: fit.zoom,
+            offset: fit.offset,
+            displayScale: 2
+        )
+        XCTAssertGreaterThanOrEqual(topLeft.x, 52)
+        XCTAssertGreaterThanOrEqual(topLeft.y, 52)
+        XCTAssertLessThanOrEqual(bottomRight.x, viewportSize.width - 52)
+        XCTAssertLessThanOrEqual(bottomRight.y, viewportSize.height - 52)
+    }
+
+    func testCanvasViewportCullingBoundsLargeGraphPresentationWork() {
+        let centers = Dictionary(uniqueKeysWithValues: (0..<2_000).map { index in
+            (
+                "state-\(index)",
+                CGPoint(x: CGFloat(index) * 240, y: CGFloat(index % 5) * 180)
+            )
+        })
+        let visible = CanvasViewportCulling.visibleStateIDs(
+            projectedCenters: centers,
+            viewportSize: CGSize(width: 1_200, height: 800),
+            cardSize: CGSize(width: 220, height: 140),
+            overscan: 120
+        )
+
+        XCTAssertTrue(visible.contains("state-0"))
+        XCTAssertTrue(visible.contains("state-5"))
+        XCTAssertFalse(visible.contains("state-100"))
+        XCTAssertLessThan(visible.count, 20)
+        XCTAssertTrue(
+            CanvasViewportCulling.transitionMayIntersectViewport(
+                source: CGPoint(x: -200, y: 400),
+                target: CGPoint(x: 1_400, y: 400),
+                viewportSize: CGSize(width: 1_200, height: 800)
+            )
+        )
+        XCTAssertFalse(
+            CanvasViewportCulling.transitionMayIntersectViewport(
+                source: CGPoint(x: -400, y: -400),
+                target: CGPoint(x: -200, y: -200),
+                viewportSize: CGSize(width: 1_200, height: 800)
+            )
+        )
+    }
+
+    func testCanvasPathPlannerEnumeratesEntryRoutesDeterministicallyAndAvoidsCycles() {
+        let stateIDs = ["entry-a", "entry-b", "middle-a", "middle-b", "target"]
+        let graph = CanvasGraph(
+            screenGraphID: "graph-paths",
+            entryStateIDs: ["entry-b", "entry-a"],
+            states: stateIDs.map {
+                CanvasStateSummary(
+                    screenStateID: $0,
+                    title: $0,
+                    kind: "screen",
+                    status: "active"
+                )
+            },
+            transitions: [
+                CanvasTransitionSummary(
+                    transitionID: "a-middle-a",
+                    sourceStateID: "entry-a",
+                    targetStateID: "middle-a",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "a-middle-b",
+                    sourceStateID: "entry-a",
+                    targetStateID: "middle-b",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "middle-a-target",
+                    sourceStateID: "middle-a",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "middle-b-target",
+                    sourceStateID: "middle-b",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "middle-b-cycle",
+                    sourceStateID: "middle-b",
+                    targetStateID: "entry-a",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "b-target",
+                    sourceStateID: "entry-b",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+            ]
+        )
+
+        let routes = CanvasPathPlanner.paths(to: "target", in: graph)
+        XCTAssertEqual(routes.count, 3)
+        XCTAssertEqual(routes.map(\.entryStateID), ["entry-a", "entry-a", "entry-b"])
+        XCTAssertEqual(routes[0].stateIDs, ["entry-a", "middle-a", "target"])
+        XCTAssertEqual(routes[1].stateIDs, ["entry-a", "middle-b", "target"])
+        XCTAssertEqual(routes[2].stateIDs, ["entry-b", "target"])
+        XCTAssertTrue(routes.allSatisfy { Set($0.stateIDs).count == $0.stateIDs.count })
+        XCTAssertEqual(
+            CanvasPathPlanner.paths(to: "target", in: graph, maximumPaths: 2)
+                .map(\.entryStateID),
+            ["entry-a", "entry-b"]
+        )
+
+        let entryRoute = CanvasPathPlanner.paths(to: "entry-a", in: graph)
+        XCTAssertEqual(entryRoute.first?.stateIDs, ["entry-a"])
+        XCTAssertEqual(entryRoute.first?.transitionIDs, [])
+    }
+
+    func testCanvasPathPlannerPrunesLargeDeadBranchesOutsidePrimaryRouteBudget() {
+        let decoyCount = 2_000
+        let stateIDs = ["entry", "middle", "target"]
+            + (0..<decoyCount).map { "decoy-\($0)" }
+        var transitions = [
+            CanvasTransitionSummary(
+                transitionID: "entry-middle",
+                sourceStateID: "entry",
+                targetStateID: "middle",
+                occurrenceCount: 1
+            ),
+            CanvasTransitionSummary(
+                transitionID: "middle-target",
+                sourceStateID: "middle",
+                targetStateID: "target",
+                occurrenceCount: 1
+            ),
+            CanvasTransitionSummary(
+                transitionID: "entry-decoy",
+                sourceStateID: "entry",
+                targetStateID: "decoy-0",
+                occurrenceCount: 1
+            ),
+        ]
+        transitions += (0..<(decoyCount - 1)).map { index in
+            CanvasTransitionSummary(
+                transitionID: "decoy-\(index)",
+                sourceStateID: "decoy-\(index)",
+                targetStateID: "decoy-\(index + 1)",
+                occurrenceCount: 1
+            )
+        }
+        let graph = CanvasGraph(
+            screenGraphID: "large-path-graph",
+            entryStateIDs: ["entry"],
+            states: stateIDs.map {
+                CanvasStateSummary(
+                    screenStateID: $0,
+                    title: $0,
+                    kind: "screen",
+                    status: "active"
+                )
+            },
+            transitions: transitions
+        )
+
+        let route = CanvasPathPlanner.paths(
+            to: "target",
+            in: graph,
+            maximumExpansions: 2
+        )
+        XCTAssertEqual(route.map(\.stateIDs), [["entry", "middle", "target"]])
+        XCTAssertEqual(
+            CanvasPathPlanner.paths(
+                to: "target",
+                in: graph,
+                maximumExpansions: 0
+            ).map(\.stateIDs),
+            [["entry", "middle", "target"]]
+        )
+
+        let positions = CanvasLayout.positions(for: graph)
+        XCTAssertEqual(positions.count, decoyCount + 3)
+    }
+
+    func testCanvasPathPlannerReservesShortestRouteForEveryReachableEntry() {
+        let stateIDs = ["entry-a", "entry-b", "branch", "branch-tail", "target"]
+        let graph = CanvasGraph(
+            screenGraphID: "entry-fairness-path-graph",
+            entryStateIDs: ["entry-b", "entry-a"],
+            states: stateIDs.map {
+                CanvasStateSummary(
+                    screenStateID: $0,
+                    title: $0,
+                    kind: "screen",
+                    status: "active"
+                )
+            },
+            transitions: [
+                CanvasTransitionSummary(
+                    transitionID: "a-branch",
+                    sourceStateID: "entry-a",
+                    targetStateID: "branch",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "branch-tail",
+                    sourceStateID: "branch",
+                    targetStateID: "branch-tail",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "tail-target",
+                    sourceStateID: "branch-tail",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "a-target",
+                    sourceStateID: "entry-a",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+                CanvasTransitionSummary(
+                    transitionID: "b-target",
+                    sourceStateID: "entry-b",
+                    targetStateID: "target",
+                    occurrenceCount: 1
+                ),
+            ]
+        )
+
+        let routes = CanvasPathPlanner.paths(
+            to: "target",
+            in: graph,
+            maximumPaths: 4,
+            maximumDepth: 3,
+            maximumExpansions: 3
+        )
+        XCTAssertEqual(
+            routes.first(where: { $0.entryStateID == "entry-a" })?.stateIDs,
+            ["entry-a", "target"]
+        )
+        XCTAssertEqual(
+            routes.first(where: { $0.entryStateID == "entry-b" })?.stateIDs,
+            ["entry-b", "target"]
+        )
+        XCTAssertEqual(
+            CanvasPathPlanner.paths(
+                to: "target",
+                in: graph,
+                maximumPaths: 2,
+                maximumDepth: 1,
+                maximumExpansions: 0
+            ).map(\.entryStateID),
+            ["entry-a", "entry-b"]
+        )
+        XCTAssertTrue(
+            CanvasPathPlanner.paths(
+                to: "target",
+                in: graph,
+                maximumDepth: 0
+            ).isEmpty
+        )
+    }
+
+    func testCanvasStatePresentationReplacesInstrumentationTitlesWithSemanticLabels() {
+        let generated = CanvasStateSummary(
+            screenStateID: "product-detail",
+            title: "android.debug.inspector.open",
+            kind: "screen",
+            status: "active",
+            labels: ["storefront", "product-detail"]
+        )
+        XCTAssertEqual(CanvasStatePresentation.displayTitle(for: generated), "Product Detail")
+
+        let cart = CanvasStateSummary(
+            screenStateID: "cart-empty",
+            title: "android.debug.inspector.open",
+            kind: "screen",
+            status: "active",
+            labels: ["cart", "empty-state"]
+        )
+        XCTAssertEqual(CanvasStatePresentation.displayTitle(for: cart), "Cart · Empty State")
+
+        let authored = CanvasStateSummary(
+            screenStateID: "shop",
+            title: "Shop",
+            kind: "screen",
+            status: "active",
+            labels: ["storefront"]
+        )
+        XCTAssertEqual(CanvasStatePresentation.displayTitle(for: authored), "Shop")
+    }
+
     func testLayerProjectionAssignsHierarchyDepthAndSkipsZeroAreaFrames() throws {
         let snapshot = try StudioTestFixtures.snapshot()
         let presentation = try SnapshotPresentation(snapshot: snapshot)

@@ -102,7 +102,12 @@ final class WorkspaceScopeAndInspectorTests: XCTestCase {
         let requests = await client.screenGraphRequests
         XCTAssertEqual(
             requests,
-            [[Self.fixtureScope.projectID, Self.fixtureScope.applicationID]]
+            [[
+                Self.fixtureScope.projectID,
+                Self.fixtureScope.applicationID,
+                Self.fixtureScope.applicationVersion,
+                Self.fixtureScope.buildID,
+            ]]
         )
         XCTAssertEqual(model.canvasPhase, .content)
     }
@@ -134,8 +139,18 @@ final class WorkspaceScopeAndInspectorTests: XCTestCase {
         XCTAssertEqual(
             requests,
             [
-                [Self.otherScope.projectID, Self.otherScope.applicationID],
-                [Self.fixtureScope.projectID, Self.fixtureScope.applicationID],
+                [
+                    Self.otherScope.projectID,
+                    Self.otherScope.applicationID,
+                    Self.otherScope.applicationVersion,
+                    Self.otherScope.buildID,
+                ],
+                [
+                    Self.fixtureScope.projectID,
+                    Self.fixtureScope.applicationID,
+                    Self.fixtureScope.applicationVersion,
+                    Self.fixtureScope.buildID,
+                ],
             ]
         )
 
@@ -422,6 +437,20 @@ private actor ScopeRecordingHostClient: HostClient {
 
     func getScreenGraph(projectID: String, applicationID: String) async throws -> CanvasGraph {
         screenGraphRequests.append([projectID, applicationID])
+        return graph()
+    }
+
+    func getScreenGraph(
+        projectID: String,
+        applicationID: String,
+        applicationVersion: String,
+        buildID: String
+    ) async throws -> CanvasGraph {
+        screenGraphRequests.append([projectID, applicationID, applicationVersion, buildID])
+        return graph()
+    }
+
+    private func graph() -> CanvasGraph {
         return CanvasGraph(
             screenGraphID: "graph_019f0000-0000-7000-8000-000000000001",
             entryStateIDs: [],

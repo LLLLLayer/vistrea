@@ -22,7 +22,7 @@ Available operations:
 | Store the baseline image | `design upload-asset --file <path> --media-type image/png` |
 | Register the baseline | `design add-reference --json <command>` |
 | Map a region to a node | `design map --json <command>` |
-| Run the comparison | `design compare --reference <id> --snapshot <id>` (add `--pixel true` for mean-color region comparison against the design asset) |
+| Run the comparison | `design compare --reference <id> --snapshot <id>` (add `--pixel true` for normalized per-pixel region metrics against the design asset) |
 | Create an issue | `issue create --json <command>` |
 | Triage issues | `issue list` / `issue transition` |
 | Verify a fix | `issue verify <id> --revision <n> --basis real_build --result passed --snapshot <id> --build <id>` |

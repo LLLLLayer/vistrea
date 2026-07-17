@@ -522,8 +522,15 @@ public final class UIKitRuntimeCaptureAdapter {
             actions: Self.actions(for: view),
             visual: VisualProperties(
                 alpha: Double(view.alpha),
+                foregroundColor: Self.foregroundColor(for: view)
+                    .flatMap(Self.protocolColor),
+                backgroundColor: view.backgroundColor.flatMap(Self.protocolColor),
+                font: Self.font(for: view).flatMap(Self.protocolFont),
                 cornerRadius: Double(view.layer.cornerRadius),
-                borderWidth: Double(view.layer.borderWidth)
+                borderWidth: Double(view.layer.borderWidth),
+                borderColor: view.layer.borderColor
+                    .map(UIColor.init(cgColor:))
+                    .flatMap(Self.protocolColor)
             ),
             accessibility: accessibility,
             sourceContext: sourceContext,
@@ -537,6 +544,53 @@ public final class UIKitRuntimeCaptureAdapter {
     /// subview trees, accessibility containers are arbitrary object graphs
     /// that may nest deeply or reference each other, so the walk carries its
     /// own explicit depth and breadth limits plus a cycle guard.
+    private static func foregroundColor(for view: UIView) -> UIColor? {
+        switch view {
+        case let label as UILabel: label.textColor
+        case let textView as UITextView: textView.textColor
+        case let textField as UITextField: textField.textColor
+        case let button as UIButton: button.titleColor(for: .normal)
+        default: nil
+        }
+    }
+
+    private static func font(for view: UIView) -> UIFont? {
+        switch view {
+        case let label as UILabel: label.font
+        case let textView as UITextView: textView.font
+        case let textField as UITextField: textField.font
+        case let button as UIButton: button.titleLabel?.font
+        default: nil
+        }
+    }
+
+    private static func protocolColor(_ color: UIColor) -> VistreaRuntimeModels.Color? {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+        return try? VistreaRuntimeModels.Color(
+            red: Double(red),
+            green: Double(green),
+            blue: Double(blue),
+            alpha: Double(alpha),
+            colorSpace: .sRGB
+        )
+    }
+
+    private static func protocolFont(_ font: UIFont) -> VistreaRuntimeModels.Font? {
+        let descriptorTraits = font.fontDescriptor.object(forKey: .traits)
+            as? [UIFontDescriptor.TraitKey: Any]
+        let weight = (descriptorTraits?[.weight] as? NSNumber)?.doubleValue ?? 0
+        return try? VistreaRuntimeModels.Font(
+            family: font.familyName,
+            postscriptName: font.fontName,
+            size: Double(font.pointSize),
+            weight: max(-1, min(1, weight))
+        )
+    }
+
     private static let accessibilityElementDepthLimit = 16
     private static let accessibilityElementCountLimit = 128
 

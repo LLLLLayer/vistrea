@@ -4,7 +4,7 @@ Status: **Implemented surface plus reserved draft for protocol version 1.0**
 
 This catalog closes the parity gap between Studio, CLI, Skills, CI, Engine modules, and Data ports. Section 1 lists the operations that exist today; section 2 reserves draft names for future phases. Named request and result types become machine-readable schemas as each phase begins.
 
-The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OPERATIONS` in `integrations/shared/host-local-client.ts`. CLI commands follow `integrations/cli/README.md`, and the Host routes follow `apps/host/README.md`.
+The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/shared/host-operation-manifest.ts`. It defines every implemented operation, kind, Host route, and CLI command. The Host contract suite proves that the Host client switch, CLI dispatch, and the implemented tables below remain exactly aligned with that manifest.
 
 ## Legend
 
@@ -17,13 +17,16 @@ The executable source of truth for the implemented names is `IMPLEMENTED_HOST_OP
 
 ## 1. Implemented operations
 
-All 55 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 72 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
 
 ### Workspace, Snapshot, and Runtime events
 
 | Operation | Kind | Host route | CLI |
 |---|---|---|---|
 | `GetWorkspaceStatus` | Q | `GET /v1/status` | `workspace status` |
+| `CreateWorkspaceRecoveryPoint` | C | `POST /v1/workspace/recovery-points` | `workspace recovery-point create` |
+| `ListWorkspaceRecoveryPoints` | Q | `GET /v1/workspace/recovery-points` | `workspace recovery-point list` |
+| `ReleaseWorkspaceRecoveryPoint` | C | `POST /v1/workspace/recovery-points/release` | `workspace recovery-point release` |
 | `CaptureSnapshot` | C | `POST /v1/captures` | `snapshot capture` |
 | `ListSnapshots` | Q | `GET /v1/snapshots` | `snapshot list` |
 | `GetSnapshot` | Q | `GET /v1/snapshots/<id>` | `snapshot get` |
@@ -35,6 +38,7 @@ All 55 operations below are implemented end to end through the Host Local API an
 |---|---|---|---|
 | `AddDesignAsset` | C | `POST /v1/design-assets` | `design upload-asset` |
 | `AddDesignReference` | C | `POST /v1/design-references` | `design add-reference` |
+| `PromoteVisualBaseline` | C | `POST /v1/design-baselines` | `design promote-baseline` |
 | `GetDesignReference` | Q | `GET /v1/design-references/<id>` | `design get-reference` |
 | `ListDesignReferences` | Q | `GET /v1/design-references` | `design list-references` |
 | `MapDesignRegion` | C | `POST /v1/design-mappings` | `design map` |
@@ -42,10 +46,12 @@ All 55 operations below are implemented end to end through the Host Local API an
 | `GetDesignComparison` | Q | `GET /v1/design-comparisons/<id>` | `design get-comparison` |
 | `ListDesignComparisons` | Q | `GET /v1/design-comparisons` | `design list-comparisons` |
 | `CreateReviewIssue` | C | `POST /v1/review-issues` | `issue create` |
+| `CreateReviewIssueFromDifference` | C | `POST /v1/design-comparisons/<id>/issues` | `issue create-from-difference` |
 | `ListReviewIssues` | Q | `GET /v1/review-issues` | `issue list` |
 | `GetReviewIssue` | Q | `GET /v1/review-issues/<id>` | `issue get` |
 | `TransitionReviewIssue` | C | `POST /v1/review-issues/<id>/transitions` | `issue transition` |
 | `VerifyReviewIssue` | C | `POST /v1/review-issues/<id>/verifications` | `issue verify` |
+| `RecaptureAndVerifyIssue` | C | `POST /v1/review-issues/<id>/recapture-verifications` | `issue recapture-verify` |
 
 ### Protected tuning
 
@@ -53,6 +59,7 @@ All 55 operations below are implemented end to end through the Host Local API an
 |---|---|---|---|
 | `CreateTuningPatch` | C | `POST /v1/tuning-patches` | `tuning create-patch` |
 | `GetTuningPatch` | Q | `GET /v1/tuning-patches/<id>` | `tuning get-patch` |
+| `GenerateTuningSourceSuggestions` | Q | `GET /v1/tuning-patches/<id>/source-suggestions` | `tuning source-suggestions` |
 | `ApplyTuningPatch` | C | `POST /v1/tuning-applications` | `tuning apply` |
 | `RevertTuningApplication` | C | `POST /v1/tuning-applications/<id>/revert` | `tuning revert` |
 | `GetTuningApplication` | Q | `GET /v1/tuning-applications/<id>` | `tuning get-application` |
@@ -87,6 +94,12 @@ All 55 operations below are implemented end to end through the Host Local API an
 | `UnlinkWikiNode` | C | `POST /v1/wiki/links/<id>/unlink` | `wiki unlink` |
 | `GetWikiBacklinks` | Q | `GET /v1/wiki/nodes/<id>/backlinks` | `wiki backlinks` |
 | `GetRelatedWikiNodes` | Q | `GET /v1/wiki/related` | `wiki related` |
+| `CreateKnowledgeCollection` | C | `POST /v1/knowledge-collections` | `collection create` |
+| `UpdateKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/revisions` | `collection update` |
+| `GetKnowledgeCollection` | Q | `GET /v1/knowledge-collections/<id>` | `collection get` |
+| `ListKnowledgeCollections` | Q | `GET /v1/knowledge-collections` | `collection list` |
+| `PublishKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/publication` | `collection publish` |
+| `ExportKnowledgeCollection` | C | `POST /v1/knowledge-collections/<id>/exports` | `collection export` |
 
 ### Validation and build diff
 
@@ -100,6 +113,23 @@ All 55 operations below are implemented end to end through the Host Local API an
 | `SuppressValidationFinding` | C | `POST /v1/validation/findings/<id>/suppress` | `validate suppress` |
 | `CompareBuilds` | C | `POST /v1/validation/build-diffs` | `validate build-diff` |
 | `GetBuildDiff` | Q | `GET /v1/validation/build-diffs/<id>` | `validate get-build-diff` |
+
+### Hub synchronization
+
+| Operation | Kind | Host route | CLI |
+|---|---|---|---|
+| `GetSyncStatus` | Q | `POST /v1/sync/status` | `sync status` |
+| `FetchWorkspace` | C | `POST /v1/sync/fetch` | `sync fetch` |
+| `PushWorkspace` | C | `POST /v1/sync/push` | `sync push` |
+| `GetSyncActivity` | Q | `POST /v1/sync/activity` | `sync activity` |
+
+These routes use `POST` even for the two queries because the Hub credential
+travels in an authenticated local request body, never in a URL, argv, log, or
+response. Status returns the effective identity and permission sources,
+team-visible projects, and a local/remote relation for each selected ref.
+Fetch and push serialize per Host, transfer immutable packs, return a fresh
+status, and surface conflicts without force. Activity is the Hub's token-free,
+project-local collaboration projection.
 
 ### Portable exchange
 
@@ -120,6 +150,7 @@ Earlier drafts of this catalog used different names for some implemented operati
 | `GetBacklinks` | `GetWikiBacklinks` |
 | `GetRelatedRuntimeContext` | `GetRelatedWikiNodes` |
 | `SearchWiki` | `ListWikiNodes` (the CLI command remains `wiki search`) |
+| `ExportWiki` | `ExportKnowledgeCollection` |
 | `RunValidation` | `ValidateSnapshot` and `ValidateScreenGraph` |
 | `GetValidationOperation` | `GetValidationRun` |
 | `RunBuildComparison` | `CompareBuilds` |
@@ -129,6 +160,12 @@ Earlier drafts of this catalog used different names for some implemented operati
 ## 2. Reserved / future operations
 
 The operations below are reserved draft contracts. They are not implemented; the names, types, gates, and adapter cells describe intended semantics for their listed phase.
+
+This status describes the public Engine/Host/CLI parity surface. The local Data
+Layer and packaged Studio already use a strict offline maintenance adapter for
+restore, plan-bound garbage collection, interrupted-restore recovery, and
+stale-lock recovery. `CollectWorkspaceGarbage` remains reserved here until that
+capability is intentionally promoted as an Agent-facing operation.
 
 ### Workspace
 
@@ -198,8 +235,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 | Operation | Kind | Request -> Result | Exec | Owner / Data ports | Gate | CLI | Phase |
 |---|---|---|---|---|---|---|---|
 | `AttachRuntimeEvidence` | C | `AttachRuntimeEvidenceCommand -> WikiLink` | sync | Knowledge / K,Sn,Obj,Vr | evidence access | `wiki attach` / — | 3 |
-| `ExportWiki` | C | `ExportWikiCommand -> ObjectRef` | async | Knowledge / K,Obj,X,Op | export/redaction policy | `wiki export` / — | 3 |
-| `PublishKnowledgeCollection` | C | `PublishKnowledgeCollectionCommand -> PublishResult` | async | Knowledge/Sync / K,Vr,Sy,Op | publication policy | `wiki publish` / — | 5 |
 | `GetKnowledgeGraph` | Q | `KnowledgeGraphQuery -> KnowledgeGraph` | sync | Knowledge / K | graph scope | `wiki graph` / — | 3 |
 
 ### Versioning and synchronization
@@ -208,8 +243,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 |---|---|---|---|---|---|---|---|
 | `CommitWorkingSetAndUpdateRef` | C | `CommitWorkingSetCommand -> CommitAndRefResult` | sync | Versioning / Vr,Obj | object integrity and ref CAS | `version commit` / — | 0B |
 | `CreateTag` | C | `CreateTagCommand -> Tag` | sync | Versioning / Vr | tag policy | `version tag` / — | 0B |
-| `FetchWorkspace` | C | `FetchWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote read policy | `sync fetch` / — | 5 |
-| `PushWorkspace` | C | `PushWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | remote write policy | `sync push` / — | 5 |
 | `PullWorkspace` | C | `PullWorkspaceCommand -> SyncResult` | async | Sync / Vr,Obj,Sy,Op | conflict policy | `sync pull` / — | 5 |
 | `PublishRef` | C | `PublishRefCommand -> PublishResult` | async | Sync / Vr,Sy,Op | publication policy | `sync publish` | 5 |
 | `SubscribeRef` | C | `SubscribeRefCommand -> Subscription` | sync | Sync / Sy | read permission | `sync subscribe` / — | 5 |
@@ -218,7 +251,6 @@ The operations below are reserved draft contracts. They are not implemented; the
 | `GetRef` | Q | `GetRefQuery -> Ref` | sync | Versioning / Vr | ref visible | `version ref-get` / — | 0B |
 | `ListCommits` | Q | `CommitQuery -> Page<Commit>` | sync | Versioning / Vr | history scope | `version log` / — | 0B |
 | `CompareCommits` | Q | `CompareCommitsQuery -> CommitDiff` | sync | Versioning / Vr | both commits visible | `version diff` / — | 0B |
-| `GetSyncStatus` | Q | `SyncStatusQuery -> SyncStatus` | sync | Sync / Vr,Sy | remote configured | `sync status` | 5 |
 | `ListSyncConflicts` | Q | `SyncConflictQuery -> Page<SyncConflict>` | sync | Sync / Sy | remote configured | `sync conflicts` / — | 5 |
 
 ### Generic operations
@@ -232,4 +264,4 @@ The operations below are reserved draft contracts. They are not implemented; the
 
 ## Parity rule
 
-Adapter implementations may expose only the operations scheduled for their current phase, but exposed operations must preserve the catalog request/result, capability, error, operation, and Data-port semantics. Contract tests derive their parity matrix from this catalog until a machine-readable operation manifest replaces it.
+Adapter implementations may expose only the operations scheduled for their current phase, but exposed operations must preserve the catalog request/result, capability, error, operation, and Data-port semantics. Contract tests derive implemented-operation parity from `HOST_OPERATION_MANIFEST` and verify that this catalog, the Host client, and CLI dispatch remain aligned with it.

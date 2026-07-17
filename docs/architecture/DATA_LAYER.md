@@ -64,7 +64,10 @@ This keeps every product surface on one fact base and prevents a separate privat
 .vistrea/
 ├── workspace.json
 ├── .host.lock
+├── .restore-journal.json        # present only after an interrupted restore
 ├── metadata.sqlite
+├── .maintenance/                # transient same-volume backup/restore staging
+├── .recovery/                   # preserved restore and stale-lock evidence
 ├── objects/
 │   └── sha256/ab/cdef...
 ├── refs/
@@ -75,6 +78,13 @@ This keeps every product surface on one fact base and prevents a separate privat
 This layout is a logical Workspace bundle, not a requirement that data live inside a source checkout. During repository development, `.vistrea/` is the default disposable local path. Studio users may choose another Workspace location, and packaged applications may default to an Application Support directory. `workspace.json` may link to a source repository URI and Git SHA without requiring co-location.
 
 `.host.lock` is the exclusive writable-Host ownership record. It contains no secret and is removed only after the metadata store closes cleanly. SQLite locks still protect transactions, but they do not replace this product-level process boundary. Crash-stale lock recovery is an explicit maintenance operation; normal open never breaks another owner's lock automatically.
+
+Online maintenance is limited to WAL-aware backup while no Unit of Work is
+active. Restore and destructive garbage collection acquire `.host.lock` while
+the Host is stopped. Restore preserves the previous SQLite database plus any
+WAL/SHM sidecars under `.recovery/`; a durable `.restore-journal.json` makes an
+interrupted replacement fail closed until explicit rollback. `.maintenance/`
+contains only transient, same-volume files and is never authoritative.
 
 ### `workspace.json`
 
@@ -129,6 +139,17 @@ All metadata repositories used by one atomic Engine command come from one transa
 - run atomic transactions;
 - apply migrations;
 - back up, compact, and restore.
+
+### `WorkspaceMaintenancePort`
+
+- create and list verified Workspace recovery points while the Host is online;
+- release exactly one recovery-point retention policy without deleting bytes;
+- return canonical backup and retention metadata without exposing physical
+  Object Store or recovery paths.
+
+Offline restore, interrupted-restore recovery, stale-lock recovery, and
+destructive garbage collection remain composition-root operations that require
+exclusive Workspace ownership.
 
 ### `SnapshotRepository`
 
@@ -194,10 +215,15 @@ Creating a Commit from a Working Set and compare-and-set updating its target ref
 
 - put and retrieve content by hash;
 - verify integrity;
-- pin or apply retention policy;
+- pin, inspect, or explicitly release a named retention policy;
 - enumerate physical inventory for Workspace GC.
 
-The Object Store does not determine commit reachability. Workspace Engine GC combines Version Repository reachability, Working Sets, pins, and retention policy before authorizing physical deletion.
+The Object Store does not determine commit reachability. Offline Workspace GC
+combines live metadata ObjectRefs, Ref/Tag/Working-Set Commit ancestry, active
+retention policies, and a minimum-age grace period before authorizing physical
+deletion. It defaults to dry-run. The SQLite catalog forgets a rechecked
+unreachable object before its bytes are removed, making interruption leave a
+safe unregistered orphan instead of a catalog entry for missing bytes.
 
 ### `SearchIndex`
 
@@ -283,7 +309,10 @@ This distinction allows Vistrea to tell the difference between removal, conditio
 
 ## 8. Portable exchange
 
-`.vistrea-pack` is the portable unit for backup, offline handoff, and pre-Hub sharing.
+`.vistrea-pack` is the portable unit for versioned history exchange, offline
+handoff, and pre-Hub sharing. It is not a byte-exact backup of the live SQLite
+metadata database; Workspace recovery uses a separately typed, verified, and
+pinned SQLite backup object.
 
 A pack contains:
 
@@ -333,6 +362,21 @@ Merge behavior depends on data type:
 - Design Baselines and Tuning Patches require explicit review;
 - binary objects are referenced by hash and never content-merged.
 
+Hub operational audit is intentionally outside this versioned content model.
+The server records authenticated access decisions and mutation intent in an
+append-only audit store, while Review Issues, Design Baselines, Knowledge
+Collections, and other collaboration resources remain Commit/Ref truth. The
+project activity feed is a safe projection of successful audit events, not a
+second repository. See ADR-0011.
+
+Hub organization/team authorization is also operational state outside every
+Workspace. A private directory stores bounded team identities and named roles,
+never bearer tokens. Team roles inherit into associated projects, direct and
+inherited roles retain their provenance, and successful team mutations project
+into each affected project's audit/activity view. This directory is a
+replaceable Hub service port, not a Data API repository or portable pack
+member. See ADR-0012.
+
 ## 10. Security and lifecycle
 
 - Redact sensitive text before publication according to project policy.
@@ -341,7 +385,9 @@ Merge behavior depends on data type:
 - Scope content hashes to authorization boundaries if global hashes could leak object existence.
 - Audit remote reads, writes, ref updates, exports, and permission changes.
 - Pin baselines, unresolved issues, and release evidence; allow transient successful-run artifacts to expire.
-- Garbage collection removes only objects unreachable from retained commits and active references.
+- Garbage collection removes only aged objects unreachable from live metadata
+  and retained Commit roots and protected by no active retention policy; the
+  default operation reports candidates without deleting them.
 
 ## 11. Usage from UI and Agents
 

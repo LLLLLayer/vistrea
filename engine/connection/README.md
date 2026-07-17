@@ -18,11 +18,12 @@ The current fixture-backed Host slice provides:
 - immutable `GetSnapshotQuery` and `ListSnapshotsQuery` results;
 - `FixtureRuntimeCapturePort` for deterministic canonical-fixture integration tests.
 
-## Loopback Runtime transport
+## Runtime transport
 
 `LoopbackRuntimeHost.listen` implements the ADR-0005 development transport:
 
-- TCP binds only to `127.0.0.1` or `::1` and uses an explicit ephemeral or configured port;
+- plaintext TCP binds only to `127.0.0.1` or `::1` and uses an explicit ephemeral or configured port;
+- the physical-device profile binds one explicit non-wildcard IP, requires TLS 1.3, and publishes the exact DER leaf-certificate SHA-256 for Runtime pinning;
 - every wire message is a bounded, fatal UTF-8 JSON line;
 - `HostChallenge`, `ClientHello`, and `HostWelcome` ordering is mandatory;
 - a per-run token produces HMAC-SHA256 client challenge and Host proofs;
@@ -32,7 +33,12 @@ The current fixture-backed Host slice provides:
 - capture objects transfer in declared order through canonical Base64 chunks with strict sequence, size, SHA-256, duplicate, completion, cancellation, and disconnect checks;
 - the advertised chunk limit is capped so a maximum-sized canonical Base64 chunk still fits inside the advertised JSON-line limit.
 
-The token is never placed in a wire error, public transport error, or log. Callers should generate a fresh high-entropy token for each Host run and deliver it to the authorized Debug/Internal application through protected development configuration.
+The certificate pin authenticates the physical-device transport before the
+protocol handshake; it does not replace the HMAC proofs. The token is never
+placed in a wire error, public transport error, or log. Callers should generate
+a fresh high-entropy token for each Host run and deliver it, plus the TLS pin
+when applicable, to the authorized Debug/Internal application through protected
+development configuration.
 
 The HMAC payloads are UTF-8 lines joined with `\n`:
 
@@ -60,4 +66,11 @@ sorted comma-separated enabled capabilities
 
 `computeLoopbackClientProof` and `computeLoopbackHostProof` are the Node reference implementations for this adapter-owned handshake. Wire envelopes do not redefine `RuntimeSnapshot` or `ObjectRef`; canonical values pass through unchanged and remain subject to protocol validation in `CaptureSnapshotUseCase`.
 
-Live native capture is verified through the real iOS and Android vertical loops, and negotiated Runtime event streaming is verified on both platforms through this module's event pump (`event-engine.ts`) with client-declared epochs, durable acknowledgement, and reconnect resume. Runtime discovery, physical-device tunneling, and resilient reconnect remain planned. Device actions remain owned by WDA/UIAutomator automation adapters.
+Live native capture is verified through the Simulator/emulator iOS and Android
+vertical loops, and negotiated Runtime event streaming is verified on both
+platforms through this module's event pump (`event-engine.ts`) with
+client-declared epochs, durable acknowledgement, and reconnect resume. The
+pinned-TLS physical-device transport and opt-in hardware runners are
+implemented; their full hardware vertical acceptance is pending. Automatic
+discovery and resilient reconnect remain planned. Device actions remain owned
+by WDA/UIAutomator automation adapters.
