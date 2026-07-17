@@ -264,4 +264,4 @@ capability is intentionally promoted as an Agent-facing operation.
 
 ## Parity rule
 
-Adapter implementations may expose only the operations scheduled for their current phase, but exposed operations must preserve the catalog request/result, capability, error, operation, and Data-port semantics. Contract tests derive their parity matrix from this catalog until a machine-readable operation manifest replaces it.
+Adapter implementations may expose only the operations scheduled for their current phase, but exposed operations must preserve the catalog request/result, capability, error, operation, and Data-port semantics. Contract tests derive implemented-operation parity from `HOST_OPERATION_MANIFEST` and verify that this catalog, the Host client, and CLI dispatch remain aligned with it.

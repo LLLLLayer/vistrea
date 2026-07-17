@@ -107,7 +107,7 @@ The main content has explicit modes rather than one overloaded canvas:
 | Mode | Primary content | Mutations allowed |
 |---|---|---|
 | Live | Current screenshot and runtime selection | Capture, device action, open Inspector |
-| Explore | Screen State Canvas and operation progress | Start/pause/resume/cancel exploration, curate identity |
+| Explore | Screen State Canvas and operation progress | Start/cancel exploration, curate identity |
 | Inspect | Screenshot plus 2D/3D structure | Select node, inspect properties, attach notes |
 | Tune | Runtime preview and property editor | Apply/revert allowlisted preview values |
 | Verify | Findings and build/graph diff | Run validation, inspect evidence, accept baseline |

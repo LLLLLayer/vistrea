@@ -115,7 +115,10 @@ vistrea/
 │   │   └── workspace-maintenance-engine.ts # recovery-point application use cases
 │   ├── operations/              # README-only reserved use cases
 │   ├── versioning/              # README-only reserved use cases
-│   └── sync/                    # README-only reserved use cases
+│   └── sync/
+│       ├── README.md
+│       ├── index.ts
+│       └── workspace-sync-engine.ts # local/Hub ref synchronization use cases
 ├── data/
 │   ├── README.md
 │   ├── api/
@@ -167,6 +170,7 @@ vistrea/
 │   │   └── skills/
 │   ├── skills/
 │   │   ├── README.md
+│   │   ├── vistrea-explore-ui/
 │   │   ├── vistrea-inspect-runtime/
 │   │   ├── vistrea-review-design/
 │   │   ├── vistrea-tune-ui/

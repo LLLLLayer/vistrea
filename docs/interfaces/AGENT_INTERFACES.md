@@ -88,8 +88,8 @@ Long-running commands print or return an `operation_id`. `--wait` may stream NDJ
 
 Deployments may focus the CLI's exposed command surface with
 `VISTREA_CLI_TOOLSETS` (named sets keyed by the first command word:
-`workspace`, `assets`, `exploration`, `knowledge`, `verification`; unset means
-all, `workspace` is always on). A masked command group disappears from `help`
+`workspace`, `assets`, `exploration`, `knowledge`, `collaboration`,
+`verification`; unset means all, `workspace` is always on). A masked command group disappears from `help`
 and fails closed as `unsupported` (exit 6) at dispatch; an unknown set name is
 `invalid_argument` (exit 2) naming the valid sets. The repository's Claude
 Code plugin (`integrations/claude-plugin/`) is the packaged
