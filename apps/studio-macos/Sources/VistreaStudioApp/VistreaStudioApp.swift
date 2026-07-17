@@ -701,10 +701,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let maintenance: ManagedWorkspaceMaintenance
         do {
-            guard let resourceURL = Bundle.main.resourceURL else {
-                throw ManagedWorkspaceMaintenanceError.embeddedRuntimeUnavailable
-            }
-            maintenance = try ManagedWorkspaceMaintenance(resourceURL: resourceURL)
+            maintenance = try StudioComposition.makeManagedWorkspaceMaintenance()
         } catch {
             workspaceMaintenanceModel.failOfflineMaintenance(
                 message: error.localizedDescription,
@@ -1230,6 +1227,11 @@ private enum StudioComposition {
             resourceURL: locations.resourceURL,
             applicationSupportURL: locations.applicationSupportURL
         )
+    }
+
+    static func makeManagedWorkspaceMaintenance() throws -> ManagedWorkspaceMaintenance {
+        let locations = try managedHostLocations()
+        return try ManagedWorkspaceMaintenance(resourceURL: locations.resourceURL)
     }
 
     private struct ManagedHostRuntimeLocations {
