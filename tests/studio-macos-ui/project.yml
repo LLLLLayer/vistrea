@@ -66,3 +66,6 @@ schemes:
       config: Debug
       targets:
         - VistreaStudioUITests
+      environmentVariables:
+        VISTREA_UI_TEST_NODE: "$(VISTREA_UI_TEST_NODE)"
+        VISTREA_UI_TEST_HOST_RESOURCES: "$(VISTREA_UI_TEST_HOST_RESOURCES)"

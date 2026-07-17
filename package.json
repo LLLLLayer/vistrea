@@ -24,6 +24,7 @@
     "test:e2e:android-real-automation": "pnpm build:host && VISTREA_RUN_ANDROID_REAL_AUTOMATION=1 node --test .build/typescript/tests/e2e/android-real-automation-loop.test.js",
     "test:e2e:ios-real-automation": "pnpm build:host && VISTREA_RUN_IOS_REAL_AUTOMATION=1 node --test .build/typescript/tests/e2e/ios-real-automation-loop.test.js",
     "test:scenarios": "node --test examples/scenarios/tests/*.test.mjs",
+    "fixture:workspace": "pnpm build:host && node .build/typescript/tools/acceptance/disposable-workspace.js",
     "check": "pnpm protocol:validate && pnpm scenarios:validate && pnpm typecheck && pnpm test:contract && pnpm test:host-contract && pnpm test:host-integration && pnpm test:scenarios",
     "vistrea": "node .build/typescript/integrations/cli/main.js"
   },

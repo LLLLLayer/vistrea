@@ -110,6 +110,28 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.33.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Build the disposable Workspace fixture and managed Host
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:host
+          runtime_root="$RUNNER_TEMP/studio-ui-host-resources/HostRuntime/$(uname -m)"
+          mkdir -p "$runtime_root"
+          cp "$(command -v node)" "$runtime_root/node"
+          ln -s "$GITHUB_WORKSPACE" "$runtime_root/app"
+          echo "VISTREA_UI_TEST_NODE=$(command -v node)" >> "$GITHUB_ENV"
+          echo "VISTREA_UI_TEST_HOST_RESOURCES=$RUNNER_TEMP/studio-ui-host-resources" >> "$GITHUB_ENV"
+
       - name: Install pinned XcodeGen
         run: tools/ci/install-xcodegen.sh "$RUNNER_TEMP/xcodegen"
 
@@ -136,6 +158,8 @@ jobs:
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
             -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Build.xcresult" \
             -parallel-testing-enabled NO \
+            VISTREA_UI_TEST_NODE="$VISTREA_UI_TEST_NODE" \
+            VISTREA_UI_TEST_HOST_RESOURCES="$VISTREA_UI_TEST_HOST_RESOURCES" \
             build-for-testing \
             | tee "$RUNNER_TEMP/studio-ui-build.log"
 
@@ -150,6 +174,8 @@ jobs:
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/VistreaStudioUI-Packages" \
             -resultBundlePath "$RUNNER_TEMP/VistreaStudioUI-Tests.xcresult" \
             -parallel-testing-enabled NO \
+            VISTREA_UI_TEST_NODE="$VISTREA_UI_TEST_NODE" \
+            VISTREA_UI_TEST_HOST_RESOURCES="$VISTREA_UI_TEST_HOST_RESOURCES" \
             test-without-building \
             | tee "$RUNNER_TEMP/studio-ui-tests.log"
 

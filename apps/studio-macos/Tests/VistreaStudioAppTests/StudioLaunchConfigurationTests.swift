@@ -54,4 +54,49 @@ final class StudioLaunchConfigurationTests: XCTestCase {
             .fixtureCanvasFailure
         )
     }
+
+    func testPersistedWorkspaceModeRequiresItsOwnExplicitArgument() {
+        let configuration = StudioLaunchConfiguration(
+            arguments: [
+                "VistreaStudio",
+                StudioLaunchConfiguration.uiTestingWorkspaceArgument,
+                StudioLaunchConfiguration.uiTestingPersistedWorkspaceArgument,
+            ]
+        )
+        XCTAssertEqual(configuration.content, .persistedWorkspace)
+        XCTAssertTrue(configuration.isUITesting)
+    }
+
+    func testPersistedWorkspaceModeAcceptsABoundedGarbageAgeOverrideOnlyExplicitly() {
+        let environment = [
+            StudioLaunchConfiguration.uiTestingGarbageMinimumAgeDaysEnvironment: "0",
+        ]
+        XCTAssertEqual(
+            StudioLaunchConfiguration(
+                arguments: [
+                    "VistreaStudio",
+                    StudioLaunchConfiguration.uiTestingPersistedWorkspaceArgument,
+                ],
+                environment: environment
+            ).garbageMinimumAgeDaysOverride,
+            0
+        )
+        XCTAssertNil(
+            StudioLaunchConfiguration(
+                arguments: ["VistreaStudio"],
+                environment: environment
+            ).garbageMinimumAgeDaysOverride
+        )
+        XCTAssertNil(
+            StudioLaunchConfiguration(
+                arguments: [
+                    "VistreaStudio",
+                    StudioLaunchConfiguration.uiTestingPersistedWorkspaceArgument,
+                ],
+                environment: [
+                    StudioLaunchConfiguration.uiTestingGarbageMinimumAgeDaysEnvironment: "366",
+                ]
+            ).garbageMinimumAgeDaysOverride
+        )
+    }
 }

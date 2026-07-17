@@ -62,6 +62,9 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
         workspaceMaintenanceModel = WorkspaceMaintenanceViewModel(
             client: composition.managedHost?.client
         )
+        if let minimumAgeDays = launchConfiguration.garbageMinimumAgeDaysOverride {
+            workspaceMaintenanceModel.garbageMinimumAgeDays = minimumAgeDays
+        }
         windowContent = composition.opensWelcome ? .welcome : .workspace
         workspaceMessage = composition.startupMessage
         selectedManagerWorkspaceURL = composition.managedHost?.workspaceURL ??
@@ -701,10 +704,7 @@ private final class StudioAppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let maintenance: ManagedWorkspaceMaintenance
         do {
-            guard let resourceURL = Bundle.main.resourceURL else {
-                throw ManagedWorkspaceMaintenanceError.embeddedRuntimeUnavailable
-            }
-            maintenance = try ManagedWorkspaceMaintenance(resourceURL: resourceURL)
+            maintenance = try StudioComposition.makeManagedWorkspaceMaintenance()
         } catch {
             workspaceMaintenanceModel.failOfflineMaintenance(
                 message: error.localizedDescription,
@@ -1043,6 +1043,35 @@ private enum StudioComposition {
         workspaceHistory: StudioWorkspaceHistory,
         launchConfiguration: StudioLaunchConfiguration = StudioLaunchConfiguration()
     ) -> Result {
+        if launchConfiguration.content == .persistedWorkspace {
+            do {
+                let locations = try persistedUITestLocations()
+                guard workspaceHistory.availability(of: locations.workspaceURL) == .available else {
+                    throw ManagedStudioHostError.launchFailed
+                }
+                let host = try ManagedStudioHost.start(
+                    workspaceURL: locations.workspaceURL,
+                    resourceURL: locations.runtime.resourceURL,
+                    applicationSupportURL: locations.runtime.applicationSupportURL
+                )
+                return Result(
+                    client: host.client,
+                    managedHost: host,
+                    workspaceManagementEnabled: true
+                )
+            } catch {
+                return Result(
+                    client: UnavailableHostClient(
+                        message: "The disposable UI-test Workspace could not start: \(error.localizedDescription)"
+                    ),
+                    workspaceManagementEnabled: true,
+                    opensWelcome: true,
+                    startupMessage: "The disposable UI-test Workspace could not start.",
+                    failedWorkspaceURL: persistedUITestWorkspaceURL()
+                )
+            }
+        }
+
         if launchConfiguration.isUITesting {
             do {
                 let snapshot = try CanonicalFixtureLoader.loadDefaultSnapshot()
@@ -1057,6 +1086,8 @@ private enum StudioComposition {
                         snapshots: [snapshot],
                         canvasGraphFailureMessage: "The deterministic UI-test Screen Graph is unavailable."
                     )
+                case .persistedWorkspace:
+                    preconditionFailure("Persisted UI testing composes a managed Host before fixtures.")
                 case .production:
                     preconditionFailure("Production is not a UI-testing launch mode.")
                 }
@@ -1183,23 +1214,88 @@ private enum StudioComposition {
 
     @MainActor
     static func makeManagedHost(workspaceURL: URL) throws -> ManagedStudioHost {
-        guard let resourceURL = Bundle.main.resourceURL else {
-            throw ManagedStudioHostError.embeddedRuntimeUnavailable
-        }
+        let locations = try managedHostLocations()
         return try ManagedStudioHost.start(
             workspaceURL: workspaceURL,
-            resourceURL: resourceURL
+            resourceURL: locations.resourceURL,
+            applicationSupportURL: locations.applicationSupportURL
         )
     }
 
     @MainActor
     static func makeManagedHostAsync(workspaceURL: URL) async throws -> ManagedStudioHost {
+        let locations = try managedHostLocations()
+        return try await ManagedStudioHost.startAsync(
+            workspaceURL: workspaceURL,
+            resourceURL: locations.resourceURL,
+            applicationSupportURL: locations.applicationSupportURL
+        )
+    }
+
+    static func makeManagedWorkspaceMaintenance() throws -> ManagedWorkspaceMaintenance {
+        let locations = try managedHostLocations()
+        return try ManagedWorkspaceMaintenance(resourceURL: locations.resourceURL)
+    }
+
+    private struct ManagedHostRuntimeLocations {
+        let resourceURL: URL
+        let applicationSupportURL: URL?
+    }
+
+    private struct PersistedUITestLocations {
+        let workspaceURL: URL
+        let runtime: ManagedHostRuntimeLocations
+    }
+
+    private static func managedHostLocations() throws -> ManagedHostRuntimeLocations {
+        if StudioLaunchConfiguration().content == .persistedWorkspace {
+            return try persistedUITestLocations().runtime
+        }
         guard let resourceURL = Bundle.main.resourceURL else {
             throw ManagedStudioHostError.embeddedRuntimeUnavailable
         }
-        return try await ManagedStudioHost.startAsync(
-            workspaceURL: workspaceURL,
-            resourceURL: resourceURL
+        return ManagedHostRuntimeLocations(
+            resourceURL: resourceURL,
+            applicationSupportURL: nil
         )
+    }
+
+    private static func persistedUITestWorkspaceURL() -> URL? {
+        absoluteDirectoryURL(
+            ProcessInfo.processInfo.environment[
+                StudioLaunchConfiguration.uiTestingWorkspacePathEnvironment
+            ]
+        )
+    }
+
+    private static func persistedUITestLocations() throws -> PersistedUITestLocations {
+        let environment = ProcessInfo.processInfo.environment
+        guard
+            let workspaceURL = absoluteDirectoryURL(
+                environment[StudioLaunchConfiguration.uiTestingWorkspacePathEnvironment]
+            ),
+            let resourceURL = absoluteDirectoryURL(
+                environment[StudioLaunchConfiguration.uiTestingHostResourcesEnvironment]
+            ),
+            let applicationSupportURL = absoluteDirectoryURL(
+                environment[StudioLaunchConfiguration.uiTestingApplicationSupportEnvironment]
+            )
+        else {
+            throw ManagedStudioHostError.launchFailed
+        }
+        return PersistedUITestLocations(
+            workspaceURL: workspaceURL,
+            runtime: ManagedHostRuntimeLocations(
+                resourceURL: resourceURL,
+                applicationSupportURL: applicationSupportURL
+            )
+        )
+    }
+
+    private static func absoluteDirectoryURL(_ path: String?) -> URL? {
+        guard let path, !path.isEmpty, path.hasPrefix("/"), !path.contains("\0") else {
+            return nil
+        }
+        return URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
     }
 }
