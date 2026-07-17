@@ -348,8 +348,16 @@ class StudioUITestCase: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        // SwiftUI may expose static text through either AXTitle (`label`) or
+        // AXValue (`value`) depending on the surrounding semantic container.
         let result = application.staticTexts
-            .matching(NSPredicate(format: "label CONTAINS %@", fragment))
+            .matching(
+                NSPredicate(
+                    format: "label CONTAINS %@ OR value CONTAINS %@",
+                    fragment,
+                    fragment
+                )
+            )
             .firstMatch
         XCTAssertTrue(
             result.waitForExistence(timeout: timeout),
