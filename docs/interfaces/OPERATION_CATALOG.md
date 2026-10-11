@@ -4,7 +4,7 @@ Status: **Implemented surface plus reserved draft for protocol version 1.0**
 
 This catalog closes the parity gap between Studio, CLI, Skills, CI, Engine modules, and Data ports. Section 1 lists the operations that exist today; section 2 reserves draft names for future phases. Named request and result types become machine-readable schemas as each phase begins.
 
-The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/shared/host-operation-manifest.ts`. It defines every implemented operation, kind, Host route, and CLI command. The Host contract suite proves that the Host client switch, CLI dispatch, and the implemented tables below remain exactly aligned with that manifest.
+The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/shared/host-operation-manifest.ts`. It defines every implemented operation, kind, Host route, and CLI command. `HOST_LOCAL_API_REQUEST_SHAPES` in `apps/host/local-api-request-contracts.ts` provides an exhaustive second contract for whether each operation accepts no body, query parameters, a strict JSON command, or a media-type-specific binary stream. The Host contract suite proves that the Host client switch, CLI dispatch, request-shape inventory, and the implemented tables below remain exactly aligned.
 
 ## Legend
 
@@ -17,7 +17,7 @@ The executable source of truth is `HOST_OPERATION_MANIFEST` in `integrations/sha
 
 ## 1. Implemented operations
 
-All 72 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations.
+All 72 operations below are implemented end to end through the Host Local API and the strict JSON CLI (ADR-0008 retired the stdio MCP server; the CLI is the single agent adapter). The headless CI gate composes the validation and build-diff operations. The Local API inventory classifies 38 operations as strict JSON commands and 2 as bounded binary streams; the remaining query or body-free operations reject request bodies. Every accepted JSON field has an explicit structural type, and a mismatch returns HTTP `400` with `invalid_argument` before Engine dispatch.
 
 ### Workspace, Snapshot, and Runtime events
 

@@ -210,6 +210,7 @@ sign_code "$APP_PATH" 0 "$APP_SIGNING_ENTITLEMENTS"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$SCRIPT_DIR/verify-studio-host-runtime.sh" \
     --runtime-root "$APP_PATH/Contents/Resources/HostRuntime"
+"$SCRIPT_DIR/verify-packaged-studio-local-beta.sh" --app "$APP_PATH"
 if ! /usr/bin/otool -L "$APP_PATH/Contents/MacOS/VistreaStudio" | /usr/bin/grep -Fq "@rpath/Sparkle.framework/"; then
     fail "packaged executable does not link the embedded Sparkle framework"
 fi

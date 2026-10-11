@@ -419,6 +419,9 @@ private struct WorkspaceMaintenanceView: View {
                     HStack {
                         TextField("Reason for this recovery point", text: $model.recoveryPointReason)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier(
+                                StudioAccessibilityID.workspaceMaintenanceRecoveryPointReason
+                            )
                         Button("Create Recovery Point") {
                             Task { await model.createRecoveryPoint() }
                         }
@@ -558,6 +561,9 @@ private struct WorkspaceMaintenanceView: View {
                         )
                     }
                     .disabled(model.isBusy)
+                    .accessibilityIdentifier(
+                        StudioAccessibilityID.workspaceMaintenanceGarbageAnalyze
+                    )
                 }
 
                 if let preview = model.garbagePreview {
@@ -581,6 +587,10 @@ private struct WorkspaceMaintenanceView: View {
                                 TextField("DELETE", text: $model.garbageConfirmation)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: 220)
+                                    .accessibilityIdentifier(
+                                        StudioAccessibilityID
+                                            .workspaceMaintenanceGarbageConfirmationField
+                                    )
                                 Button("Delete Planned Objects", role: .destructive) {
                                     onOfflineMaintenance(
                                         .applyGarbage(

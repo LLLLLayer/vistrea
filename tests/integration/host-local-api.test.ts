@@ -6,6 +6,7 @@ import path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { startHostLocalApi, type HostLocalApiHandle } from "../../apps/host/index.js";
+import { HOST_LOCAL_API_REQUEST_SHAPES } from "../../apps/host/local-api-request-contracts.js";
 import {
   DataError,
   isDataError,
@@ -564,6 +565,301 @@ test("Host Local API authenticates and strictly parses Workspace recovery-point 
     "/v1/workspace/recovery-points?unexpected=1",
   );
   assert.equal(queryResponse.status, 400);
+});
+
+test("all JSON Local API operations reject mistyped request fields before Engine dispatch", async (t) => {
+  const validator = await validatorPromise;
+  const workspaceRoot = await temporaryWorkspace(t, "vistrea-host-api-command-types-");
+  const fixture = await captureFixture(validator);
+  const workspace = new MemoryDataStore({ validator });
+  const objects = await FileObjectStore.open({ workspaceRoot });
+  const runtime = new FixtureRuntimeCapturePort({
+    snapshot: fixture.snapshot,
+    objects: [{ ref: fixture.object, chunks: [fixture.bytes] }],
+  });
+  const api = await startHostLocalApi({
+    host: "127.0.0.1",
+    runtime,
+    workspace,
+    maintenance: new RecordingWorkspaceMaintenancePort(),
+    objects,
+    validator,
+  });
+  t.after(() => api.close());
+
+  const actor = { kind: "agent", id: "request-contract-test", extensions: {} };
+  const objectHash = `sha256:${"a".repeat(64)}`;
+  const cases = [
+    { operation: "CreateWorkspaceRecoveryPoint", route: "/v1/workspace/recovery-points", body: { reason: 7 } },
+    {
+      operation: "ReleaseWorkspaceRecoveryPoint",
+      route: "/v1/workspace/recovery-points/release",
+      body: { recovery_point_id: 7, retention_policy_id: "policy" },
+    },
+    { operation: "CaptureSnapshot", route: "/v1/captures", body: { reason: 7 } },
+    {
+      operation: "AddDesignReference",
+      route: "/v1/design-references",
+      body: {
+        name: 7,
+        kind: "screen",
+        canvas_size: {},
+        pixel_size: {},
+        asset_hash: objectHash,
+        created_by: actor,
+      },
+    },
+    {
+      operation: "PromoteVisualBaseline",
+      route: "/v1/design-baselines",
+      body: { snapshot_id: 7, name: "Baseline", created_by: actor },
+    },
+    {
+      operation: "MapDesignRegion",
+      route: "/v1/design-mappings",
+      body: {
+        design_reference_id: 7,
+        design_region: {},
+        runtime_target: {},
+        created_by: actor,
+      },
+    },
+    {
+      operation: "RunDesignComparison",
+      route: "/v1/design-comparisons",
+      body: { design_reference_id: 7, target_snapshot_id: "snapshot", completed_by: actor },
+    },
+    {
+      operation: "CreateReviewIssueFromDifference",
+      route: "/v1/design-comparisons/comparison/issues",
+      body: { difference_id: 7, created_by: actor },
+    },
+    {
+      operation: "CreateReviewIssue",
+      route: "/v1/review-issues",
+      body: {
+        design_reference_id: 7,
+        runtime_target: {},
+        title: "Issue",
+        category: "visual",
+        severity: "major",
+        expected: {},
+        actual: {},
+        created_by: actor,
+      },
+    },
+    {
+      operation: "TransitionReviewIssue",
+      route: "/v1/review-issues/issue/transitions",
+      body: { expected_revision: "one", to_state: "open", changed_by: actor },
+    },
+    {
+      operation: "VerifyReviewIssue",
+      route: "/v1/review-issues/issue/verifications",
+      body: {
+        expected_revision: "one",
+        basis: "runtime",
+        result: "passed",
+        verified_snapshot_id: "snapshot",
+        verified_build_id: "build",
+        verified_by: actor,
+      },
+    },
+    {
+      operation: "RecaptureAndVerifyIssue",
+      route: "/v1/review-issues/issue/recapture-verifications",
+      body: { expected_revision: "one", verified_by: actor },
+    },
+    {
+      operation: "CreateTuningPatch",
+      route: "/v1/tuning-patches",
+      body: { title: 7, target_snapshot_id: "snapshot", changes: [], created_by: actor },
+    },
+    {
+      operation: "ApplyTuningPatch",
+      route: "/v1/tuning-applications",
+      body: { patch_id: 7 },
+    },
+    {
+      operation: "RecordStateObservation",
+      route: "/v1/screen-graph/state-observations",
+      body: { snapshot_id: 7 },
+    },
+    {
+      operation: "RecordTransitionObservation",
+      route: "/v1/screen-graph/transition-observations",
+      body: { before_snapshot_id: 7, after_snapshot_id: "after", action: {} },
+    },
+    {
+      operation: "MergeScreenStates",
+      route: "/v1/screen-graph/state-merges",
+      body: {
+        project_id: 7,
+        application_id: "app",
+        state_ids: ["state"],
+        expected_graph_revision: 1,
+        merged_by: actor,
+      },
+    },
+    {
+      operation: "SplitScreenState",
+      route: "/v1/screen-graph/state-splits",
+      body: {
+        project_id: 7,
+        application_id: "app",
+        state_id: "state",
+        observation_ids: ["observation"],
+        expected_graph_revision: 1,
+        split_by: actor,
+      },
+    },
+    {
+      operation: "AnnotateScreenState",
+      route: "/v1/screen-graph/state-annotations",
+      body: {
+        project_id: 7,
+        application_id: "app",
+        state_id: "state",
+        expected_graph_revision: 1,
+        annotated_by: actor,
+      },
+    },
+    {
+      operation: "TagGraphVersion",
+      route: "/v1/screen-graph/version-tags",
+      body: { project_id: 7, application_id: "app", tag_name: "release" },
+    },
+    {
+      operation: "RunExploration",
+      route: "/v1/exploration/operations",
+      body: { maximum_actions: "ten" },
+    },
+    {
+      operation: "CreateWikiNode",
+      route: "/v1/wiki/nodes",
+      body: { kind: 7, title: "Node", markdown: "# Node", created_by: actor },
+    },
+    {
+      operation: "UpdateWikiNode",
+      route: "/v1/wiki/nodes/node/revisions",
+      body: { expected_revision: "one", updated_by: actor },
+    },
+    {
+      operation: "LinkWikiNode",
+      route: "/v1/wiki/links",
+      body: { source_node_id: 7, target: {}, relation: "related", created_by: actor },
+    },
+    {
+      operation: "UnlinkWikiNode",
+      route: "/v1/wiki/links/link/unlink",
+      body: { expected_revision: "one" },
+    },
+    {
+      operation: "CreateKnowledgeCollection",
+      route: "/v1/knowledge-collections",
+      body: { name: 7, node_ids: [], entry_node_ids: [], created_by: actor },
+    },
+    {
+      operation: "UpdateKnowledgeCollection",
+      route: "/v1/knowledge-collections/collection/revisions",
+      body: { expected_revision: "one", updated_by: actor },
+    },
+    {
+      operation: "PublishKnowledgeCollection",
+      route: "/v1/knowledge-collections/collection/publication",
+      body: {
+        expected_revision: "one",
+        base_commit_id: objectHash,
+        target_ref_name: "releases/latest",
+        ref_precondition: {},
+        published_by: actor,
+      },
+    },
+    {
+      operation: "ExportKnowledgeCollection",
+      route: "/v1/knowledge-collections/collection/exports",
+      body: { formats: "markdown" },
+    },
+    {
+      operation: "ValidateSnapshot",
+      route: "/v1/validation/snapshot-runs",
+      body: { snapshot_id: 7 },
+    },
+    {
+      operation: "ValidateScreenGraph",
+      route: "/v1/validation/graph-runs",
+      body: { project_id: 7, application_id: "app" },
+    },
+    {
+      operation: "SuppressValidationFinding",
+      route: "/v1/validation/findings/finding/suppress",
+      body: {
+        expected_finding_revision: "one",
+        reason_code: "accepted",
+        justification: "Test",
+        created_by: actor,
+      },
+    },
+    {
+      operation: "CompareBuilds",
+      route: "/v1/validation/build-diffs",
+      body: {
+        project_id: 7,
+        application_id: "app",
+        left_build_id: "left",
+        right_build_id: "right",
+      },
+    },
+    { operation: "GetSyncStatus", route: "/v1/sync/status", body: { remote: "Hub" } },
+    {
+      operation: "FetchWorkspace",
+      route: "/v1/sync/fetch",
+      body: { remote: "Hub", ref_names: ["users/test"], created_by: actor },
+    },
+    {
+      operation: "PushWorkspace",
+      route: "/v1/sync/push",
+      body: { remote: "Hub", ref_names: ["users/test"], created_by: actor },
+    },
+    { operation: "GetSyncActivity", route: "/v1/sync/activity", body: { remote: "Hub" } },
+    { operation: "ExportPack", route: "/v1/exchange/exports", body: { created_by: "agent" } },
+  ] as const;
+
+  assert.deepEqual(
+    cases.map(({ operation }) => operation).sort(),
+    Object.entries(HOST_LOCAL_API_REQUEST_SHAPES)
+      .filter(([, shape]) => shape === "json")
+      .map(([operation]) => operation)
+      .sort(),
+  );
+
+  for (const { operation, route, body } of cases) {
+    const response = await authorizedFetch(api, route, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 400, `${operation} must reject ${JSON.stringify(body)}.`);
+    const payload = (await response.json()) as {
+      readonly error?: { readonly code?: string; readonly retryable?: boolean };
+    };
+    assert.equal(payload.error?.code, "invalid_argument", operation);
+    assert.equal(payload.error?.retryable, false, operation);
+  }
+
+  for (const route of [
+    "/v1/tuning-applications/application/revert",
+    "/v1/exploration/operations/operation/cancel",
+  ]) {
+    const response = await authorizedFetch(api, route, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(response.status, 400, `${route} must reject a request body.`);
+    const payload = (await response.json()) as { readonly error?: { readonly code?: string } };
+    assert.equal(payload.error?.code, "invalid_argument");
+  }
 });
 
 test("Host Local API drives the design review flow from asset to verified issue", async (t) => {

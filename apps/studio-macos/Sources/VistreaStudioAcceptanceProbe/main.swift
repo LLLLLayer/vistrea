@@ -17,9 +17,17 @@ private enum VistreaStudioAcceptanceProbe {
                 )
             }
             let client = try HTTPHostClient(baseURL: url, bearerToken: token)
+            let persistedAcceptance = try persistedAcceptanceValues(environment)
             let result = try await StudioCoreAcceptanceWorkflow.run(
                 client: client,
-                request: StudioCoreAcceptanceRequest(expectedSnapshotID: expectedSnapshotID)
+                request: StudioCoreAcceptanceRequest(
+                    expectedSnapshotID: expectedSnapshotID,
+                    requireConnectedRuntime: persistedAcceptance == nil,
+                    expectedCollectionID: persistedAcceptance?.collectionID,
+                    expectedTuningPatchID: persistedAcceptance?.tuningPatchID,
+                    leftBuildID: persistedAcceptance?.leftBuildID,
+                    rightBuildID: persistedAcceptance?.rightBuildID
+                )
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -33,5 +41,41 @@ private enum VistreaStudioAcceptanceProbe {
             FileHandle.standardError.write(Data("Studio acceptance probe failed: \(reason)\n".utf8))
             exit(EXIT_FAILURE)
         }
+    }
+
+    private struct PersistedAcceptanceValues {
+        let collectionID: String
+        let tuningPatchID: String
+        let leftBuildID: String
+        let rightBuildID: String
+    }
+
+    private static func persistedAcceptanceValues(
+        _ environment: [String: String]
+    ) throws -> PersistedAcceptanceValues? {
+        let values = [
+            environment["VISTREA_COLLECTION_ID"],
+            environment["VISTREA_TUNING_PATCH_ID"],
+            environment["VISTREA_LEFT_BUILD_ID"],
+            environment["VISTREA_RIGHT_BUILD_ID"],
+        ]
+        if values.allSatisfy({ $0 == nil }) {
+            return nil
+        }
+        guard let collectionID = values[0], !collectionID.isEmpty,
+              let tuningPatchID = values[1], !tuningPatchID.isEmpty,
+              let leftBuildID = values[2], !leftBuildID.isEmpty,
+              let rightBuildID = values[3], !rightBuildID.isEmpty
+        else {
+            throw HostClientError.invalidConfiguration(
+                "Persisted acceptance requires Collection, tuning patch, and both Build IDs."
+            )
+        }
+        return PersistedAcceptanceValues(
+            collectionID: collectionID,
+            tuningPatchID: tuningPatchID,
+            leftBuildID: leftBuildID,
+            rightBuildID: rightBuildID
+        )
     }
 }

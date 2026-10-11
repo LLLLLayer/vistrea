@@ -23,11 +23,15 @@ The UI tests always pass one explicit process argument:
   Workspaces;
 - `--ui-testing-canvas-empty` exposes the honest no-Screen-State presentation;
 - `--ui-testing-canvas-error` exposes the retryable Screen Graph failure.
+- `--ui-testing-persisted-workspace` is reserved for hosted automation. It
+  starts a managed Host against a newly generated, disposable persisted
+  Workspace and caller-supplied test runtime root.
 
-All modes use `VISTREA_FIXTURE_PATH` only to locate the checked-in canonical
-Runtime Snapshot. They do not start the embedded Host, read or write the
-operator's Workspace history, start Sparkle, restore a window frame, use Hub,
-or connect to a device.
+The in-memory modes use `VISTREA_FIXTURE_PATH` only to locate the checked-in
+canonical Runtime Snapshot. The persisted mode requires explicit Workspace,
+Host resources, and application-support paths, all owned by the test process.
+No mode reads or writes the operator's Workspace history, starts Sparkle,
+restores a window frame, uses Hub, or connects to a device.
 
 ## Covered acceptance
 
@@ -35,6 +39,8 @@ or connect to a device.
 - Welcome to Workspace Manager to Back navigation, including the empty no-Host
   state that must not expose recovery-point, garbage-collection, or repair
   actions without an eligible Workspace;
+- persisted Workspace Manager recovery-point creation, exact GC preview/apply,
+  restore, managed-Host stop/reopen, and post-operation readiness;
 - Command-1 through Command-6 navigation across Canvas, Evidence, Documents,
   Wiki, Quality, and the optional Hub entry surface;
 - Canvas state selection, selected entry path presentation, and Inspector AX
